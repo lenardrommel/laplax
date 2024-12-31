@@ -12,3 +12,8 @@ class CurvApprox(StrEnum):
     FULL = "full"
     DIAGONAL = "diagonal"
     LOW_RANK = "low_rank"
+
+
+class CalibrationErrorNorm(StrEnum):
+    L1 = "l1"
+    INF = "inf"
