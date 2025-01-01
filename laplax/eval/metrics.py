@@ -20,6 +20,7 @@ import jax
 import jax.numpy as jnp
 from jax import lax
 
+from laplax.enums import CalibrationErrorNorm
 from laplax.types import Array, Float
 
 # --------------------------------------------------------------------------------
@@ -172,6 +173,89 @@ def calculate_bin_metrics(
     return bin_proportions, bin_confidences, bin_accuracies
 
 
+def calibration_error(
+    confidence: jax.Array,
+    correctness: jax.Array,
+    num_bins: int,
+    norm: CalibrationErrorNorm,
+) -> jax.Array:
+    """Compute the expected/maximum calibration error.
+
+    Args:
+        confidence: Float tensor of shape (n,) containing predicted confidences.
+        correctness: Float tensor of shape (n,) containing the true correctness
+            labels.
+        num_bins: Number of equally sized bins.
+        norm: Whether to return ECE (L1 norm) or MCE (inf norm).
+
+    Returns:
+        The ECE/MCE.
+
+    """
+    bin_proportions, bin_confidences, bin_accuracies = calculate_bin_metrics(
+        confidence, correctness, num_bins
+    )
+
+    abs_diffs = jnp.abs(bin_accuracies - bin_confidences)
+
+    if norm == CalibrationErrorNorm.L1:
+        score = (bin_proportions * abs_diffs).sum()
+    else:
+        score = abs_diffs.max()
+
+    return score
+
+
+def expected_calibration_error(
+    confidence: jax.Array,
+    correctness: jax.Array,
+    num_bins: int,
+) -> jax.Array:
+    """Compute the expected calibration error.
+
+    Args:
+        confidence: Float tensor of shape (n,) containing predicted confidences.
+        correctness: Float tensor of shape (n,) containing the true correctness
+            labels.
+        num_bins: Number of equally sized bins.
+
+    Returns:
+        The ECE/MCE.
+
+    """
+    return calibration_error(
+        confidence=confidence,
+        correctness=correctness,
+        num_bins=num_bins,
+        norm=CalibrationErrorNorm.L1,
+    )
+
+
+def maximum_calibration_error(
+    confidence: jax.Array,
+    correctness: jax.Array,
+    num_bins: int,
+) -> jax.Array:
+    """Compute the maximum calibration error.
+
+    Args:
+        confidence: Float tensor of shape (n,) containing predicted confidences.
+        correctness: Float tensor of shape (n,) containing the true correctness
+            labels.
+        num_bins: Number of equally sized bins.
+
+    Returns:
+        The ECE/MCE.
+
+    """
+    return calibration_error(
+        confidence=confidence,
+        correctness=correctness,
+        num_bins=num_bins,
+        norm=CalibrationErrorNorm.INF,
+    )
+
+
 # --------------------------------------------------------------------------------
 # Regression metrics
 # --------------------------------------------------------------------------------
@@ -241,7 +325,7 @@ def estimate_true_rmse(pred: Array, target: Array, **kwargs) -> Float:
 
 
 def nll_gaussian(
-    pred: Array,
+    pred_mean: Array,
     pred_std: Array,
     target: Array,
     *,
@@ -259,7 +343,7 @@ def nll_gaussian(
     \exp \left( -\frac{(y_i - \hat{y}_i)^2}{2\sigma_i^2} \right) \right)$.
 
     Args:
-        pred: Array of predicted means for the dataset.
+        pred_mean: Array of predicted means for the dataset.
         pred_std: Array of predicted standard deviations for the dataset.
         target: Array of ground truth labels for the dataset.
         scaled: Whether to normalize the NLL by the number of samples (default: True).
@@ -271,12 +355,12 @@ def nll_gaussian(
     del kwargs
 
     # Ensure input arrays are 1D and of the same shape
-    if not (pred.shape == pred_std.shape == target.shape):
-        msg = "Arrays must have the same shape"
+    if not (pred_mean.shape == pred_std.shape == target.shape):
+        msg = "arrays must have the same shape"
         raise ValueError(msg)
 
     # Compute residuals
-    residuals = pred - target
+    residuals = pred_mean - target
 
     # Compute negative log likelihood
     nll_list = jax.scipy.stats.norm.logpdf(residuals, scale=pred_std)
@@ -284,7 +368,7 @@ def nll_gaussian(
 
     # Scale the result by the number of data points if `scaled` is True
     if scaled:
-        nll /= math.prod(pred.shape)
+        nll /= math.prod(pred_mean.shape)
 
     return nll
 
