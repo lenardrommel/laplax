@@ -18,7 +18,7 @@ Currently, the following approximations and corresponding weight posteriors are 
 
 - **Full:** Exact representation of the curvature.
 - **Diagonal:** Diagonal approximation of the curvature.
-- **Low Rank** Low-rank approximation of the curvature.
+- **Low Rank:** Low-rank approximation of the curvature.
 
 Each method leads to a corresponding weight space covariance matrix-vector product. Additional curvature can be easily registered to have the same pipeline available.
 

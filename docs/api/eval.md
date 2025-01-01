@@ -7,9 +7,9 @@ The evaluation module provides functionality for propagating weight-space uncert
 ### Pushforward Methods
 Currently supported pushforward methods are:
 
-- **Monte Carlo**: Ensemble-based predictions using weight samples
-- **Linearized**: Efficient uncertainty propagation using model linearization
-- **GP Kernel**: Posterior GP kernel.
+- **Monte Carlo:** Prediction of the (non-linear) network using multiple weight samples
+- **Linearized:** Efficient uncertainty propagation using model linearization
+- **GP Kernel:** Posterior GP kernel.
 
 Each method provides functions for computing predictive means, variances, and covariances in output space.
 
@@ -27,7 +27,7 @@ All pushforward functions follow the pattern of the following setup function.
 
 ::: laplax.eval.pushforward.set_prob_predictive
 
-Once the pushforward is setup, they can be applied and evaluated using the following shared functions:
+Once the pushforward is set up, they can be applied and evaluated using the following shared functions:
 
 ::: laplax.eval.utils.evaluate_on_dataset
 

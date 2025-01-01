@@ -14,7 +14,9 @@ The following metrics are available for evaluating classification models:
 
 ::: laplax.eval.metrics.multiclass_brier
 
-::: laplax.eval.metrics.calculate_bin_metrics
+::: laplax.eval.metrics.expected_calibration_error
+
+::: laplax.eval.metrics.maximum_calibration_error
 
 
 ## Regression Metrics

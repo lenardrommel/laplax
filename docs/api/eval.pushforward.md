@@ -21,7 +21,7 @@ The linearized Laplace approximation propagates uncertainty through a first-orde
 
 ::: laplax.eval.pushforward.lin_pred_cov
 
-::: laplax.eval.pushforward.lin_n_samples_fn
+::: laplax.eval.pushforward.lin_samples
 
 
 ### Posterior GP Kernel
@@ -29,25 +29,25 @@ The linearized Laplace approximation propagates uncertainty through a first-orde
 ::: laplax.eval.pushforward.set_posterior_gp_kernel
 
 
-## Sample-based Laplace
+## Non-linear Laplace
 
-The sample-based Laplace approximation propagates uncertainty by sampling from the weight-space posterior and evaluating the model at these samples. The following functions implement this approach:
+The non-linear Laplace approximation propagates uncertainty by sampling from the weight-space posterior and evaluating the model with these weight samples. The following functions implement this approach:
 
 ### Setup Functions
 
-::: laplax.eval.pushforward.set_mc_pushforward
+::: laplax.eval.pushforward.set_nonlin_pushforward
 
 
 ### Core Functions
 
-::: laplax.eval.pushforward.mc_setup
+::: laplax.eval.pushforward.nonlin_setup
 
-::: laplax.eval.pushforward.mc_pred_mean
+::: laplax.eval.pushforward.nonlin_pred_mean
 
-::: laplax.eval.pushforward.mc_pred_var
+::: laplax.eval.pushforward.nonlin_pred_var
 
-::: laplax.eval.pushforward.mc_pred_std
+::: laplax.eval.pushforward.nonlin_pred_std
 
-::: laplax.eval.pushforward.mc_pred_cov
+::: laplax.eval.pushforward.nonlin_pred_cov
 
-::: laplax.eval.pushforward.mc_samples
+::: laplax.eval.pushforward.nonlin_samples
