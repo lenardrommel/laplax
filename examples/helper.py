@@ -37,7 +37,7 @@ class DataLoader:
 
 # Function to create the sinusoid dataset
 def get_sinusoid_example(
-    n_data: int = 150,
+    num_data: int = 150,
     sigma_noise: float = 0.3,
     batch_size: int = 150,
     rng_key=None,
@@ -49,7 +49,7 @@ def get_sinusoid_example(
     """Generate a sinusoid dataset.
 
     Args:
-        n_data: Number of data points.
+        num_data: Number of data points.
         sigma_noise: Standard deviation of the noise.
         batch_size: Batch size for the data loader.
         rng_key: Random number generator key.
@@ -64,7 +64,9 @@ def get_sinusoid_example(
     rng_key, rng_noise = random.split(rng_key)
 
     # Generate random training data
-    X_train = random.uniform(rng_key, (n_data, 1)) * 8  # X_train values between 0 and 8
+    X_train = (
+        random.uniform(rng_key, (num_data, 1)) * 8
+    )  # X_train values between 0 and 8
     noise = random.normal(rng_noise, X_train.shape) * sigma_noise
     y_train = jnp.sin(X_train) + noise
 

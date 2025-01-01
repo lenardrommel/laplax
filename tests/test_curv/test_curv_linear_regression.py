@@ -65,8 +65,8 @@ def test_ggn_linear_regression_2():
     )
     flatten, unflatten = create_pytree_flattener(state)
     ggn_mv = wrap_function(ggn_mv, input_fn=unflatten, output_fn=flatten)
-    n_params = get_size(state)
-    G = todense(ggn_mv, layout=n_params)
+    num_params = get_size(state)
+    G = todense(ggn_mv, layout=num_params)
 
     # Compare results
     G_manual = (
@@ -140,8 +140,8 @@ def test_hessian_linear_regression_2():
     )
     flatten, unflatten = create_pytree_flattener(state)
     hessian_mv = wrap_function(hessian_mv, input_fn=unflatten, output_fn=flatten)
-    n_params = get_size(state)
-    H = todense(hessian_mv, layout=n_params)
+    num_params = get_size(state)
+    H = todense(hessian_mv, layout=num_params)
 
     # Compare results
     hessian_manual = (

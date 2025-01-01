@@ -36,10 +36,10 @@ def test_eval_metrics(curv_op, task):
     pushforward = set_lin_pushforward(
         key=jax.random.key(0),
         model_fn=model_fn,
-        mean=params,
-        posterior=get_posterior,
+        mean_params=params,
+        posterior_fn=get_posterior,
         prior_arguments={"prior_prec": 99999999.0},
-        n_samples=5,  # TODO(2bys): Find a better way of setting this.
+        num_samples=5,  # TODO(2bys): Find a better way of setting this.
     )
 
     results = jax.vmap(pushforward)(data["input"])

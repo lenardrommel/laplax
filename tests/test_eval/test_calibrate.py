@@ -42,9 +42,9 @@ def test_lin_pushforward(curv_op, task):
         set_lin_pushforward,
         key=jax.random.key(0),
         model_fn=model_fn,
-        mean=params,
-        posterior=get_posterior,
-        n_samples=5,  # TODO(2bys): Find a better way of setting this.
+        mean_params=params,
+        posterior_fn=get_posterior,
+        num_samples=5,  # TODO(2bys): Find a better way of setting this.
     )
 
     def calibration_objective(prior_arguments):

@@ -177,19 +177,19 @@ def tree_matvec(tree: PyTree, vector: Array) -> PyTree:
     """
     # Flatten the vector
     vec_flatten, vec_def = jax.tree.flatten(vector)
-    n_vec_flatten = len(vec_flatten)
+    num_vec_flatten = len(vec_flatten)
 
     # Array flattening and reshaping
     arr_flatten, _ = jax.tree.flatten(tree)
     arr_flatten = [
         jnp.concatenate(
             [
-                arr_flatten[i * n_vec_flatten + j].reshape(*vec_flatten[j].shape, -1)
-                for i in range(n_vec_flatten)
+                arr_flatten[i * num_vec_flatten + j].reshape(*vec_flatten[j].shape, -1)
+                for i in range(num_vec_flatten)
             ],
             axis=-1,
         )
-        for j in range(n_vec_flatten)
+        for j in range(num_vec_flatten)
     ]
 
     # Array, vector to correct shape
@@ -335,8 +335,8 @@ def eye_like_with_basis_vector(tree: PyTree) -> PyTree:
     Returns:
         A PyTree of basis vectors.
     """
-    n_ele = get_size(tree)
-    return lmap(partial(basis_vector_from_index, tree=tree), jnp.arange(n_ele))
+    num_elems = get_size(tree)
+    return lmap(partial(basis_vector_from_index, tree=tree), jnp.arange(num_elems))
 
 
 def eye_like(tree: PyTree) -> PyTree:
