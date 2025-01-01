@@ -35,7 +35,7 @@ def str_to_bool(value: str) -> bool:
     """
     valid_values = {"True": True, "False": False}
     if value not in valid_values:
-        msg = "Invalid string representation of a boolean value."
+        msg = "invalid string representation of a boolean value"
         raise ValueError(msg)
     return valid_values[value]
 

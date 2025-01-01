@@ -38,11 +38,11 @@ def diagonal(mv: Callable | jnp.ndarray, layout: Layout | None = None) -> Array:
     Raises:
         TypeError: If `layout` is not provided when `mv` is a callable.
     """
-    if isinstance(mv, Callable) and not isinstance(layout, Layout):
-        msg = "Either size or tree needs to be present."
+    if isinstance(mv, Callable) and layout is None:
+        msg = "either size or tree needs to be present"
         raise TypeError(msg)
 
-    if isinstance(mv, jnp.ndarray):
+    if isinstance(mv, jax.Array):
         return jnp.diag(mv)
 
     # Define basis vector generator based on layout type

@@ -94,7 +94,7 @@ def concatenate_model_and_loss_fn(
 
         return loss_wrapper
 
-    msg = f"Unknown loss function: {loss_fn}."
+    msg = f"unknown loss function: {loss_fn}"
     raise ValueError(msg)
 
 

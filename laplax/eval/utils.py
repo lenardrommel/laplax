@@ -47,7 +47,7 @@ def finalize_function_wrapper(
 
 def finalize_functions(
     functions: dict[str, Callable],
-    results: dict,  # Typing must allow empty dict for initializations.
+    results: dict,  # Typing must allow empty dict for initializations
     aux: dict[str, Any] | None = None,
     **kwargs,
 ) -> dict:
@@ -61,15 +61,13 @@ def finalize_functions(
         functions: A dictionary where keys are names for the results, and values
             are callables to execute.
         results: A dictionary to store the outputs of the functions.
-        aux: Auxiliary data passed to the functions (default: None).
+        aux: Auxiliary data passed to the functions.
         **kwargs: Additional arguments passed to each function.
 
     Returns:
-        dict: The updated `results` dictionary containing the outputs of all
+        The updated `results` dictionary containing the outputs of all
         executed functions.
     """
-    # if aux is None:
-    #     aux = {"none": None}
     for name, func in functions.items():
         results, aux = func(results=results, aux=aux, name=name, **kwargs)
     return results
@@ -93,8 +91,7 @@ def evaluate_on_dataset(
             - `lmap_eval`: Batch size for processing data (default: "data").
 
     Returns:
-        dict: A dictionary containing predictions and target labels for the
-            entire dataset.
+        A dictionary containing predictions and target labels for the entire dataset.
     """
 
     def evaluate_data_point(dp: Data) -> dict[str, Array]:

@@ -136,7 +136,7 @@ def get_low_rank_approximation(
     # Adjust maxiter if it's too large compared to problem size
     if size < maxiter * 5:
         maxiter = max(1, size // 5 - 1)
-        msg = f"Reduced maxiter to {maxiter} due to insufficient size."
+        msg = f"reduced maxiter to {maxiter} due to insufficient size"
         warnings.warn(msg, stacklevel=1)
 
     is_compute_in_float64 = jax.config.read("jax_enable_x64")

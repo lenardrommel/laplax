@@ -114,7 +114,7 @@ def create_loss_hessian_mv(
 
         return custom_hessian_mv
 
-    msg = "Unsupported loss function provided."
+    msg = "unsupported loss function provided"
     raise ValueError(msg)
 
 

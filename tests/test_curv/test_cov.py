@@ -60,7 +60,7 @@ def test_prec_to_scale(prior_prec):
 
 def test_prec_to_scale_invalid(invalid_prec):
     """Test `prec_to_scale` for invalid input."""
-    with pytest.raises(ValueError, match="Matrix is not positive definite"):
+    with pytest.raises(ValueError, match="matrix is not positive definite"):
         prec_to_scale(invalid_prec)
 
 

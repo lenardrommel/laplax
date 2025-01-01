@@ -155,7 +155,7 @@ def process_batches(
         result = function(*args, data=transform(batch), **kwargs)
         result, state = reduce(result, state)
     if result is None:
-        msg = "Data loader was empty"
+        msg = "data loader was empty"
         raise ValueError(msg)
     return result
 
