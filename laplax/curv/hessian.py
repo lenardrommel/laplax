@@ -8,14 +8,16 @@ from laplax.types import (
     Array,
     Callable,
     Data,
+    Float,
     InputArray,
+    Int,
     ModelFn,
     Num,
     Params,
-    PredArray,
     PyTree,
     TargetArray,
 )
+from laplax.util.tree import mul
 
 
 def hvp(func: Callable, primals: PyTree, tangents: PyTree) -> PyTree:
@@ -38,7 +40,7 @@ def hvp(func: Callable, primals: PyTree, tangents: PyTree) -> PyTree:
 
 def concatenate_model_and_loss_fn(
     model_fn: ModelFn,  # type: ignore[reportRedeclaration]
-    loss_fn: LossFn | Callable | None = None,
+    loss_fn: LossFn | str | Callable,
     *,
     has_batch: bool = False,
 ) -> Callable[[InputArray, TargetArray, Params], Num[Array, "..."]]:
@@ -101,7 +103,8 @@ def concatenate_model_and_loss_fn(
 def create_hessian_mv_without_data(
     model_fn: ModelFn,  # type: ignore[reportRedeclaration]
     params: Params,
-    loss_fn: LossFn | Callable | None = None,
+    loss_fn: LossFn | str | Callable,
+    factor: Float,
     *,
     has_batch: bool = False,
     **kwargs,
@@ -122,6 +125,7 @@ def create_hessian_mv_without_data(
             - `LossFn.MSE` for mean squared error.
             - `LossFn.CROSSENTROPY` for cross-entropy loss.
             - A custom callable loss function.
+        factor: Scaling factor for the Hessian computation.
         has_batch: Whether the model function should be vectorized over the batch.
         **kwargs: Additional arguments (ignored).
 
@@ -132,25 +136,16 @@ def create_hessian_mv_without_data(
 
     new_model_fn: Callable[[InputArray, TargetArray, Params], Num[Array, "..."]]  # noqa: UP037
 
-    if loss_fn is not None:
-        new_model_fn = concatenate_model_and_loss_fn(
-            model_fn, loss_fn, has_batch=has_batch
-        )
-    else:
+    new_model_fn = concatenate_model_and_loss_fn(model_fn, loss_fn, has_batch=has_batch)
 
-        def model_without_loss(
-            input: InputArray, target: TargetArray, params: Params
-        ) -> PredArray:
-            del target  # Ignore target since there's no loss
-            return model_fn(input, params)
-
-        new_model_fn = model_without_loss
-
-    def _hessian_mv(vector: Params, data: Data) -> Params:
-        return hvp(
-            lambda p: new_model_fn(data["input"], data["target"], p),
-            params,
-            vector,
+    def _hessian_mv(vec: Params, data: Data) -> Params:
+        return mul(
+            factor,
+            hvp(
+                lambda p: new_model_fn(data["input"], data["target"], p),
+                params,
+                vec,
+            ),
         )
 
     return _hessian_mv
@@ -160,7 +155,9 @@ def create_hessian_mv(
     model_fn: ModelFn,  # type: ignore[reportRedeclaration]
     params: Params,
     data: Data,
-    loss_fn: LossFn | Callable | None = None,
+    loss_fn: LossFn | str | Callable,
+    num_curv_samples: Int | None = None,
+    num_total_samples: Int | None = None,
     **kwargs,
 ) -> Callable[[Params], Params]:
     r"""Computes the Hessian-vector product (HVP) for a model and loss fn. with data.
@@ -180,10 +177,37 @@ def create_hessian_mv(
             - `LossFn.MSE` for mean squared error.
             - `LossFn.CROSSENTROPY` for cross-entropy loss.
             - A custom callable loss function.
-        **kwargs: Additional arguments (ignored).
+        num_curv_samples: Number of samples used to calculate the Hessian. Defaults to
+            None, in which case it is inferred from `data` as its batch size. Note that
+            for losses that contain sums even for a single input (e.g., pixel-wise
+            semantic segmentation losses), this number is _not_ the batch size.
+        num_total_samples: Number of total samples the model was trained on. See the
+            remark in `num_ggn_samples`'s description. Defaults to None, in which case
+            it is set to equal `num_ggn_samples`.
+        **kwargs: Additional arguments.
 
     Returns:
         A function that computes the HVP for a given vector and the fixed dataset.
+
+    Note: The function assumes a batch dimension.
     """
-    hessian_mv = create_hessian_mv_without_data(model_fn, params, loss_fn, **kwargs)
-    return lambda vector: hessian_mv(vector, data)
+    if num_curv_samples is None:
+        num_curv_samples = data["input"].shape[0]
+
+    if num_total_samples is None:
+        num_total_samples = num_curv_samples
+
+    curv_scaling_factor = num_total_samples / num_curv_samples
+
+    hessian_mv = create_hessian_mv_without_data(
+        model_fn=model_fn,
+        params=params,
+        loss_fn=loss_fn,
+        factor=curv_scaling_factor,
+        **kwargs,
+    )
+
+    def wrapped_hessian_mv(vec: Params) -> Params:
+        return hessian_mv(vec, data)
+
+    return wrapped_hessian_mv

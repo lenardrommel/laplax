@@ -25,7 +25,9 @@ from laplax.types import (
     Array,
     Callable,
     DistState,
+    Float,
     InputArray,
+    Int,
     KeyType,
     ModelFn,
     Params,
@@ -737,10 +739,11 @@ def set_prob_predictive(
 def set_nonlin_pushforward(
     model_fn: ModelFn,
     mean: Params,
-    posterior_fn: Callable[[PriorArguments], Posterior],
+    posterior_fn: Callable[[PriorArguments, Int], Posterior],
     prior_arguments: PriorArguments,
     *,
     key: KeyType,
+    loss_scaling_factor: Float = 1.0,
     pushforward_fns: dict = DEFAULT_NONLIN_FUNCTIONS,
     num_weight_samples: int = 100,
     **kwargs,
@@ -758,6 +761,8 @@ def set_nonlin_pushforward(
             arguments.
         prior_arguments: Arguments for defining the prior distribution.
         key: PRNG key for generating random samples.
+        loss_scaling_factor: Factor by which the user-provided loss function is scaled.
+            Defaults to 1.0.
         pushforward_fns: A dictionary of Monte Carlo pushforward functions
             (default: `DEFAULT_MC_FUNCTIONS`).
         num_weight_samples: Number of weight samples for Monte Carlo predictions.
@@ -768,7 +773,7 @@ def set_nonlin_pushforward(
         and uncertainty metrics using Monte Carlo sampling.
     """
     # Create weight sample function
-    posterior_state = posterior_fn(prior_arguments)
+    posterior_state = posterior_fn(prior_arguments, loss_scaling_factor)
 
     # Posterior state to dist_state
     dist_state = get_dist_state(
@@ -795,8 +800,9 @@ def set_nonlin_pushforward(
 def set_lin_pushforward(
     model_fn: ModelFn,
     mean_params: Params,
-    posterior_fn: Callable[[PriorArguments], Posterior],
+    posterior_fn: Callable[[PriorArguments, Int], Posterior],
     prior_arguments: PriorArguments,
+    loss_scaling_factor: Float = 1.0,
     pushforward_fns: dict = DEFAULT_LIN_FINALIZE,
     **kwargs,
 ) -> Callable:
@@ -812,6 +818,8 @@ def set_lin_pushforward(
         posterior_fn: A callable that generates the posterior state from prior
             arguments.
         prior_arguments: Arguments for defining the prior distribution.
+        loss_scaling_factor: Factor by which the user-provided loss function is scaled.
+            Defaults to 1.0.
         pushforward_fns: A dictionary of linearized pushforward functions
             (default: `DEFAULT_LIN_FINALIZE`).
         **kwargs: Additional arguments passed to the pushforward functions, including:
@@ -823,7 +831,7 @@ def set_lin_pushforward(
         and uncertainty metrics using a linearized approximation.
     """
     # Create posterior state
-    posterior_state = posterior_fn(prior_arguments)
+    posterior_state = posterior_fn(prior_arguments, loss_scaling_factor)
 
     # Posterior state to dist_state
     dist_state = get_dist_state(
@@ -850,8 +858,9 @@ def set_lin_pushforward(
 def set_posterior_gp_kernel(
     model_fn: ModelFn,
     mean: Params,
-    posterior_fn: Callable[..., Posterior],
+    posterior_fn: Callable[[PriorArguments, Int], Posterior],
     prior_arguments: PriorArguments,
+    loss_scaling_factor: Float = 1.0,
     **kwargs,
 ) -> tuple[Callable, DistState]:
     """Construct a kernel matrix-vector product function for a posterior GP.
@@ -867,6 +876,8 @@ def set_posterior_gp_kernel(
         posterior_fn: A callable that generates the posterior state from prior
             arguments.
         prior_arguments: Arguments for defining the prior distribution.
+        loss_scaling_factor: Factor by which the user-provided loss function is scaled.
+            Defaults to 1.0.
         **kwargs: Additional arguments, including:
             - `dense`: Whether to return a dense kernel matrix instead of the MVP.
             - `output_layout`: The layout of the dense kernel matrix (required if
@@ -880,7 +891,7 @@ def set_posterior_gp_kernel(
         ValueError: If `dense` is True but `output_layout` is not specified.
     """
     # Create posterior state
-    posterior_state = posterior_fn(prior_arguments)
+    posterior_state = posterior_fn(prior_arguments, loss_scaling_factor)
 
     # Posterior state to dist_state
     dist_state = get_dist_state(

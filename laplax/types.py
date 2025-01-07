@@ -4,7 +4,7 @@ from collections.abc import Callable, Iterable, Mapping  # noqa: F401
 from typing import Any  # noqa: F401
 
 import jax
-from jaxtyping import Array, Float, Num, PRNGKeyArray, PyTree  # noqa: F401
+from jaxtyping import Array, Float, Int, Num, PRNGKeyArray, PyTree  # noqa: F401
 
 # Basic JAX types
 KeyType = PRNGKeyArray

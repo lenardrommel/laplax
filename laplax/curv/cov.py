@@ -14,6 +14,7 @@ from laplax.types import (
     Callable,
     CurvatureMV,
     FlatParams,
+    Float,
     Layout,
     Num,
     PosteriorState,
@@ -59,6 +60,7 @@ def create_full_curvature(
 def full_with_prior(
     curv_est: Num[Array, "P P"],
     prior_arguments: PriorArguments,
+    loss_scaling_factor: Float = 1.0,
 ) -> Num[Array, "P P"]:
     """Add prior precision to the curvature estimate.
 
@@ -68,12 +70,14 @@ def full_with_prior(
     Args:
         curv_est: Full curvature estimate matrix.
         prior_arguments: Dictionary containing prior precision as 'prior_prec'.
+        loss_scaling_factor: Factor by which the user-provided loss function is
+            scaled. Defaults to 1.0.
 
     Returns:
         Updated curvature matrix with added prior precision.
     """
     prior_prec = prior_arguments["prior_prec"]
-    return curv_est + prior_prec * jnp.eye(curv_est.shape[-1])
+    return (curv_est + prior_prec * jnp.eye(curv_est.shape[-1])) / loss_scaling_factor
 
 
 def prec_to_scale(prec: Num[Array, "P P"]) -> Num[Array, "P P"]:
@@ -196,7 +200,9 @@ def create_diagonal_curvature(mv: CurvatureMV, layout: Layout, **kwargs) -> Flat
 
 
 def diag_with_prior(
-    curv_est: FlatParams, prior_arguments: PriorArguments
+    curv_est: FlatParams,
+    prior_arguments: PriorArguments,
+    loss_scaling_factor: Float = 1.0,
 ) -> FlatParams:
     """Add prior precision to the diagonal curvature estimate.
 
@@ -206,12 +212,16 @@ def diag_with_prior(
     Args:
         curv_est: Diagonal curvature estimate.
         prior_arguments: Dictionary containing prior precision as 'prior_prec'.
+        loss_scaling_factor: Factor by which the user-provided loss function is
+            scaled. Defaults to 1.0.
 
     Returns:
         Updated diagonal curvature with added prior precision.
     """
     prior_prec = prior_arguments["prior_prec"]
-    return curv_est + prior_prec * jnp.ones_like(curv_est.shape[-1])
+    return (
+        curv_est + prior_prec * jnp.ones_like(curv_est.shape[-1])
+    ) / loss_scaling_factor
 
 
 def diag_prec_to_state(prec: FlatParams) -> dict[str, FlatParams]:
@@ -359,7 +369,9 @@ def low_rank_square(state: LowRankTerms) -> LowRankTerms:
 
 
 def low_rank_with_prior(
-    curv_est: LowRankTerms, prior_arguments: PriorArguments
+    curv_est: LowRankTerms,
+    prior_arguments: PriorArguments,
+    loss_scaling_factor: Float = 1.0,
 ) -> LowRankTerms:
     """Add prior precision to the low-rank curvature estimate.
 
@@ -371,13 +383,15 @@ def low_rank_with_prior(
         curv_est: Low-rank curvature approximation.
         prior_arguments: Dictionary containing prior precision
             as 'prior_prec'.
+        loss_scaling_factor: Factor by which the user-provided loss function is
+            scaled. Defaults to 1.0.
 
     Returns:
         LowRankTerms: Updated low-rank curvature approximation with added prior
             precision.
     """
     prior_prec = prior_arguments["prior_prec"]
-    curv_est.scalar = prior_prec
+    curv_est.scalar = prior_prec / loss_scaling_factor
     return curv_est
 
 
@@ -485,7 +499,7 @@ class Posterior:
     scale_mv: Callable[[PosteriorState], Callable[[FlatParams], FlatParams]]
 
 
-def create_posterior_function(
+def create_posterior_fn(
     curvature_type: CurvApprox | str,
     mv: CurvatureMV,
     layout: Layout | None = None,
@@ -528,11 +542,16 @@ def create_posterior_function(
     # Retrieve the curvature estimator based on the provided type
     curv_estimator = CURVATURE_METHODS[curvature_type](mv, layout=layout, **kwargs)
 
-    def posterior_function(prior_arguments: PriorArguments) -> PosteriorState:
+    def posterior_fn(
+        prior_arguments: PriorArguments,
+        loss_scaling_factor: Float = 1.0,
+    ) -> PosteriorState:
         """Posterior function to compute covariance and scale-related functions.
 
         Parameters:
             prior_arguments: Prior arguments for the posterior.
+            loss_scaling_factor: Factor by which the user-provided loss function is
+                scaled. Defaults to 1.0.
 
         Returns:
             PosteriorState: Dictionary containing:
@@ -542,7 +561,9 @@ def create_posterior_function(
         """
         # Calculate posterior precision.
         precision = CURVATURE_PRIOR_METHODS[curvature_type](
-            curv_est=curv_estimator, prior_arguments=prior_arguments
+            curv_est=curv_estimator,
+            prior_arguments=prior_arguments,
+            loss_scaling_factor=loss_scaling_factor,
         )
 
         # Calculate posterior state
@@ -558,7 +579,7 @@ def create_posterior_function(
             scale_mv=wrap_factory(scale_mv_from_state, flatten, unflatten),
         )
 
-    return posterior_function
+    return posterior_fn
 
 
 # ----------------------------------------------------------------------------------
