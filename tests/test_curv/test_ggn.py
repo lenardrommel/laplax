@@ -94,6 +94,8 @@ def test_ggn_rosenbrock(rosenbrock):
         params=rosenbrock.x,
         data={"input": jnp.zeros(1), "target": jnp.zeros(1)},
         loss_fn=rosenbrock.loss_fn,
+        num_curv_samples=1,
+        num_total_samples=1,
     )
 
     # Compute the GGN

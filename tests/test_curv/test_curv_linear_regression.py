@@ -31,7 +31,11 @@ def test_ggn_linear_regression():
 
     # Compute the GGN using package
     ggn_mv = create_ggn_mv(
-        model_fn, params=params, data={"input": X, "target": y}, loss_fn=LossFn.MSE
+        model_fn,
+        params=params,
+        data={"input": X, "target": y},
+        loss_fn=LossFn.MSE,
+        num_total_samples=N,
     )
 
     G_calc = todense(ggn_mv, layout=params).swapaxes(0, 1).reshape(-1, D_out * D_in)
@@ -61,7 +65,11 @@ def test_ggn_linear_regression_2():
 
     # Calculate the GGN and flatten
     ggn_mv = create_ggn_mv(
-        model_fn, state, data={"input": X, "target": y}, loss_fn=LossFn.MSE
+        model_fn,
+        state,
+        data={"input": X, "target": y},
+        loss_fn=LossFn.MSE,
+        num_total_samples=N,
     )
     flatten, unflatten = create_pytree_flattener(state)
     ggn_mv = wrap_function(ggn_mv, input_fn=unflatten, output_fn=flatten)
@@ -90,16 +98,17 @@ def test_hessian_linear_regression():
     def model_fn(input, params):
         return params @ input
 
-    # Compute manual GGN (ground truth)
+    # Compute manual Hessian (ground truth)
     xxT = jnp.einsum("ni,nj->ij", X, X)
     hessian_manual = jnp.kron(2 * jnp.eye(D_out), xxT)
 
-    # Compute the hessian using package
+    # Compute the Hessian using package
     hessian_mv = create_hessian_mv(
-        model_fn,
+        model_fn=model_fn,
         params=params,
         data={"input": X, "target": y},
         loss_fn=LossFn.MSE,
+        num_total_samples=N,
         has_batch=True,
     )
 
@@ -126,16 +135,17 @@ def test_hessian_linear_regression_2():
     X = jax.random.normal(key[0], (N, D_in))
     y = jax.random.normal(key[1], (N, D_out))
 
-    # Manually calculate GGN
+    # Manually calculate Hessian
     xxT = jnp.einsum("ni,nj->ij", X, X)
     hessian_manual = jnp.kron(2 * jnp.eye(D_out), xxT)
 
-    # Calculate the GGN and flatten
+    # Calculate the Hessian and flatten
     hessian_mv = create_hessian_mv(
-        model_fn,
-        state,
+        model_fn=model_fn,
+        params=state,
         data={"input": X, "target": y},
         loss_fn=LossFn.MSE,
+        num_total_samples=N,
         has_batch=True,
     )
     flatten, unflatten = create_pytree_flattener(state)

@@ -25,6 +25,7 @@ def test_hessian_rosenbrock(rosenbrock):
         params=rosenbrock.x,
         data={"input": jnp.zeros(1), "target": jnp.zeros(1)},
         loss_fn=rosenbrock.loss_fn,
+        num_total_samples=1,
     )
 
     hessian_calc = lmap(hessian_mv, jnp.eye(2))

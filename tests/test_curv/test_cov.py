@@ -82,7 +82,8 @@ def test_posterior_covariance_est(task):
 
     # Get and test precision matrix
     prec = CURVATURE_PRIOR_METHODS[task.method](
-        curv_est, prior_arguments={"prior_prec": 1.0}
+        curv_est=curv_est,
+        prior_arguments={"prior_prec": 1.0},
     )
     prec_dense = task.adjust_prec(prec)
     assert jnp.allclose(
