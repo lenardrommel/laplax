@@ -48,7 +48,7 @@ def test_nonlin_pushforward(curv_op, task):
     pushforward = set_nonlin_pushforward(
         key=jax.random.key(0),
         model_fn=model_fn,
-        mean=params,
+        mean_params=params,
         posterior_fn=posterior_fn,
         prior_arguments={"prior_prec": 99999999999.0},
         num_weight_samples=100000,
