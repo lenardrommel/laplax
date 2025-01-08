@@ -36,6 +36,7 @@ from laplax.types import (
     PriorArguments,
 )
 from laplax.util.ops import lmap, precompute_list
+from laplax.util.tree import add
 
 # -------------------------------------------------------------------------
 # Utilities - General
@@ -43,7 +44,7 @@ from laplax.util.ops import lmap, precompute_list
 
 
 def set_get_weight_sample(key, mean_params, scale_mv, num_weight_samples, **kwargs):
-    """Creates a function to sample weights from a Gaussian posterior.
+    """Creates a function to sample weights from a Gaussian distribution.
 
     This function generates weight samples from a Gaussian distribution
     characterized by the mean and the scale matrix-vector product function.
@@ -64,7 +65,7 @@ def set_get_weight_sample(key, mean_params, scale_mv, num_weight_samples, **kwar
     keys = jax.random.split(key, num_weight_samples)
 
     def get_weight_sample(idx):
-        return util.tree.normal_like(keys[idx], mean_params, scale_mv)
+        return util.tree.normal_like(keys[idx], mean=mean_params, scale_mv=scale_mv)
 
     return precompute_list(
         get_weight_sample,
@@ -178,12 +179,16 @@ def get_dist_state(
         dist_state["jvp"] = pf_jvp
 
     if num_samples > 0:
+        weight_sample_mean = (
+            util.tree.zeros_like(mean_params) if linearized else mean_params
+        )
+
         # Create weight sample function
         get_weight_samples = set_get_weight_sample(
             key,
-            mean_params,
-            posterior_state.scale_mv(posterior_state.state),
-            num_samples,
+            mean_params=weight_sample_mean,
+            scale_mv=posterior_state.scale_mv(posterior_state.state),
+            num_weight_samples=num_samples,
         )
         dist_state["get_weight_samples"] = get_weight_samples
 
@@ -376,7 +381,7 @@ def nonlin_special_pred_act(
     return special_pred(results, aux, name, linearized=False, **kwargs)
 
 
-def nonlin_mc_pred(
+def nonlin_mc_pred_act(
     results: dict[str, Array], aux: dict[str, Any], name: str, **kwargs
 ) -> tuple[dict[str, Array], dict[str, Any]]:
     if "samples" not in results:
@@ -403,7 +408,7 @@ DEFAULT_NONLIN_FUNCTIONS = {
 # -------------------------------------------------------------------------
 
 
-def set_output_cov_mv(
+def set_output_mv(
     posterior_state: Posterior,
     input: InputArray,
     jvp: Callable[[InputArray, Params], PredArray],
@@ -426,18 +431,17 @@ def set_output_cov_mv(
     Returns:
         dict: A dictionary with:
             - `cov_mv`: Function for the output covariance matrix-vector product.
-            - `scale_mv`: Function for the output scale matrix-vector product.
+            - `jac_mv`: Function for the JVP with a fixed input.
     """
     cov_mv = posterior_state.cov_mv(posterior_state.state)
-    scale_mv = posterior_state.scale_mv(posterior_state.state)
 
     def output_cov_mv(vec: PredArray) -> PredArray:
         return jvp(input, cov_mv(vjp(input, vec)[0]))
 
-    def output_cov_scale_mv(vec: PredArray) -> PredArray:
-        return jvp(input, scale_mv(vec))
+    def output_jac_mv(vec: PredArray) -> PredArray:
+        return jvp(input, vec)
 
-    return {"cov_mv": output_cov_mv, "scale_mv": output_cov_scale_mv}
+    return {"cov_mv": output_cov_mv, "jac_mv": output_jac_mv}
 
 
 def lin_setup(
@@ -484,9 +488,9 @@ def lin_setup(
         msg = "VJP is not a VJPType"
         raise TypeError(msg)
 
-    mv = set_output_cov_mv(posterior_state, input, jvp, vjp)
+    mv = set_output_mv(posterior_state, input, jvp, vjp)
     aux["cov_mv"] = mv["cov_mv"]
-    aux["scale_mv"] = mv["scale_mv"]
+    aux["jac_mv"] = mv["jac_mv"]
 
     return results, aux
 
@@ -639,14 +643,17 @@ def lin_samples(
     Raises:
         TypeError: If the scale matrix or sampling functions are invalid.
     """
+    if "pred_mean" not in results:
+        results, aux = lin_pred_mean(results, aux, "pred_mean", **kwargs)
+
     # Unpack arguments
-    scale_mv = aux["scale_mv"]
+    jac_mv = aux["jac_mv"]
     get_weight_samples = dist_state["get_weight_samples"]
     num_samples = dist_state["num_samples"]
 
     # Compute samples
     results[name] = lmap(
-        lambda i: scale_mv(get_weight_samples(i)),
+        lambda i: add(results["pred_mean"], jac_mv(get_weight_samples(i))),
         jnp.arange(num_samples),
         batch_size=kwargs.get("lmap_lin_samples", "weight"),
     )
@@ -662,7 +669,7 @@ def lin_special_pred_act(
     return special_pred(results, aux, name, linearized=True, **kwargs)
 
 
-def lin_mc_pred(
+def lin_mc_pred_act(
     results: dict[str, Array], aux: dict[str, Any], name: str, **kwargs
 ) -> tuple[dict[str, Array], dict[str, Any]]:
     if "samples" not in results:
@@ -738,7 +745,7 @@ def set_prob_predictive(
 
 def set_nonlin_pushforward(
     model_fn: ModelFn,
-    mean: Params,
+    mean_params: Params,
     posterior_fn: Callable[[PriorArguments, Int], Posterior],
     prior_arguments: PriorArguments,
     *,
@@ -756,7 +763,7 @@ def set_nonlin_pushforward(
 
     Args:
         model_fn: The model function to evaluate, which takes input and parameters.
-        mean: The mean of the posterior distribution over model parameters.
+        mean_params: The mean of the posterior distribution over model parameters.
         posterior_fn: A callable that generates the posterior state from prior
             arguments.
         prior_arguments: Arguments for defining the prior distribution.
@@ -777,7 +784,7 @@ def set_nonlin_pushforward(
 
     # Posterior state to dist_state
     dist_state = get_dist_state(
-        mean,
+        mean_params,
         model_fn,
         posterior_state,
         linearized=False,
@@ -788,7 +795,7 @@ def set_nonlin_pushforward(
     # Set prob predictive
     prob_predictive = set_prob_predictive(
         model_fn=model_fn,
-        mean_params=mean,
+        mean_params=mean_params,
         dist_state=dist_state,
         pushforward_fns=pushforward_fns,
         **kwargs,
@@ -840,7 +847,7 @@ def set_lin_pushforward(
         posterior_state,
         linearized=True,
         num_samples=kwargs.get("num_samples", 0),
-        key=kwargs.get("key"),
+        key=kwargs["key"],
     )
 
     # Set prob predictive
