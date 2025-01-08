@@ -847,7 +847,7 @@ def set_lin_pushforward(
         posterior_state,
         linearized=True,
         num_samples=kwargs.get("num_samples", 0),
-        key=kwargs["key"],
+        key=kwargs.get("key"),
     )
 
     # Set prob predictive
