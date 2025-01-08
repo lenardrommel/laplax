@@ -20,6 +20,27 @@ from laplax.types import (
 from laplax.util.tree import mul
 
 
+def log_sigmoid_cross_entropy(
+    logits: Num[Array, "..."], targets: Num[Array, "..."]
+) -> Num[Array, "..."]:
+    """Computes log sigmoid cross entropy given logits and targets.
+
+    This function computes the cross entropy loss between the sigmoid of the logits
+    and the target values. The formula implemented is:
+    -targets * log_sigmoid(logits) - (1 - targets) * log_sigmoid(-logits)
+
+    Args:
+        logits: The predicted logits before sigmoid activation
+        targets: The target values (0 or 1)
+
+    Returns:
+        The computed loss value
+    """
+    return -targets * jax.nn.log_sigmoid(logits) - (1 - targets) * jax.nn.log_sigmoid(
+        -logits
+    )
+
+
 def hvp(func: Callable, primals: PyTree, tangents: PyTree) -> PyTree:
     r"""Compute the Hessian-vector product (HVP) for a given function.
 
@@ -83,7 +104,7 @@ def concatenate_model_and_loss_fn(
         def loss_wrapper(
             input: InputArray, target: TargetArray, params: Params
         ) -> Num[Array, "..."]:
-            return jax.lax.log_sigmoid_cross_entropy(model_fn(input, params), target)
+            return log_sigmoid_cross_entropy(model_fn(input, params), target)
 
         return loss_wrapper
 
