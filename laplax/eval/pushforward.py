@@ -43,7 +43,7 @@ from laplax.util.tree import add
 # -------------------------------------------------------------------------
 
 
-def set_get_weight_sample(key, mean_params, scale_mv, num_weight_samples, **kwargs):
+def set_get_weight_sample(key, mean_params, scale_mv, num_samples, **kwargs):
     """Creates a function to sample weights from a Gaussian distribution.
 
     This function generates weight samples from a Gaussian distribution
@@ -55,21 +55,21 @@ def set_get_weight_sample(key, mean_params, scale_mv, num_weight_samples, **kwar
         key: PRNG key for generating random samples.
         mean_params: Mean of the weight-space Gaussian distribution.
         scale_mv: Function for the scale matrix-vector product.
-        num_weight_samples: Number of weight samples to generate.
+        num_samples: Number of weight samples to generate.
         **kwargs: Additional arguments, including:
             - `precompute_samples`: Controls whether samples are precomputed.
 
     Returns:
         Callable: A function that generates a specific weight sample by index.
     """
-    keys = jax.random.split(key, num_weight_samples)
+    keys = jax.random.split(key, num_samples)
 
     def get_weight_sample(idx):
         return util.tree.normal_like(keys[idx], mean=mean_params, scale_mv=scale_mv)
 
     return precompute_list(
         get_weight_sample,
-        jnp.arange(num_weight_samples),
+        jnp.arange(num_samples),
         option=kwargs.get("precompute_samples", "samples"),
     )
 
@@ -188,7 +188,7 @@ def get_dist_state(
             key,
             mean_params=weight_sample_mean,
             scale_mv=posterior_state.scale_mv(posterior_state.state),
-            num_weight_samples=num_samples,
+            num_samples=num_samples,
         )
         dist_state["get_weight_samples"] = get_weight_samples
 
@@ -752,7 +752,7 @@ def set_nonlin_pushforward(
     key: KeyType,
     loss_scaling_factor: Float = 1.0,
     pushforward_fns: dict = DEFAULT_NONLIN_FUNCTIONS,
-    num_weight_samples: int = 100,
+    num_samples: int = 100,
     **kwargs,
 ):
     """Construct a Monte Carlo pushforward predictive function.
@@ -772,7 +772,7 @@ def set_nonlin_pushforward(
             Defaults to 1.0.
         pushforward_fns: A dictionary of Monte Carlo pushforward functions
             (default: `DEFAULT_MC_FUNCTIONS`).
-        num_weight_samples: Number of weight samples for Monte Carlo predictions.
+        num_samples: Number of weight samples for Monte Carlo predictions.
         **kwargs: Additional arguments passed to the pushforward functions.
 
     Returns:
@@ -788,7 +788,7 @@ def set_nonlin_pushforward(
         model_fn,
         posterior_state,
         linearized=False,
-        num_samples=num_weight_samples,
+        num_samples=num_samples,
         key=key,
     )
 
