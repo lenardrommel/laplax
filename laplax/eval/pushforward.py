@@ -918,7 +918,7 @@ def set_posterior_gp_kernel(
         )
         return dist_state["jvp"](x1, cov_mv(dist_state["vjp"](x2, vec)[0]))
 
-    if kwargs.get("dense", False):
+    if kwargs.get("dense"):
         output_layout = kwargs.get("output_layout")
         if output_layout:
             return lambda x1, x2: util.mv.todense(

@@ -40,7 +40,7 @@ def str_to_bool(value: str) -> bool:
     return valid_values[value]
 
 
-def get_env_value(key: str, default: str) -> str:
+def get_env_value(key: str, default: int | str | None = None) -> str | None:
     """Fetch the value of an environment variable or return a default value.
 
     Args:
@@ -50,10 +50,12 @@ def get_env_value(key: str, default: str) -> str:
     Returns:
         str: The value of the environment variable or the default.
     """
+    if default is not None:
+        default = str(default)
     return os.getenv(key, default)
 
 
-def get_env_int(key: str, default: int) -> int:
+def get_env_int(key: str, default: int | None = None) -> int | None:
     """Fetch the value of an environment variable as an integer.
 
     Args:
@@ -63,10 +65,13 @@ def get_env_int(key: str, default: int) -> int:
     Returns:
         int: The value of the environment variable as an integer.
     """
-    return int(get_env_value(key, str(default)))
+    val = get_env_value(key, default)
+    if val is not None:
+        val = int(val)
+    return val
 
 
-def get_env_bool(key: str, default: str) -> bool:
+def get_env_bool(key: str, default: str | None = None) -> bool | None:
     """Fetch the value of an environment variable as a boolean.
 
     Args:
@@ -80,7 +85,10 @@ def get_env_bool(key: str, default: str) -> bool:
     Raises:
         ValueError: If the default string is not a valid boolean representation.
     """
-    return str_to_bool(get_env_value(key, default))
+    val = get_env_value(key, default)
+    if val is not None:
+        val = str_to_bool(val)
+    return val
 
 
 # -------------------------------------------------------------------------
@@ -106,11 +114,12 @@ def lmap(func: Callable, data: Iterable, batch_size: int | str | None = None) ->
         Any: The result of mapping `func` over `data`.
     """
     if isinstance(batch_size, str):
-        batch_size = get_env_int(
-            f"LAPLAX_PARALLELISM_{batch_size.upper()}", DEFAULT_PARALLELISM
-        )
+        batch_size = get_env_int(f"LAPLAX_PARALLELISM_{batch_size.upper()}", None)
     elif batch_size is None:
         batch_size = get_env_int("LAPLAX_PARALLELISM", DEFAULT_PARALLELISM)
+        if batch_size is None:
+            msg = "LAPLAX_PARALLELISM environment variable not set properly."
+            raise ValueError(msg)
 
     return jax.lax.map(func, data, batch_size=batch_size)
 
@@ -151,11 +160,12 @@ def precompute_list(
         `func` if precomputation is disabled.
     """
     if isinstance(option, str):
-        option = get_env_bool(
-            f"LAPLAX_PRECOMPUTE_LIST_{option}", DEFAULT_PRECOMPUTE_LIST
-        )
+        option = get_env_bool(f"LAPLAX_PRECOMPUTE_LIST_{option}", None)
     elif option is None:
         option = get_env_bool("LAPLAX_PRECOMPUTE_LIST", DEFAULT_PRECOMPUTE_LIST)
+        if option is None:
+            msg = "LAPLAX_PRECOMPUTE_LIST environment variable not set properly."
+            raise ValueError(msg)
 
     if option:
         precomputed = lmap(
