@@ -378,12 +378,46 @@ def nonlin_special_pred_act(
     name: str,
     **kwargs,
 ) -> tuple[dict[str, Array], dict[str, Any]]:
+    """Apply special predictive methods to nonlinear Laplace for classification.
+
+    This function applies special predictive methods (Laplace Bridge, Mean Field-0,
+    Mean Field-1, or Mean Field-2) to nonlinear Laplace for classification. These
+    methods transform the predictions into probability space using specific formulations
+    rather than Monte Carlo sampling.
+
+    Args:
+        results: Dictionary to store computed results.
+        aux: Auxiliary data containing prediction information.
+        name: Name under which to store the computed predictions.
+        **kwargs: Additional arguments, including:
+            - `special_pred_type`: Type of special prediction ("laplace_bridge",
+              "mean_field_0", "mean_field_1", or "mean_field_2")
+            - `use_correction`: Whether to apply correction term for applicable methods.
+
+    Returns:
+        tuple: Updated `results` and `aux`.
+    """
     return special_pred(results, aux, name, linearized=False, **kwargs)
 
 
 def nonlin_mc_pred_act(
     results: dict[str, Array], aux: dict[str, Any], name: str, **kwargs
 ) -> tuple[dict[str, Array], dict[str, Any]]:
+    """Compute Monte Carlo predictions for nonlinear Laplace classification.
+
+    This function generates Monte Carlo predictions for classification by averaging
+    softmax probabilities across different weight samples. If samples are not already
+    available, it generates them first.
+
+    Args:
+        results: Dictionary to store computed results.
+        aux: Auxiliary data containing prediction information.
+        name: Name under which to store the computed predictions.
+        **kwargs: Additional arguments passed to sample generation.
+
+    Returns:
+        tuple: Updated `results` and `aux`.
+    """
     if "samples" not in results:
         results, aux = nonlin_samples(
             results=results, aux=aux, name="samples", **kwargs
@@ -666,12 +700,46 @@ def lin_special_pred_act(
     name: str,
     **kwargs,
 ) -> tuple[dict[str, Array], dict[str, Any]]:
+    """Apply special predictive methods to linearized Laplace for classification.
+
+    This function applies special predictive methods (Laplace Bridge, Mean Field-0,
+    Mean Field-1, or Mean Field-2) to linearized Laplace for classification. These
+    methods transform the predictions into probability space using specific formulations
+    rather than Monte Carlo sampling.
+
+    Args:
+        results: Dictionary to store computed results.
+        aux: Auxiliary data containing prediction information.
+        name: Name under which to store the computed predictions.
+        **kwargs: Additional arguments, including:
+            - `special_pred_type`: Type of special prediction ("laplace_bridge",
+              "mean_field_0", "mean_field_1", or "mean_field_2")
+            - `use_correction`: Whether to apply correction term for applicable methods.
+
+    Returns:
+        tuple: Updated `results` and `aux`.
+    """
     return special_pred(results, aux, name, linearized=True, **kwargs)
 
 
 def lin_mc_pred_act(
     results: dict[str, Array], aux: dict[str, Any], name: str, **kwargs
 ) -> tuple[dict[str, Array], dict[str, Any]]:
+    """Compute Monte Carlo predictions for linear Laplace classification.
+
+    This function generates Monte Carlo predictions for classification by averaging
+    softmax probabilities across different weight samples. If samples are not already
+    available, it generates them first.
+
+    Args:
+        results: Dictionary to store computed results.
+        aux: Auxiliary data containing prediction information.
+        name: Name under which to store the computed predictions.
+        **kwargs: Additional arguments passed to sample generation.
+
+    Returns:
+        tuple: Updated `results` and `aux`.
+    """
     if "samples" not in results:
         results, aux = lin_samples(results=results, aux=aux, name="samples", **kwargs)
 
