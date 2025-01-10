@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Operating System :: OS Independent",
 ]
-dependencies = ["jax", "jaxtyping"]
+dependencies = ["jax", "jaxtyping", "loguru"]
 description = "Laplace approximations in JAX."
 dynamic = ["version"]
 keywords = [
@@ -43,6 +43,21 @@ dev = [
     "flax",
     "equinox",
     "matplotlib",
+]
+notebooks = [
+    "torch",
+    "torchvision",
+    "optax",
+    "flax",
+]
+docs = [
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocstrings",
+    "mkdocstrings-python",
+    "mknotebooks",
+    "pytkdocs-tweaks",
+    "mkdocs-autorefs",
 ]
 
 # PEP 518 Build System Configuration
@@ -145,6 +160,9 @@ ignore = [
     "FBT001",
     "FBT003",
     "TD003",
+    # We allow strings as type annotations, following the recommendations from jaxtyping:
+    #(https://docs.kidger.site/jaxtyping/faq/#flake8-or-ruff-are-throwing-an-error)
+    "F722",
     # It is fine to override loop variables when it is clear that only the value that
     # overrides the original is needed
     "PLW2901",

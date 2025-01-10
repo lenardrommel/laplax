@@ -60,7 +60,7 @@ def test_prec_to_scale(prior_prec):
 
 def test_prec_to_scale_invalid(invalid_prec):
     """Test `prec_to_scale` for invalid input."""
-    with pytest.raises(ValueError, match="Matrix is not positive definite"):
+    with pytest.raises(ValueError, match="matrix is not positive definite"):
         prec_to_scale(invalid_prec)
 
 
@@ -81,7 +81,10 @@ def test_posterior_covariance_est(task):
     )
 
     # Get and test precision matrix
-    prec = CURVATURE_PRIOR_METHODS[task.method](curv_est, prior_prec=1.0)
+    prec = CURVATURE_PRIOR_METHODS[task.method](
+        curv_est=curv_est,
+        prior_arguments={"prior_prec": 1.0},
+    )
     prec_dense = task.adjust_prec(prec)
     assert jnp.allclose(
         prec_dense, task.true_curv + jnp.eye(task.size), atol=1e-4, rtol=1e-4
