@@ -21,7 +21,6 @@ from loguru import logger
 
 from laplax.eval.metrics import estimate_q
 from laplax.types import Array, Data, Float, PriorArguments
-from laplax.util.ops import laplax_dtype
 
 
 # Calibrate prior
@@ -190,7 +189,6 @@ def optimize_prior_prec(
         start=log_prior_prec_min,
         stop=log_prior_prec_max,
         num=grid_size,
-        dtype=laplax_dtype(),
     )
     prior_prec = grid_search(
         prior_prec_interval,
