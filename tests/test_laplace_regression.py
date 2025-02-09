@@ -259,11 +259,11 @@ class LaplaceComparison:
             key=jax.random.key(0),
             posterior_fn=self.get_posterior,
             prior_arguments={"prior_prec": 1},
-            pushforward_fns={
-                "setup": nonlin_setup,
-                "pred_mean": nonlin_pred_mean,
-                "pred_var": nonlin_pred_var,
-            },
+            pushforward_fns=[
+                nonlin_setup,
+                nonlin_pred_mean,
+                nonlin_pred_var,
+            ],
             num_samples=self.num_samples,
         )
 
@@ -281,11 +281,11 @@ class LaplaceComparison:
             key=jax.random.key(0),
             posterior_fn=self.get_posterior,
             prior_arguments={"prior_prec": 1},
-            pushforward_fns={
-                "setup": lin_setup,
-                "pred_mean": lin_pred_mean,
-                "pred_var": lin_pred_var,
-            },
+            pushforward_fns=[
+                lin_setup,
+                lin_pred_mean,
+                lin_pred_var,
+            ],
         )
 
         results = jax.vmap(pushforward)(self.X_test_jax)

@@ -21,7 +21,7 @@ from laplax.types import Any, Array, Callable, Data, InputArray
 from laplax.util.utils import identity
 
 
-def finalize_function_wrapper(
+def named_finalize_fn_wrapper(
     fn: Callable,
 ) -> Callable:
     """Wrap a function to store its result in a dictionary.
@@ -46,20 +46,21 @@ def finalize_function_wrapper(
     return wrapper
 
 
-def finalize_functions(
-    functions: dict[str, Callable],
+def named_finalize_fns(
+    fns: dict[str, Callable],
     results: dict,  # Typing must allow empty dict for initializations
     aux: dict[str, Any] | None = None,
     **kwargs,
 ) -> dict:
-    """Execute a set of functions and store their results in a dictionary.
+    """Execute a set of named functions and store their results in a dictionary.
 
     This function iterates over a dictionary of functions, executes each
     function with the provided keyword arguments, and updates the `results`
-    dictionary with their outputs.
+    dictionary with their outputs. The functions need to know what key to update the
+    `results` dict with, which is given by their name in the `functions` dict.
 
     Args:
-        functions: A dictionary where keys are names for the results, and values
+        fns: A dictionary where keys are names for the results, and values
             are callables to execute.
         results: A dictionary to store the outputs of the functions.
         aux: Auxiliary data passed to the functions.
@@ -69,8 +70,36 @@ def finalize_functions(
         The updated `results` dictionary containing the outputs of all
         executed functions.
     """
-    for name, func in functions.items():
+    for name, func in fns.items():
         results, aux = func(results=results, aux=aux, name=name, **kwargs)
+    return results
+
+
+def finalize_fns(
+    fns: list[Callable],
+    results: dict,  # Typing must allow empty dict for initializations
+    aux: dict[str, Any] | None = None,
+    **kwargs,
+) -> dict:
+    """Execute a set of functions and store their results in a dictionary.
+
+    This function iterates over a list of functions, executes each
+    function with the provided keyword arguments, and updates the `results`
+    dictionary with their outputs. The functions know what key they should update the
+    results dict with.
+
+    Args:
+        fns: A list of callables to execute.
+        results: A dictionary to store the outputs of the functions.
+        aux: Auxiliary data passed to the functions.
+        **kwargs: Additional arguments passed to each function.
+
+    Returns:
+        The updated `results` dictionary containing the outputs of all
+        executed functions.
+    """
+    for func in fns:
+        results, aux = func(results=results, aux=aux, **kwargs)
     return results
 
 
@@ -139,12 +168,14 @@ def evaluate_metrics_on_dataset(
         dataset.
     """
     # Wrap metrics
-    metrics = {name: finalize_function_wrapper(fn) for name, fn in metrics.items()}
+    metrics = {
+        name: named_finalize_fn_wrapper(fn) for name, fn in metrics.items()
+    }
 
     # Setup pointwise evaluation
     def evaluate_data_point(dp: Data) -> dict[str, Array]:
         pred = {**pred_fn(dp["input"]), "target": dp["target"]}
-        return finalize_functions(functions=metrics, results={}, aux=None, **pred)
+        return named_finalize_fns(fns=metrics, results={}, aux=None, **pred)
 
     # Evaluate metrics
     evaluated_metrics = jax.lax.map(
