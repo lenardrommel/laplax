@@ -1,12 +1,10 @@
 """Contains operations for flexible/adaptive compute."""
 
 import operator
-import os
 
 import jax
-import jax.numpy as jnp
 
-from laplax.types import Callable, DType, Iterable
+from laplax.types import Callable, Iterable
 
 # -------------------------------------------------------------------------
 # Default values
