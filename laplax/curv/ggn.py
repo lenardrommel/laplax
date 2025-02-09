@@ -129,7 +129,6 @@ def create_ggn_mv_without_data(
     factor=Float,
     *,
     has_batch: bool = True,
-    **kwargs,
 ) -> Callable[[Params, Data], Params]:
     r"""Create Generalized Gauss-Newton (GGN) matrix-vector productwithout fixed data.
 
@@ -148,8 +147,6 @@ def create_ggn_mv_without_data(
         loss_fn: Loss function to use for the GGN computation.
         factor: Scaling factor for the GGN computation.
         has_batch: Whether the data has a batch dimension.
-        **kwargs: Additional arguments, including:
-            - `lmap_ggn_mv`: Chunk size for iterating over data.
 
     Returns:
         A function that takes a vector and a batch of data, and computes the GGN
@@ -158,8 +155,6 @@ def create_ggn_mv_without_data(
     Note:
         The function assumes that the data has a batch dimension.
     """
-    del kwargs
-
     # Create loss Hessian-vector product
     loss_fn_hessian_mv = create_loss_hessian_mv(loss_fn)
     if has_batch:
@@ -191,10 +186,8 @@ def create_ggn_mv(
     params: Params,
     data: Data,
     loss_fn: LossFn | str | Callable,
-    # loss_scaling_factor: Float = 1.0,
     num_curv_samples: Int | None = None,
     num_total_samples: Int | None = None,
-    **kwargs,
 ) -> Callable[[Params], Params]:
     r"""Computes the Generalized Gauss-Newton (GGN) matrix-vector product with data.
 
@@ -222,8 +215,6 @@ def create_ggn_mv(
         num_total_samples: Number of total samples the model was trained on. See the
             remark in `num_ggn_samples`'s description. Defaults to None, in which case
             it is set to equal `num_ggn_samples`.
-        **kwargs: Additional arguments, including:
-            - `lmap_ggn_mv`: Chunk size for iterating over data.
 
     Returns:
         A function that takes a vector and computes the GGN matrix-vector product for
@@ -231,13 +222,6 @@ def create_ggn_mv(
 
     Note: The function assumes a batch dimension.
     """
-    # if not isinstance(loss_fn, Callable) and loss_scaling_factor != 1.0:
-    #     msg = (
-    #         "invalid scaling factor provided; "
-    #         "built-in losses use `loss_scaling_factor = 1"
-    #     )
-    #     raise ValueError(msg)
-
     if num_curv_samples is None:
         num_curv_samples = data["input"].shape[0]
 
@@ -251,7 +235,6 @@ def create_ggn_mv(
         params=params,
         loss_fn=loss_fn,
         factor=curv_scaling_factor,
-        **kwargs,
     )
 
     def wrapped_ggn_mv(vec: Params) -> Params:

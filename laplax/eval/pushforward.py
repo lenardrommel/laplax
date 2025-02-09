@@ -35,7 +35,7 @@ from laplax.types import (
     PredArray,
     PriorArguments,
 )
-from laplax.util.ops import lmap, precompute_list
+from laplax.util.ops import precompute_list
 from laplax.util.tree import add
 
 # -------------------------------------------------------------------------
@@ -57,7 +57,8 @@ def set_get_weight_sample(key, mean_params, scale_mv, num_samples, **kwargs):
         scale_mv: Function for the scale matrix-vector product.
         num_samples: Number of weight samples to generate.
         **kwargs: Additional arguments, including:
-            - `precompute_samples`: Controls whether samples are precomputed.
+            - `set_get_weight_sample_precompute`: Controls whether samples are
+              precomputed.
 
     Returns:
         Callable: A function that generates a specific weight sample by index.
@@ -70,7 +71,10 @@ def set_get_weight_sample(key, mean_params, scale_mv, num_samples, **kwargs):
     return precompute_list(
         get_weight_sample,
         jnp.arange(num_samples),
-        option=kwargs.get("precompute_samples", "samples"),
+        precompute=kwargs.get(
+            "set_get_weight_sample_precompute", kwargs.get("precompute")
+        ),
+        **kwargs,
     )
 
 
@@ -136,6 +140,7 @@ def get_dist_state(
     linearized: bool = False,
     num_samples: int = 0,
     key: KeyType | None = None,
+    **kwargs,
 ) -> DistState:
     """Construct the distribution state for uncertainty propagation.
 
@@ -150,6 +155,8 @@ def get_dist_state(
         linearized: Whether to consider a linearized approximation.
         num_samples: Number of weight samples for Monte Carlo methods.
         key: PRNG key for generating random samples.
+        **kwargs: Additional arguments, including:
+            - `set_get_weight_sample_precompute`.
 
     Returns:
         DistState: A dictionary containing functions and parameters for uncertainty
@@ -189,6 +196,7 @@ def get_dist_state(
             mean_params=weight_sample_mean,
             scale_mv=posterior_state.scale_mv(posterior_state.state),
             num_samples=num_samples,
+            **kwargs,
         )
         dist_state["get_weight_samples"] = get_weight_samples
 
@@ -218,7 +226,7 @@ def nonlin_setup(
         input: Input data for prediction.
         dist_state: Distribution state containing weight sampling functions.
         **kwargs: Additional arguments, including:
-            - `lmap_pred_ptw`: Controls batch size for computing predictions.
+            - `nonlin_setup_batch_size`: Controls batch size for computing predictions.
 
     Returns:
         tuple: Updated `results` and `aux`.
@@ -228,10 +236,12 @@ def nonlin_setup(
         weight_sample = dist_state["get_weight_samples"](idx)
         return aux["model_fn"](input=input, params=weight_sample)
 
-    aux["pred_ensemble"] = lmap(
+    aux["pred_ensemble"] = jax.lax.map(
         compute_pred_ptw,
         jnp.arange(dist_state["num_samples"]),
-        batch_size=kwargs.get("lmap_pred_ptw", "weight"),
+        batch_size=kwargs.get(
+            "nonlin_setup_batch_size", kwargs.get("weight_batch_size")
+        ),
     )
 
     return results, aux
@@ -647,7 +657,7 @@ def lin_pred_cov(
     pred_mean = results["pred_mean"]
     cov_mv = aux["cov_mv"]
 
-    results[name] = util.mv.todense(cov_mv, layout=pred_mean)
+    results[name] = util.mv.to_dense(cov_mv, layout=pred_mean)
     return results, aux
 
 
@@ -669,7 +679,7 @@ def lin_samples(
         dist_state: Distribution state containing sampling functions and sample count.
         name: Name under which to store the generated samples.
         **kwargs: Additional arguments, including:
-            - `lmap_lin_samples`: Batch size for computing samples.
+            - `lin_samples_batch_size`: Batch size for computing samples.
 
     Returns:
         tuple: Updated `results` and `aux`.
@@ -686,10 +696,12 @@ def lin_samples(
     num_samples = dist_state["num_samples"]
 
     # Compute samples
-    results[name] = lmap(
+    results[name] = jax.lax.map(
         lambda i: add(results["pred_mean"], jac_mv(get_weight_samples(i))),
         jnp.arange(num_samples),
-        batch_size=kwargs.get("lmap_lin_samples", "weight"),
+        batch_size=kwargs.get(
+            "lin_samples_batch_size", kwargs.get("weight_batch_size")
+        ),
     )
     return results, aux
 
@@ -794,7 +806,6 @@ def set_prob_predictive(
     def prob_predictive(input: InputArray) -> dict[str, Array]:
         # MAP prediction
         pred_map = model_fn(input=input, params=mean_params)
-        # jax.debug.print("haha" + str(pred_map[0]))
         aux = {"model_fn": model_fn, "mean_params": mean_params}
         results = {"map": pred_map}
 
@@ -858,6 +869,7 @@ def set_nonlin_pushforward(
         linearized=False,
         num_samples=num_samples,
         key=key,
+        **kwargs,
     )
 
     # Set prob predictive
@@ -914,8 +926,7 @@ def set_lin_pushforward(
         model_fn,
         posterior_state,
         linearized=True,
-        num_samples=kwargs.get("num_samples", 0),
-        key=kwargs.get("key"),
+        **kwargs,
     )
 
     # Set prob predictive
@@ -975,6 +986,7 @@ def set_posterior_gp_kernel(
         posterior_state,
         linearized=True,
         num_samples=0,
+        **kwargs,
     )
 
     # Kernel mv
@@ -989,7 +1001,7 @@ def set_posterior_gp_kernel(
     if kwargs.get("dense"):
         output_layout = kwargs.get("output_layout")
         if output_layout:
-            return lambda x1, x2: util.mv.todense(
+            return lambda x1, x2: util.mv.to_dense(
                 lambda v: kernel_mv(v, x1, x2, dist_state), layout=output_layout
             ), dist_state
         msg = "function should return a dense matrix, but no output layout is specified"

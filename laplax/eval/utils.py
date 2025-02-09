@@ -15,8 +15,9 @@ These utilities streamline dataset evaluation workflows and ensure flexibility i
 computation and result aggregation.
 """
 
+import jax
+
 from laplax.types import Any, Array, Callable, Data, InputArray
-from laplax.util.ops import lmap
 from laplax.util.utils import identity
 
 
@@ -88,7 +89,8 @@ def evaluate_on_dataset(
         data: A dataset, where each data point is a dictionary containing
             "input" and "target".
         **kwargs: Additional arguments, including:
-            - `lmap_eval`: Batch size for processing data (default: "data").
+            - `evaluate_on_dataset_batch_size`: Batch size for processing data
+              (default: `data_batch_size`).
 
     Returns:
         A dictionary containing predictions and target labels for the entire dataset.
@@ -97,7 +99,13 @@ def evaluate_on_dataset(
     def evaluate_data_point(dp: Data) -> dict[str, Array]:
         return {**pred_fn(dp["input"]), "target": dp["target"]}
 
-    return lmap(evaluate_data_point, data, batch_size=kwargs.get("lmap_eval", "data"))
+    return jax.lax.map(
+        evaluate_data_point,
+        data,
+        batch_size=kwargs.get(
+            "evaluate_on_dataset_batch_size", kwargs.get("data_batch_size")
+        ),
+    )
 
 
 def evaluate_metrics_on_dataset(
@@ -123,7 +131,8 @@ def evaluate_metrics_on_dataset(
             names and values are callables.
         apply: A callable to transform the evaluated metrics (default: identity).
         **kwargs: Additional arguments, including:
-            - `lmap_eval_metrics`: Batch size for processing data (default: "data").
+            - `evaluate_metrics_on_dataset_batch_size`: Batch size for processing data
+              (default: `data_batch_size`).
 
     Returns:
         dict: A dictionary containing the evaluated metrics for the entire
@@ -138,7 +147,11 @@ def evaluate_metrics_on_dataset(
         return finalize_functions(functions=metrics, results={}, aux=None, **pred)
 
     # Evaluate metrics
-    evaluated_metrics = lmap(
-        evaluate_data_point, data, batch_size=kwargs.get("lmap_eval_metrics", "data")
+    evaluated_metrics = jax.lax.map(
+        evaluate_data_point,
+        data,
+        batch_size=kwargs.get(
+            "evaluate_metrics_on_dataset_batch_size", kwargs.get("data_batch_size")
+        ),
     )
     return {metric: apply(evaluated_metrics[metric]) for metric in evaluated_metrics}

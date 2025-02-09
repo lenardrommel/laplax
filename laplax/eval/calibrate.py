@@ -14,13 +14,14 @@ utilities from the `laplax` package.
 import time
 from collections.abc import Callable
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from loguru import logger
 
 from laplax.eval.metrics import estimate_q
 from laplax.types import Array, Data, Float, PriorArguments
-from laplax.util.ops import laplax_dtype, lmap
+from laplax.util.ops import laplax_dtype
 
 
 # Calibrate prior
@@ -60,7 +61,7 @@ def evaluate_for_given_prior_arguments(
         metric: A callable metric function to evaluate the predictions
             (default: `calibration_metric`).
         **kwargs: Additional arguments passed to `set_prob_predictive` and
-            `lmap`.
+            `jax.lax.map`.
 
     Returns:
         The evaluated metric value.
@@ -71,8 +72,13 @@ def evaluate_for_given_prior_arguments(
         return {**prob_predictive(dp["input"]), "target": dp["target"]}
 
     res = metric(
-        **lmap(
-            evaluate_data, data, batch_size=kwargs.get("lmap_eval_prior_prec", "data")
+        **jax.lax.map(
+            evaluate_data,
+            data,
+            batch_size=kwargs.get(
+                "evaluate_for_given_prior_arguments_batch_size",
+                kwargs.get("data_batch_size"),
+            ),
         )
     )
     return res

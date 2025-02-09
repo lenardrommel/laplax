@@ -333,14 +333,6 @@ def test_compare_implementations_against_laplace_redux(
     mean_diff_lin = np.abs(torch_mu_lin - laplax_mu_lin).mean()
     std_diff_lin = np.abs(torch_std_lin - laplax_std_lin).mean()
 
-    # print("===== Non-linear Laplace Comparison =====")
-    # print("Mean predictions difference:", mean_diff_nonlin)
-    # print("Std predictions difference:", std_diff_nonlin)
-
-    # print("===== Linear Laplace Comparison =====")
-    # print("Mean predictions difference:", mean_diff_lin)
-    # print("Std predictions difference:", std_diff_lin)
-
     np.testing.assert_allclose(mean_diff_nonlin, 0, atol=1)
     np.testing.assert_allclose(std_diff_nonlin, 0, atol=1)
     np.testing.assert_allclose(mean_diff_lin, 0, atol=1e-4)
