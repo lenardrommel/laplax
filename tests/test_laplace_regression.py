@@ -21,7 +21,7 @@ from laplax.eval.pushforward import (
     set_nonlin_pushforward,
 )
 from laplax.util.flatten import create_pytree_flattener, wrap_function
-from laplax.util.mv import todense
+from laplax.util.mv import to_dense
 
 
 def get_sinusoid_example(n_data=150, sigma_noise=0.3, batch_size=150):
@@ -371,7 +371,7 @@ def test_ggn_against_curvlinops(trained_laplace_comparison):
         num_total_samples=1,
     )
     flatten, unflatten = create_pytree_flattener(la_case.params)
-    jax_ggn = todense(
+    jax_ggn = to_dense(
         wrap_function(ggn_mv, unflatten, flatten), layout=flatten(la_case.params)
     )
 
