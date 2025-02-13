@@ -168,9 +168,7 @@ def evaluate_metrics_on_dataset(
         dataset.
     """
     # Wrap metrics
-    metrics = {
-        name: named_finalize_fn_wrapper(fn) for name, fn in metrics.items()
-    }
+    metrics = {name: named_finalize_fn_wrapper(fn) for name, fn in metrics.items()}
 
     # Setup pointwise evaluation
     def evaluate_data_point(dp: Data) -> dict[str, Array]:
