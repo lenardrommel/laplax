@@ -93,7 +93,7 @@ def special_pred_act(
 
     if "pred_mean" not in results:
         pred_mean_fn = lin_pred_mean if linearized else nonlin_pred_mean
-        results, aux = pred_mean_fn(results, aux, "pred_mean", **kwargs)
+        results, aux = pred_mean_fn(results, aux, **kwargs)
 
     pred_mean = results["pred_mean"]
 
@@ -103,7 +103,7 @@ def special_pred_act(
         pred_fn = var_pred_dict[special_pred_type]
 
         if "pred_var" not in results:  # Fall back to `lin_pred_var`
-            results, aux = lin_pred_var(results, aux, "pred_var", **kwargs)
+            results, aux = lin_pred_var(results, aux, **kwargs)
 
         pred_var = results["pred_var"]
 
@@ -115,7 +115,7 @@ def special_pred_act(
 
         if "pred_cov" not in results:
             pred_cov = lin_pred_cov if linearized else nonlin_pred_cov
-            results, aux = pred_cov(results, aux, "pred_cov")
+            results, aux = pred_cov(results, aux)
 
         pred_cov = results["pred_cov"]
 
@@ -318,7 +318,7 @@ def nonlin_pred_var(
             pred_cov = jnp.diagonal(pred_cov)
         results["pred_var"] = pred_cov
     else:
-        pred_ensemble = aux.get("pred_ensemble")
+        pred_ensemble = aux["pred_ensemble"]
         results["pred_var"] = util.tree.var(pred_ensemble, axis=0)
     return results, aux
 
@@ -344,7 +344,7 @@ def nonlin_pred_std(
     if "pred_var" in results:
         results["pred_std"] = jnp.sqrt(results["pred_var"])
     else:
-        pred_ensemble = aux.get("pred_ensemble")
+        pred_ensemble = aux["pred_ensemble"]
         results["pred_std"] = util.tree.std(pred_ensemble, axis=0)
     return results, aux
 
@@ -370,7 +370,7 @@ def nonlin_samples(
     """
     del kwargs
 
-    pred_ensemble = aux.get("pred_ensemble")
+    pred_ensemble = aux["pred_ensemble"]
     results["samples"] = util.tree.tree_slice(pred_ensemble, 0, num_samples)
     return results, aux
 
@@ -390,7 +390,6 @@ def nonlin_special_pred_act(
     Args:
         results: Dictionary to store computed results.
         aux: Auxiliary data containing prediction information.
-        name: Name under which to store the computed predictions.
         **kwargs: Additional arguments, including:
             - `special_pred_type`: Type of special prediction ("laplace_bridge",
               "mean_field_0", "mean_field_1", or "mean_field_2")
@@ -414,16 +413,13 @@ def nonlin_mc_pred_act(
     Args:
         results: Dictionary to store computed results.
         aux: Auxiliary data containing prediction information.
-        name: Name under which to store the computed predictions.
         **kwargs: Additional arguments passed to sample generation.
 
     Returns:
         tuple: Updated `results` and `aux`.
     """
     if "samples" not in results:
-        results, aux = nonlin_samples(
-            results=results, aux=aux, name="samples", **kwargs
-        )
+        results, aux = nonlin_samples(results=results, aux=aux, **kwargs)
 
     results["mc_pred_act"] = jnp.mean(
         jax.nn.softmax(results["samples"], axis=1), axis=0
@@ -541,7 +537,7 @@ def lin_pred_mean(
     """Restore the linearized predictions.
 
     This function extracts the prediction from the results dictionary and
-    stores it under the specified name.
+    stores it.
 
     Args:
         results: Dictionary to store computed results.
@@ -581,7 +577,7 @@ def lin_pred_var(
     cov = results.get("pred_cov", aux["cov_mv"])
 
     if "pred_mean" not in results:
-        results, aux = lin_pred_mean(results, aux, "pred_mean", **kwargs)
+        results, aux = lin_pred_mean(results, aux, **kwargs)
 
     pred_mean = results["pred_mean"]
 
@@ -609,7 +605,7 @@ def lin_pred_std(
         tuple: Updated `results` and `aux`.
     """
     if "pred_var" not in results:  # Fall back to `lin_pred_var`
-        results, aux = lin_pred_var(results, aux, "pred_var", **kwargs)
+        results, aux = lin_pred_var(results, aux, **kwargs)
 
     var = results["pred_var"]
     results["pred_std"] = util.tree.sqrt(var)
@@ -638,7 +634,7 @@ def lin_pred_cov(
         TypeError: If the covariance matrix-vector product function is invalid.
     """
     if "pred_mean" not in results:
-        results, aux = lin_pred_mean(results, aux, "pred_mean", **kwargs)
+        results, aux = lin_pred_mean(results, aux, **kwargs)
 
     pred_mean = results["pred_mean"]
     cov_mv = aux["cov_mv"]
@@ -662,7 +658,6 @@ def lin_samples(
         results: Dictionary to store computed results.
         aux: Auxiliary data containing the scale matrix function.
         dist_state: Distribution state containing sampling functions and sample count.
-        name: Name under which to store the generated samples.
         **kwargs: Additional arguments, including:
             - `lin_samples_batch_size`: Batch size for computing samples.
 
@@ -673,7 +668,7 @@ def lin_samples(
         TypeError: If the scale matrix or sampling functions are invalid.
     """
     if "pred_mean" not in results:
-        results, aux = lin_pred_mean(results, aux, "pred_mean", **kwargs)
+        results, aux = lin_pred_mean(results, aux, **kwargs)
 
     # Unpack arguments
     jac_mv = aux["jac_mv"]
@@ -735,7 +730,7 @@ def lin_mc_pred_act(
         tuple: Updated `results` and `aux`.
     """
     if "samples" not in results:
-        results, aux = lin_samples(results=results, aux=aux, name="samples", **kwargs)
+        results, aux = lin_samples(results=results, aux=aux, **kwargs)
 
     results["mc_pred_act"] = jnp.mean(
         jax.nn.softmax(results["samples"], axis=1), axis=0
