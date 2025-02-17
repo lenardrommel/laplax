@@ -21,6 +21,7 @@ import jax.numpy as jnp
 from jax import lax
 
 from laplax.enums import CalibrationErrorNorm
+from laplax.eval.utils import apply_fns
 from laplax.types import Array, Float
 
 # --------------------------------------------------------------------------------
@@ -330,6 +331,7 @@ def crps_gaussian(
     target: Array,
     *,
     scaled: bool = True,
+    **kwargs,
 ) -> float:
     """The negatively oriented continuous ranked probability score for Gaussians.
 
@@ -340,10 +342,13 @@ def crps_gaussian(
         pred_std: 1D array of he predicted standard deviations for the held out dataset.
         target: 1D array of the true labels in the held out dataset.
         scaled: Whether to scale the score by size of held out set.
+        **kwargs: Additional arguments (ignored).
 
     Returns:
         The crps for the heldout set.
     """
+    del kwargs
+
     # Ensure input arrays are 1D and of the same shape
     if not (pred_mean.shape == pred_std.shape == target.shape):
         msg = "arrays must have the same shape"
@@ -415,8 +420,22 @@ def nll_gaussian(
     return nll
 
 
-DEFAULT_REGRESSION_METRICS = {
+DEFAULT_REGRESSION_METRICS_DICT = {
     "rmse": estimate_rmse,
     "q": estimate_q,
     "nll": nll_gaussian,
+    "crps": crps_gaussian,
 }
+
+DEFAULT_REGRESSION_METRICS = [
+    apply_fns(
+        estimate_rmse,
+        estimate_q,
+        nll_gaussian,
+        crps_gaussian,
+        names=["rmse", "q", "nll", "crps"],
+        pred_mean="pred_mean",
+        pred_std="pred_std",
+        target="target",
+    )
+]
