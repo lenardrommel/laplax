@@ -15,6 +15,8 @@ These utilities streamline dataset evaluation workflows and ensure flexibility i
 computation and result aggregation.
 """
 
+from collections.abc import Iterator
+
 import jax
 from loguru import logger
 
@@ -276,3 +278,74 @@ def evaluate_metrics_on_dataset(
         ),
     )
     return {metric: reduce(evaluated_metrics[metric]) for metric in evaluated_metrics}
+
+
+def evaluate_metrics_on_generator(
+    pred_fn: Callable[[InputArray], dict[str, Array]],
+    data_generator: Iterator[Data],
+    *,
+    metrics: list | None = None,
+    metrics_dict: dict[str, Callable] | None = None,
+    reduce: Callable = identity,
+    **kwargs,
+) -> dict:
+    """Evaluate a set of metrics on a data generator.
+
+    Similar to evaluate_metrics_on_dataset, but works with a generator of data points
+    instead of a dataset array. This is useful for cases where the data doesn't fit
+    in memory or is being streamed.
+
+    Args:
+        pred_fn: A callable that takes an input array and returns predictions
+            as a dictionary.
+        data_generator: An iterator yielding data points, where each data point
+            is a dictionary containing "input" and "target".
+        metrics: A list of metrics to compute, this should use the `apply_fns`
+            function to apply the metrics and `transfer_entry` function to transfer
+            entries between results and auxiliary dictionaries.
+        metrics_dict: A dictionary of metrics to compute, where keys are metric
+            names and values are callables.
+        reduce: A callable to transform the evaluated metrics (default: identity).
+        **kwargs: Additional keyword arguments passed to the metrics functions.
+
+    Returns:
+        dict: A dictionary containing the evaluated metrics for all data points.
+
+    Raises:
+        ValueError: If neither metrics nor metric_dict is provided.
+    """
+    # Initialize metrics list from metric_dict if provided
+    metrics_from_dict = []
+    if metrics_dict is not None:
+        metrics_from_dict = [
+            apply_fns(*metrics_dict.values(), names=list(metrics_dict.keys()))
+        ]
+
+    # Initialize final metrics list
+    if metrics is None and metrics_dict is None:
+        msg = "Either metrics or metric_dict must be provided."
+        raise ValueError(msg)
+    if metrics is None:
+        metrics = metrics_from_dict
+    elif metrics_dict is not None:
+        metrics.extend(metrics_from_dict)
+
+    def evaluate_data(dp: Data) -> dict[str, Array]:
+        pred = {**pred_fn(dp["input"]), "target": dp["target"]}
+        return finalize_fns(fns=metrics, results={}, aux=pred, **kwargs)
+
+    # Evaluate metrics by iterating over the generator
+    all_results = [evaluate_data(dp) for dp in data_generator]
+
+    # Combine and reduce results
+    if not all_results:
+        return {}
+
+    # Get all metric names from the first result
+    metric_names = all_results[0].keys()
+
+    # Collect and reduce metrics
+    return {
+        metric: reduce([result[metric] for result in all_results])
+        for metric in metric_names
+    }
