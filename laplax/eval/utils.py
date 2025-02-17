@@ -22,60 +22,6 @@ from laplax.types import Any, Array, Callable, Data, InputArray
 from laplax.util.utils import identity
 
 
-def named_finalize_fn_wrapper(
-    fn: Callable,
-) -> Callable:
-    """Wrap a function to store its result in a dictionary.
-
-    This wrapper allows a function to be executed with specified arguments, and
-    its output is stored in the `results` dictionary under a specified name.
-
-    Args:
-        fn: A callable function to be wrapped.
-
-    Returns:
-        Callable: A wrapped function that takes `results`, `aux`, `name`, and
-        other keyword arguments, and updates the `results` dictionary.
-    """
-
-    def wrapper(
-        results: dict[str, Array], aux: dict[str, Any] | None, name: str, **kwargs
-    ):
-        results[name] = fn(**kwargs)
-        return results, aux
-
-    return wrapper
-
-
-def named_finalize_fns(
-    fns: dict[str, Callable],
-    results: dict,  # Typing must allow empty dict for initializations
-    aux: dict[str, Any] | None = None,
-    **kwargs,
-) -> dict:
-    """Execute a set of named functions and store their results in a dictionary.
-
-    This function iterates over a dictionary of functions, executes each
-    function with the provided keyword arguments, and updates the `results`
-    dictionary with their outputs. The functions need to know what key to update the
-    `results` dict with, which is given by their name in the `functions` dict.
-
-    Args:
-        fns: A dictionary where keys are names for the results, and values
-            are callables to execute.
-        results: A dictionary to store the outputs of the functions.
-        aux: Auxiliary data passed to the functions.
-        **kwargs: Additional arguments passed to each function.
-
-    Returns:
-        The updated `results` dictionary containing the outputs of all
-        executed functions.
-    """
-    for name, func in fns.items():
-        results, aux = func(results=results, aux=aux, name=name, **kwargs)
-    return results
-
-
 def finalize_fns(
     fns: list[Callable],
     results: dict,  # Typing must allow empty dict for initializations

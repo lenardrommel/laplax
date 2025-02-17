@@ -307,24 +307,6 @@ def estimate_rmse(pred_mean: Array, target: Array, **kwargs) -> Float:
     return jnp.sqrt(jnp.mean(jnp.power(pred_mean - target, 2)))
 
 
-def estimate_true_rmse(pred: Array, target: Array, **kwargs) -> Float:
-    """Estimate the 'true' RMSE for predictions.
-
-    This function computes the RMSE directly from the predictions and targets,
-    without additional variance or uncertainty modeling.
-
-    Args:
-        pred: Array of predicted values.
-        target: Array of ground truth labels.
-        **kwargs: Additional arguments (ignored).
-
-    Returns:
-        The RMSE value.
-    """
-    del kwargs
-    return jnp.sqrt(jnp.mean(jnp.power(pred - target, 2)))
-
-
 def crps_gaussian(
     pred_mean: Array,
     pred_std: Array,
