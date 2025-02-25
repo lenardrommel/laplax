@@ -29,7 +29,7 @@ from laplax.types import Array, Float
 # --------------------------------------------------------------------------------
 
 
-def correctness(pred: Array, target: Array) -> Array:
+def correctness(pred: Array, target: Array, **kwargs) -> Array:
     """Determine if each target label matches the top-1 prediction.
 
     Computes a binary indicator for whether the predicted class matches the
@@ -40,11 +40,14 @@ def correctness(pred: Array, target: Array) -> Array:
         pred: Array of predictions with shape `(batch_size, num_classes)`.
         target: Array of ground truth labels, either 1D (class indices) or
             2D (one-hot encoded).
+        **kwargs: Additional arguments (ignored).
 
     Returns:
         Boolean array of shape `(batch_size,)` indicating correctness
         for each prediction.
     """
+    del kwargs
+
     pred = jnp.argmax(pred, axis=-1)
 
     if target.ndim == 2:
@@ -53,7 +56,7 @@ def correctness(pred: Array, target: Array) -> Array:
     return pred == target
 
 
-def accuracy(pred: Array, target: Array, top_k: tuple[int] = (1,)) -> list[Array]:
+def accuracy(pred: Array, target: Array, top_k: tuple[int] = (1,), **kwargs) -> list[Array]:
     """Compute top-k accuracy for specified values of k.
 
     For each k in `top_k`, this function calculates the fraction of samples
@@ -65,11 +68,13 @@ def accuracy(pred: Array, target: Array, top_k: tuple[int] = (1,)) -> list[Array
         target: Array of ground truth labels, either 1D (class indices) or
             2D (one-hot encoded).
         top_k: Tuple of integers specifying the values of k for top-k accuracy.
+        **kwargs: Additional arguments (ignored).
 
     Returns:
         A list of accuracies corresponding to each k in `top_k`,
         expressed as percentages.
     """
+    del kwargs
     max_k = min(max(top_k), pred.shape[1])
     batch_size = target.shape[0]
 
@@ -89,7 +94,7 @@ def accuracy(pred: Array, target: Array, top_k: tuple[int] = (1,)) -> list[Array
     ]
 
 
-def cross_entropy(prob_p: Array, prob_q: Array, axis: int = -1) -> Array:
+def cross_entropy(prob_p: Array, prob_q: Array, axis: int = -1, **kwargs) -> Array:
     """Compute cross-entropy between two probability distributions.
 
     This function calculates the cross-entropy of `prob_p` relative to `prob_q`,
@@ -99,16 +104,18 @@ def cross_entropy(prob_p: Array, prob_q: Array, axis: int = -1) -> Array:
         prob_p: Array of true probability distributions.
         prob_q: Array of predicted probability distributions.
         axis: Axis along which to compute the cross-entropy (default: -1).
+        **kwargs: Additional arguments (ignored).
 
     Returns:
         Cross-entropy values for each sample.
     """
+    del kwargs
     p_log_q = jax.scipy.special.xlogy(prob_p, prob_q)
 
     return -p_log_q.sum(axis=axis)
 
 
-def multiclass_brier(prob: Array, target: Array) -> Array:
+def multiclass_brier(prob: Array, target: Array, **kwargs) -> Array:
     """Compute the multiclass Brier score.
 
     The Brier score is a measure of the accuracy of probabilistic predictions.
@@ -119,10 +126,12 @@ def multiclass_brier(prob: Array, target: Array) -> Array:
         prob: Array of predicted probabilities with shape `(batch_size, num_classes)`.
         target: Array of ground truth labels, either 1D (class indices) or
             2D (one-hot encoded).
+        **kwargs: Additional arguments (ignored).
 
     Returns:
         Mean Brier score across all samples.
     """
+    del kwargs
     if target.ndim == 1:
         target = jax.nn.one_hot(target, num_classes=prob.shape[-1])
 
@@ -136,6 +145,7 @@ def calculate_bin_metrics(
     confidence: Array,
     correctness: Array,
     num_bins: int = 15,
+    **kwargs
 ) -> tuple[Array, Array, Array]:
     """Calculate bin-wise metrics for confidence and correctness.
 
@@ -147,6 +157,7 @@ def calculate_bin_metrics(
         confidence: Array of predicted confidence values with shape `(n,)`.
         correctness: Array of correctness labels (0 or 1) with shape `(n,)`.
         num_bins: Number of bins for dividing the confidence range (default: 15).
+        **kwargs: Additional arguments (ignored).
 
     Returns:
         Tuple of arrays:
@@ -154,6 +165,8 @@ def calculate_bin_metrics(
             - Bin confidences: Average confidence for each bin.
             - Bin accuracies: Average accuracy for each bin.
     """
+    del kwargs
+
     bin_boundaries = jnp.linspace(0, 1, num_bins + 1)
     indices = jnp.digitize(confidence, bin_boundaries) - 1
     indices = jnp.clip(indices, min=0, max=num_bins - 1)
@@ -179,6 +192,7 @@ def calibration_error(
     correctness: jax.Array,
     num_bins: int,
     norm: CalibrationErrorNorm,
+    **kwargs
 ) -> jax.Array:
     """Compute the expected/maximum calibration error.
 
@@ -188,11 +202,13 @@ def calibration_error(
             labels.
         num_bins: Number of equally sized bins.
         norm: Whether to return ECE (L1 norm) or MCE (inf norm).
+        **kwargs: Additional arguments (ignored).
 
     Returns:
         The ECE/MCE.
 
     """
+    del kwargs
     bin_proportions, bin_confidences, bin_accuracies = calculate_bin_metrics(
         confidence, correctness, num_bins
     )
@@ -211,6 +227,7 @@ def expected_calibration_error(
     confidence: jax.Array,
     correctness: jax.Array,
     num_bins: int,
+    **kwargs
 ) -> jax.Array:
     """Compute the expected calibration error.
 
@@ -219,11 +236,13 @@ def expected_calibration_error(
         correctness: Float tensor of shape (n,) containing the true correctness
             labels.
         num_bins: Number of equally sized bins.
+        **kwargs: Additional arguments (ignored).
 
     Returns:
         The ECE/MCE.
 
     """
+    del kwargs
     return calibration_error(
         confidence=confidence,
         correctness=correctness,
@@ -236,6 +255,7 @@ def maximum_calibration_error(
     confidence: jax.Array,
     correctness: jax.Array,
     num_bins: int,
+    **kwargs
 ) -> jax.Array:
     """Compute the maximum calibration error.
 
@@ -244,6 +264,7 @@ def maximum_calibration_error(
         correctness: Float tensor of shape (n,) containing the true correctness
             labels.
         num_bins: Number of equally sized bins.
+        **kwargs: Additional arguments (ignored).
 
     Returns:
         The ECE/MCE.
