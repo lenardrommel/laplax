@@ -307,6 +307,8 @@ def evaluate_metrics_on_generator(
         metrics_dict: A dictionary of metrics to compute, where keys are metric
             names and values are callables.
         reduce: A callable to transform the evaluated metrics (default: identity).
+        has_batch: Data batches from generator have unaccounted batch dimension
+            (default: False).
         **kwargs: Additional keyword arguments passed to the metrics functions.
 
     Returns:

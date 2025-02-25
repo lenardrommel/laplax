@@ -56,7 +56,9 @@ def correctness(pred: Array, target: Array, **kwargs) -> Array:
     return pred == target
 
 
-def accuracy(pred: Array, target: Array, top_k: tuple[int] = (1,), **kwargs) -> list[Array]:
+def accuracy(
+    pred: Array, target: Array, top_k: tuple[int] = (1,), **kwargs
+) -> list[Array]:
     """Compute top-k accuracy for specified values of k.
 
     For each k in `top_k`, this function calculates the fraction of samples
@@ -142,10 +144,7 @@ def multiclass_brier(prob: Array, target: Array, **kwargs) -> Array:
 
 
 def calculate_bin_metrics(
-    confidence: Array,
-    correctness: Array,
-    num_bins: int = 15,
-    **kwargs
+    confidence: Array, correctness: Array, num_bins: int = 15, **kwargs
 ) -> tuple[Array, Array, Array]:
     """Calculate bin-wise metrics for confidence and correctness.
 
@@ -192,7 +191,7 @@ def calibration_error(
     correctness: jax.Array,
     num_bins: int,
     norm: CalibrationErrorNorm,
-    **kwargs
+    **kwargs,
 ) -> jax.Array:
     """Compute the expected/maximum calibration error.
 
@@ -224,10 +223,7 @@ def calibration_error(
 
 
 def expected_calibration_error(
-    confidence: jax.Array,
-    correctness: jax.Array,
-    num_bins: int,
-    **kwargs
+    confidence: jax.Array, correctness: jax.Array, num_bins: int, **kwargs
 ) -> jax.Array:
     """Compute the expected calibration error.
 
@@ -252,10 +248,7 @@ def expected_calibration_error(
 
 
 def maximum_calibration_error(
-    confidence: jax.Array,
-    correctness: jax.Array,
-    num_bins: int,
-    **kwargs
+    confidence: jax.Array, correctness: jax.Array, num_bins: int, **kwargs
 ) -> jax.Array:
     """Compute the maximum calibration error.
 
@@ -270,6 +263,8 @@ def maximum_calibration_error(
         The ECE/MCE.
 
     """
+    del kwargs
+
     return calibration_error(
         confidence=confidence,
         correctness=correctness,
