@@ -287,6 +287,7 @@ def evaluate_metrics_on_generator(
     metrics: list | None = None,
     metrics_dict: dict[str, Callable] | None = None,
     reduce: Callable = identity,
+    has_batch: bool = False,
     **kwargs,
 ) -> dict:
     """Evaluate a set of metrics on a data generator.
@@ -333,6 +334,11 @@ def evaluate_metrics_on_generator(
     def evaluate_data(dp: Data) -> dict[str, Array]:
         pred = {**pred_fn(dp["input"]), "target": dp["target"]}
         return finalize_fns(fns=metrics, results={}, aux=pred, **kwargs)
+
+    # Vmap over batch dimension, if necessary.
+    if has_batch:
+        evaluate_data = jax.vmap(evaluate_data)
+    evaluate_data = jax.jit(evaluate_data)
 
     # Evaluate metrics by iterating over the generator
     all_results = [evaluate_data(dp) for dp in data_generator]
