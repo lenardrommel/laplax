@@ -177,3 +177,17 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# save files
+examples/models/model_params_good_fit.pkl
+examples/models/model_params_overfit.pkl
+examples/models/model_params_overfit_old.pkl
+examples/models/model_params_reasonable.pkl
+examples/models/model_params_simple.pkl
+examples/models/model_rest_good_fit.pkl
+examples/models/model_rest_overfit.pkl
+examples/models/model_rest_overfit_old.pkl
+examples/models/model_rest_reasonable.pkl
+examples/models/model_rest_simple.pkl
+examples/simple.pkl
+myplot
