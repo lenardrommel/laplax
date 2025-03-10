@@ -330,7 +330,7 @@ def crps_gaussian(
     *,
     scaled: bool = True,
     **kwargs,
-) -> float:
+) -> Float:
     """The negatively oriented continuous ranked probability score for Gaussians.
 
     Negatively oriented means a smaller value is more desirable.
