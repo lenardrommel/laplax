@@ -67,14 +67,14 @@ def test_prec_to_scale_invalid(invalid_prec):
 @pytest_cases.parametrize_with_cases("task", cases=case_posterior_covariance)
 def test_posterior_covariance_est(task):
     # Get low rank terms
-    curv_est = CURVATURE_METHODS[task.method](
+    curv_estimate = CURVATURE_METHODS[task.method](
         mv=task.arr_mv,
         layout=task.layout,
-        key=task.key_curv_est,
+        key=task.key_curv_estimate,
         rank=task.rank,
     )
     assert jnp.allclose(
-        task.adjust_curv_est(curv_est),
+        task.adjust_curv_estimate(curv_estimate),
         task.true_curv,
         atol=task.atol,
         rtol=task.rtol,
@@ -82,7 +82,7 @@ def test_posterior_covariance_est(task):
 
     # Get and test precision matrix
     prec = CURVATURE_PRIOR_METHODS[task.method](
-        curv_est=curv_est,
+        curv_estimate=curv_estimate,
         prior_arguments={"prior_prec": 1.0},
     )
     prec_dense = task.adjust_prec(prec)

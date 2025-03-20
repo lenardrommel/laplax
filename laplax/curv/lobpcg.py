@@ -147,7 +147,7 @@ def lobpcg_standard(
 
     @jax.jit
     def _iteration_second_step(X, R, theta, AX, n, tol):
-        # # Compute new residuals.
+        # Compute new residuals.
         # AX = A(X)
         R = AX - theta[jnp.newaxis, :k] * X
         resid_norms = jnp.linalg.norm(R, ord=2, axis=0)

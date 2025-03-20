@@ -328,7 +328,7 @@ class DataLoaderMV:
         )
 
 
-@to_dense.register(DataLoaderMV)
+@to_dense.register
 def _(mv: DataLoaderMV, layout: Layout, **kwargs) -> Array:
     """Apply to_dense to DataLoaderMV."""
     return mv.lower_func(to_dense, layout=layout, **kwargs)
