@@ -104,7 +104,7 @@ def create_partial_pytree_flattener(
     def unflatten(arr: jax.Array) -> PyTree:
         flat_vector_split = jnp.split(
             arr, cumsum(math.prod(sh[:-1]) for sh in all_shapes)[:-1], axis=0
-        )  # Ignore row indices in shape.
+        )  # Ignore column indices in shape.
         return jax.tree_util.tree_unflatten(
             tree_def,
             [
