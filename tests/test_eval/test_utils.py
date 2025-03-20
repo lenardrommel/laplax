@@ -54,7 +54,6 @@ def test_eval_metrics(curv_op, task):
         num_samples=5,  # TODO(2bys): Find a better way of setting this.
     )
 
-    # results = jax.vmap(pushforward)(data["input"])
     results_metrics_dict = evaluate_metrics_on_dataset(
         pushforward,
         data,
