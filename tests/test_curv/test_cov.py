@@ -67,27 +67,30 @@ def test_prec_to_scale_invalid(invalid_prec):
 @pytest_cases.parametrize_with_cases("task", cases=case_posterior_covariance)
 def test_posterior_covariance_est(task):
     # Get low rank terms
-    curv_est = CURVATURE_METHODS[task.method](
+    curv_estimate = CURVATURE_METHODS[task.method](
         mv=task.arr_mv,
-        layout=task.tree_like,
-        key=task.key_curv_est,
-        maxiter=task.rank,
+        layout=task.layout,
+        key=task.key_curv_estimate,
+        rank=task.rank,
     )
     assert jnp.allclose(
-        task.adjust_curv_est(curv_est),
+        task.adjust_curv_estimate(curv_estimate),
         task.true_curv,
-        atol=1e-2,
-        rtol=1e-2,
+        atol=task.atol,
+        rtol=task.rtol,
     )
 
     # Get and test precision matrix
     prec = CURVATURE_PRIOR_METHODS[task.method](
-        curv_est=curv_est,
+        curv_estimate=curv_estimate,
         prior_arguments={"prior_prec": 1.0},
     )
     prec_dense = task.adjust_prec(prec)
     assert jnp.allclose(
-        prec_dense, task.true_curv + jnp.eye(task.size), atol=1e-4, rtol=1e-4
+        prec_dense,
+        task.true_curv + jnp.eye(task.size),
+        atol=task.atol,
+        rtol=task.rtol,
     )
 
     # Create posterior state
@@ -95,19 +98,22 @@ def test_posterior_covariance_est(task):
 
     # Get and test scale matrix
     scale_mv = CURVATURE_STATE_TO_SCALE[task.method](state)
-    scale_dense = util.mv.to_dense(scale_mv, layout=task.tree_like)
+    scale_dense = util.mv.to_dense(scale_mv, layout=task.layout)
     assert jnp.allclose(
         scale_dense @ scale_dense.T @ prec_dense,
         jnp.eye(task.size),
-        atol=1e-2,
-        rtol=1e-2,
+        atol=task.atol,
+        rtol=task.rtol,
     )
 
     # Get and test covariance matrix
     cov_mv = CURVATURE_STATE_TO_COV[task.method](state)
-    cov_dense = util.mv.to_dense(cov_mv, layout=task.tree_like)
+    cov_dense = util.mv.to_dense(cov_mv, layout=task.layout)
     assert jnp.allclose(
-        cov_dense @ prec_dense, jnp.eye(task.size), atol=1e-2, rtol=1e-2
+        cov_dense @ prec_dense,
+        jnp.eye(task.size),
+        atol=task.atol,
+        rtol=task.rtol,
     )
 
 
@@ -153,7 +159,7 @@ def test_register_curvature_method(
 @pytest.mark.parametrize(
     ("name", "default"),
     [
-        ("default_test", "low_rank"),
+        ("default_test", "lanczos"),
     ],
 )
 def test_register_curvature_method_with_default(name, default):
@@ -174,7 +180,7 @@ def test_register_curvature_method_missing_functions():
 @pytest.mark.parametrize(
     ("name", "create_fn", "default"),
     [
-        ("partial_test", Mock(name="create_fn"), "low_rank"),
+        ("partial_test", Mock(name="create_fn"), "lanczos"),
     ],
 )
 def test_register_curvature_method_partial(name, create_fn, default):
