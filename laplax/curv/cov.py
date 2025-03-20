@@ -481,7 +481,7 @@ CurvatureKeyType = CurvApprox | str | None
 CURVATURE_METHODS: dict[CurvatureKeyType, Callable] = {
     CurvApprox.FULL: create_full_curvature,
     CurvApprox.DIAGONAL: create_diagonal_curvature,
-    CurvApprox.LOW_RANK: create_low_rank_curvature,
+    CurvApprox.LANCZOS: create_low_rank_curvature,
     CurvApprox.LOBPCG: partial(
         create_low_rank_curvature, low_rank_method=LowRankMethod.LOBPCG
     ),
@@ -490,28 +490,28 @@ CURVATURE_METHODS: dict[CurvatureKeyType, Callable] = {
 CURVATURE_PRIOR_METHODS: dict[CurvatureKeyType, Callable] = {
     CurvApprox.FULL: full_with_prior,
     CurvApprox.DIAGONAL: diag_with_prior,
-    CurvApprox.LOW_RANK: low_rank_with_prior,
+    CurvApprox.LANCZOS: low_rank_with_prior,
     CurvApprox.LOBPCG: low_rank_with_prior,
 }
 
 CURVATURE_TO_POSTERIOR_STATE: dict[CurvatureKeyType, Callable] = {
     CurvApprox.FULL: full_prec_to_state,
     CurvApprox.DIAGONAL: diag_prec_to_state,
-    CurvApprox.LOW_RANK: low_rank_prec_to_state,
+    CurvApprox.LANCZOS: low_rank_prec_to_state,
     CurvApprox.LOBPCG: low_rank_prec_to_state,
 }
 
 CURVATURE_STATE_TO_SCALE: dict[CurvatureKeyType, Callable] = {
     CurvApprox.FULL: full_state_to_scale,
     CurvApprox.DIAGONAL: diag_state_to_scale,
-    CurvApprox.LOW_RANK: low_rank_state_to_scale,
+    CurvApprox.LANCZOS: low_rank_state_to_scale,
     CurvApprox.LOBPCG: low_rank_state_to_scale,
 }
 
 CURVATURE_STATE_TO_COV: dict[CurvatureKeyType, Callable] = {
     CurvApprox.FULL: full_state_to_cov,
     CurvApprox.DIAGONAL: diag_state_to_cov,
-    CurvApprox.LOW_RANK: low_rank_state_to_cov,
+    CurvApprox.LANCZOS: low_rank_state_to_cov,
     CurvApprox.LOBPCG: low_rank_state_to_cov,
 }
 
@@ -536,7 +536,7 @@ def estimate_curvature(
     """Estimate the curvature based on the provided type.
 
     Args:
-        curv_type: Type of curvature approximation ('full', 'diagonal', 'low_rank',
+        curv_type: Type of curvature approximation ('full', 'diagonal', 'lanczos',
             'lobpcg').
         mv: Function representing the curvature.
         layout: Defines the format of the layout for matrix-vector products. If None or
@@ -567,7 +567,7 @@ def set_posterior_fn(
 
     Args:
         curv_type: Type of curvature approximation. Options include ('full', 'diagonal',
-            'low_rank', 'lobpcg').
+            'lanczos', 'lobpcg').
         curv_estimate: Estimated curvature.
         layout: Defines the format of the layout for matrix-vector products.
         **kwargs: Additional key-word arguments (unused).
@@ -647,7 +647,7 @@ def create_posterior_fn(
 
     Args:
         curv_type: Type of curvature approximation ('full', 'diagonal',
-            'low_rank', 'lobpcg').
+            'lanczos', 'lobpcg').
         mv: Function representing the curvature.
         layout: Defines the format of the layout for matrix-vector products. If None or
             an integer, no flattening/unflattening is used.

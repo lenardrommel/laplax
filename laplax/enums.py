@@ -11,7 +11,7 @@ class LossFn(StrEnum):
 class CurvApprox(StrEnum):
     FULL = "full"
     DIAGONAL = "diagonal"
-    LOW_RANK = "low_rank"
+    LANCZOS = "lanczos"
     LOBPCG = "lobpcg"
 
 

@@ -159,7 +159,7 @@ def test_register_curvature_method(
 @pytest.mark.parametrize(
     ("name", "default"),
     [
-        ("default_test", "low_rank"),
+        ("default_test", "lanczos"),
     ],
 )
 def test_register_curvature_method_with_default(name, default):
@@ -180,7 +180,7 @@ def test_register_curvature_method_missing_functions():
 @pytest.mark.parametrize(
     ("name", "create_fn", "default"),
     [
-        ("partial_test", Mock(name="create_fn"), "low_rank"),
+        ("partial_test", Mock(name="create_fn"), "lanczos"),
     ],
 )
 def test_register_curvature_method_partial(name, create_fn, default):

@@ -64,8 +64,8 @@ class CurvatureTask:
         return jax.numpy.ones((100,))
 
 
-class LowRankCurvatureTask(CurvatureTask):
-    method = "low_rank"
+class LANCZOSLowRankCurvatureTask(CurvatureTask):
+    method = "lanczos"
     atol = 1e-1
     rtol = 5e-2
 
@@ -90,7 +90,7 @@ class LowRankCurvatureTask(CurvatureTask):
         return jax.numpy.ones((100,))
 
 
-class LOBPCGLowRankCurvatureTask(LowRankCurvatureTask):
+class LOBPCGLowRankCurvatureTask(LANCZOSLowRankCurvatureTask):
     method = "lobpcg"
     atol = 1e-2
     rtol = 1e-2
@@ -131,7 +131,7 @@ class FullCurvatureTask(CurvatureTask):
 @pytest_cases.parametrize(
     "task_class",
     [
-        LowRankCurvatureTask,
+        LANCZOSLowRankCurvatureTask,
         LOBPCGLowRankCurvatureTask,
         DiagonalCurvatureTask,
         FullCurvatureTask,
