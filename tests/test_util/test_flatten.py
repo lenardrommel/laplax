@@ -28,7 +28,7 @@ def get_conv_params(dim):
     strides = create_kernel_size(1, dim)
     return kernel_size, strides
 
-def create_random_jax_pytree(key, depth, branching_factor, array_dim_range=(1, 3), num_array_dims=3):
+def create_random_pytree(key, depth, branching_factor, num_array_dims=3):
     """
     Create random pytree where each leaf is a multidimensional array.
     
@@ -36,19 +36,18 @@ def create_random_jax_pytree(key, depth, branching_factor, array_dim_range=(1, 3
         key: jax.random.PRNGKey - random key.
         depth (int): Depth of the tree.
         branching_factor (int): Number of children per non-leaf node.
-        array_dim_range (tuple): specifying the range for each dimension of the array shape.
         num_array_dims (int): Number of dimensions for arrays.
     
     Returns:
         A nested dictionary representing the pytree with JAX arrays as leaves.
     """
-    min_dim, max_dim = array_dim_range
+    min_range, max_range = (1, 5)
 
     def create_array(key):
         key_shape, key_uniform = jax.random.split(key)
         shape = tuple(int(x) for x in jax.random.randint(key_shape, shape=(num_array_dims,),
-                                                            minval=min_dim,
-                                                            maxval=max_dim + 1))
+                                                            minval=min_range,
+                                                            maxval=max_range + 1))
         return jax.random.uniform(key_uniform, shape=shape)
 
     def create_tree(key, current_depth):
@@ -234,6 +233,13 @@ def test_block(num_layers, dim, kernel_size):
     model = CNN(num_layers=num_layers, dim=dim, kernel_size=kernel_size, rngs=nnx.Rngs(2))
     graph, params = nnx.split(model)
     round_trip(params)
+
+
+def test_partial_pytree_flattener_with_random_pytree(depth, branching_factor):
+    """Test PyTree flattening with random
+    PyTree structures."""
+    key = jax.random.PRNGKey(0)
+    pytree = create_random_pytree(key, depth, branching_factor, array_dim_range=(1, 3), num_array_dims=3)
 
 
 def test_mlp_eqx():
