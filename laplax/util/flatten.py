@@ -91,19 +91,19 @@ def create_partial_pytree_flattener(
             - `unflatten`: A function that reconstructs the PyTree from a 2D array.
     """
 
-    def flatten(tree: PyTree, axis: int = 0) -> jax.Array:
+    def flatten(tree: PyTree) -> jax.Array:
         flat, _ = jax.tree_util.tree_flatten(tree)
         return jnp.concatenate(
-            [leaf.reshape(-1, leaf.shape[-1]) for leaf in flat], axis=axis
+            [leaf.reshape(-1, leaf.shape[-1]) for leaf in flat], axis=0
         )
 
     # Get shapes and tree def for unflattening
     flat, tree_def = jax.tree_util.tree_flatten(tree)
     all_shapes = [leaf.shape for leaf in flat]
 
-    def unflatten(arr: jax.Array, axis: int = 0) -> PyTree:
+    def unflatten(arr: jax.Array) -> PyTree:
         flat_vector_split = jnp.split(
-            arr, cumsum(math.prod(sh[:-1]) for sh in all_shapes)[:-1], axis=axis
+            arr, cumsum(math.prod(sh[:-1]) for sh in all_shapes)[:-1], axis=0
         )  # Ignore column indices in shape.
         return jax.tree_util.tree_unflatten(
             tree_def,

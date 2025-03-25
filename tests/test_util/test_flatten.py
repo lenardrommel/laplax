@@ -1,5 +1,6 @@
 import functools
 import operator
+import random
 from flax import nnx
 from flax import linen as nn
 import equinox as eqx
@@ -16,6 +17,16 @@ from laplax.types import KeyType, PyTree
 from laplax.util.flatten import create_partial_pytree_flattener, create_pytree_flattener
 from laplax.util.tree import allclose, sub
 
+# ----- Hypothesis Composite Functions -----
+@st.composite
+def pytree_params(draw):
+    key = jax.random.PRNGKey(2)
+    depth = draw(st.integers(min_value=1, max_value=4))
+    branching_factor = draw(st.integers(min_value=1, max_value=4))
+    num_array_dims = draw(st.integers(min_value=2, max_value=5))
+    
+    return key, depth, branching_factor, num_array_dims
+
 # ----- Utility Functions -----
 
 def create_kernel_size(kernel_size, dim):
@@ -29,7 +40,7 @@ def get_conv_params(dim):
     return kernel_size, strides
 
 
-def create_random_pytree(key, depth, branching_factor, num_array_dims, axis, axis_shape=5):
+def create_random_pytree(key, depth, branching_factor, num_array_dims):
     """
     Create random pytree where each leaf is a multidimensional array.
     
@@ -39,19 +50,18 @@ def create_random_pytree(key, depth, branching_factor, num_array_dims, axis, axi
         branching_factor (int): Number of children per non-leaf node.
         num_array_dims (int): Number of dimensions for arrays.
         axis (int): concatenation axis of flatten/unflatten operation.
+        axis_shape (int): shape of the axis dimension. default is 5 for no reason.
     
     Returns:
         Random Pytree with JAX arrays as leaves.
     """
-
+    key_global, key = jax.random.split(key)
+    shapes = list(jax.random.randint(key_global, shape=(num_array_dims,), minval=1, maxval=6))
+    
     def create_array(key):
         '''Create a random array with shape (num_array_dims,)'''
-        key_shape, key_uniform = jax.random.split(key)
-        shapes = jax.random.randint(key_shape, shape=(num_array_dims,), minval=1, maxval=6)
-        shapes = shapes.at[axis].set(axis_shape)
-        
-        shape = tuple(int(x) for x in shapes)
-        return jax.random.uniform(key_uniform, shape=shape)
+        leaf_shape = tuple(shapes[i] for i in range(num_array_dims))
+        return jax.random.uniform(key, shape=shapes)
 
     def create_tree(key, current_depth):
         if current_depth == 0:
@@ -239,16 +249,13 @@ def test_block(num_layers, dim, kernel_size):
 
 
 @given(
-    depth=st.integers(min_value=1, max_value=4),
-    branching_factor=st.integers(min_value=2, max_value=5),
-    num_array_dims=st.integers(min_value=1, max_value=2),
-    array_shape=st.integers(min_value=1, max_value=5),
+        pytree_params(),
 )
 @hp.settings(deadline=None)
-def test_partial_pytree_flattener_with_random_pytree(depth, branching_factor, num_array_dims, array_shape):
+def test_partial_pytree_flattener_with_random_pytree(params):
     """Test PyTree flattening with random PyTree structures."""
-    key = jax.random.PRNGKey(0)
-    pytree = create_random_pytree(key, depth, branching_factor, num_array_dims, array_shape)
+    key, depth, branching_factor, num_array_dims = params
+    pytree = create_random_pytree(key, depth, branching_factor, num_array_dims)
     round_trip(pytree)
     #assert_correct_shapes(pytree, array_shape)
 
