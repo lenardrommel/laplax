@@ -28,6 +28,39 @@ def get_conv_params(dim):
     strides = create_kernel_size(1, dim)
     return kernel_size, strides
 
+def create_random_jax_pytree(key, depth, branching_factor, array_dim_range=(1, 3), num_array_dims=3):
+    """
+    Create random pytree where each leaf is a multidimensional array.
+    
+    Parameters:
+        key: jax.random.PRNGKey - random key.
+        depth (int): Depth of the tree.
+        branching_factor (int): Number of children per non-leaf node.
+        array_dim_range (tuple): specifying the range for each dimension of the array shape.
+        num_array_dims (int): Number of dimensions for arrays.
+    
+    Returns:
+        A nested dictionary representing the pytree with JAX arrays as leaves.
+    """
+    min_dim, max_dim = array_dim_range
+
+    def create_array(key):
+        key_shape, key_uniform = jax.random.split(key)
+        shape = tuple(int(x) for x in jax.random.randint(key_shape, shape=(num_array_dims,),
+                                                            minval=min_dim,
+                                                            maxval=max_dim + 1))
+        return jax.random.uniform(key_uniform, shape=shape)
+
+    def create_tree(key, current_depth):
+        if current_depth == 0:
+            return create_array(key)
+        else:
+            keys = jax.random.split(key, branching_factor)
+            return {f'node_{i}': create_tree(keys[i], current_depth - 1)
+                    for i in range(branching_factor)}
+
+    return create_tree(key, depth)
+
 # ----- Model Creation Helpers -----
 
 def create_cnn_nnx(num_layers, features, dim=1, key=None):
@@ -202,3 +235,12 @@ def test_block(num_layers, dim, kernel_size):
     graph, params = nnx.split(model)
     round_trip(params)
 
+
+def test_mlp_eqx():
+    model = create_mlp_eqx([1, 16, 32])
+    params, static = eqx.partition(model, eqx.is_array)
+
+    round_trip(params)
+    assert_correct_shapes(params, 32)
+
+test_mlp_eqx()
