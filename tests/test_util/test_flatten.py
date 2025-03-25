@@ -51,7 +51,27 @@ def create_cnn_linen(x, num_layers, features, dim=1):
         x = nn.relu(x)
     return x
 
+def create_mlp_eqx(features):
+    """Create an MLP using equinox."""
+    key = jax.random.split(jax.random.PRNGKey(0), len(features))
+    model = LinearNN(key, features)
+    return model
+
+
 # ----- Model Classes -----
+class LinearNN(eqx.Module):
+    layers: list
+    extra_bias: jax.Array
+    def __init__(self, keys, hidden):
+        self.layers = [
+            eqx.nn.Linear(hidden[i], hidden[i+1], key=keys[i]) for i in range(len(hidden) - 1)
+        ]
+        self.extra_bias = jax.random.uniform(keys[0], (10,))
+
+    def __call__(self, x):
+        for layer in self.layers[:-1]:
+            x = jax.nn.relu(layer(x))
+        return self.layers[-1](x) + self.extra_bias
 
 class Block(nnx.Module):
     def __init__(self, dim: int, *, rngs: nnx.Rngs):
@@ -181,3 +201,4 @@ def test_block(num_layers, dim, kernel_size):
     model = CNN(num_layers=num_layers, dim=dim, kernel_size=kernel_size, rngs=nnx.Rngs(2))
     graph, params = nnx.split(model)
     round_trip(params)
+
