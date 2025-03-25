@@ -126,7 +126,7 @@ def lanczos_lowrank(
     layout: Layout | None = None,
     rank: int = 20,
     tol: float = 1e-6,
-    mv_dtype: DType = jnp.float32,
+    mv_dtype: DType | None = None,
     calc_dtype: DType = jnp.float64,
     return_dtype: DType | None = None,
     mv_jittable: bool = True,
@@ -156,17 +156,19 @@ def lanczos_lowrank(
     """
     del kwargs
 
+    # Initialize handling mixed precision.
+    original_float64_enabled = jax.config.read("jax_enable_x64")
+
+    if mv_dtype is None:
+        mv_dtype = jnp.float64 if original_float64_enabled else jnp.float32
+
+    if return_dtype is None:
+        return_dtype = jnp.float64 if original_float64_enabled else jnp.float32
+
+    jax.config.update("jax_enable_x64", calc_dtype == jnp.float64)
+
     # Obtain a uniform matrix-vector multiplication function.
     matvec, size = get_matvec(A, layout=layout, jit=mv_jittable)
-
-    # Initialize handling mixed precision.
-    is_compute_in_float64 = jax.config.read("jax_enable_x64")
-    if jnp.float64 in {mv_dtype, calc_dtype, return_dtype}:
-        jax.config.update("jax_enable_x64", True)
-
-    # Infer return_dtype.
-    if return_dtype is None:
-        return_dtype = jnp.float64 if is_compute_in_float64 else jnp.float32
 
     # Wrap to_dtype around mv if necessary.
     if mv_dtype != calc_dtype:
@@ -193,5 +195,5 @@ def lanczos_lowrank(
     )
 
     # Restore the original configuration dtype
-    jax.config.update("jax_enable_x64", is_compute_in_float64)
+    jax.config.update("jax_enable_x64", original_float64_enabled)
     return low_rank_result
