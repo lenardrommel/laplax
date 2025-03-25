@@ -28,7 +28,8 @@ def get_conv_params(dim):
     strides = create_kernel_size(1, dim)
     return kernel_size, strides
 
-def create_random_pytree(key, depth, branching_factor, num_array_dims=3):
+
+def create_random_pytree(key, depth, branching_factor, num_array_dims, axis, axis_shape=5):
     """
     Create random pytree where each leaf is a multidimensional array.
     
@@ -37,17 +38,19 @@ def create_random_pytree(key, depth, branching_factor, num_array_dims=3):
         depth (int): Depth of the tree.
         branching_factor (int): Number of children per non-leaf node.
         num_array_dims (int): Number of dimensions for arrays.
+        axis (int): concatenation axis of flatten/unflatten operation.
     
     Returns:
-        A nested dictionary representing the pytree with JAX arrays as leaves.
+        Random Pytree with JAX arrays as leaves.
     """
-    min_range, max_range = (1, 5)
 
     def create_array(key):
+        '''Create a random array with shape (num_array_dims,)'''
         key_shape, key_uniform = jax.random.split(key)
-        shape = tuple(int(x) for x in jax.random.randint(key_shape, shape=(num_array_dims,),
-                                                            minval=min_range,
-                                                            maxval=max_range + 1))
+        shapes = jax.random.randint(key_shape, shape=(num_array_dims,), minval=1, maxval=6)
+        shapes = shapes.at[axis].set(axis_shape)
+        
+        shape = tuple(int(x) for x in shapes)
         return jax.random.uniform(key_uniform, shape=shape)
 
     def create_tree(key, current_depth):
@@ -235,11 +238,20 @@ def test_block(num_layers, dim, kernel_size):
     round_trip(params)
 
 
-def test_partial_pytree_flattener_with_random_pytree(depth, branching_factor):
-    """Test PyTree flattening with random
-    PyTree structures."""
+@given(
+    depth=st.integers(min_value=1, max_value=4),
+    branching_factor=st.integers(min_value=2, max_value=5),
+    num_array_dims=st.integers(min_value=1, max_value=2),
+    array_shape=st.integers(min_value=1, max_value=5),
+)
+@hp.settings(deadline=None)
+def test_partial_pytree_flattener_with_random_pytree(depth, branching_factor, num_array_dims, array_shape):
+    """Test PyTree flattening with random PyTree structures."""
     key = jax.random.PRNGKey(0)
-    pytree = create_random_pytree(key, depth, branching_factor, array_dim_range=(1, 3), num_array_dims=3)
+    pytree = create_random_pytree(key, depth, branching_factor, num_array_dims, array_shape)
+    round_trip(pytree)
+    #assert_correct_shapes(pytree, array_shape)
+
 
 
 def test_mlp_eqx():
@@ -248,5 +260,3 @@ def test_mlp_eqx():
 
     round_trip(params)
     assert_correct_shapes(params, 32)
-
-test_mlp_eqx()
