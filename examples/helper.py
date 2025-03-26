@@ -90,7 +90,7 @@ def get_sinusoid_example(
     return X_train, y_train, train_loader, X_test
 
 
-def get_hard_sinusoid_example(
+def get_sinusoid_examples_spaced(
     num_data: int = 150,
     sigma_noise: float = 0.3,
     batch_size: int = 150,
@@ -121,10 +121,19 @@ def get_hard_sinusoid_example(
 
 
     # Generate random values within selected intervals
-    X_train = (
-        random.uniform(rng_key, (num_data, 1))
-    )
 
+    tuples_as_array = jnp.asarray(intervals)
+
+    def f(key):
+        key1, key2 = jax.random.split(key, 2)
+        interval = jax.random.choice(key1, tuples_as_array, axis=0)
+        x = jax.random.uniform(key2, minval=interval[0], maxval=interval[1])
+        return x
+
+
+    X_train = (jax.vmap(f)(jax.random.split(rng_key, num_data))).reshape(-1, 1)
+
+    """
     # Generate X_train by selecting a random interval for each point
     X_train_list = []
     for x in X_train:
@@ -135,7 +144,7 @@ def get_hard_sinusoid_example(
         X_train_list.append(x)
 
     X_train = jnp.array(X_train_list)
-
+    """
     # Add noise to the output
     noise = random.normal(rng_noise, X_train.shape) * sigma_noise
     y_train = jnp.sin(X_train) + noise
