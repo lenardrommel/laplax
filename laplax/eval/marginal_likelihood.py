@@ -1,9 +1,6 @@
 import jax
 import jax.numpy as jnp
-import jax
-import jax.numpy as jnp
 import jax.scipy.linalg as linalg
-import laplax
 from laplax.util.mv import to_dense, diagonal
 from laplax.util.tree import get_size
 from laplax.util.flatten import create_pytree_flattener, wrap_function
@@ -21,7 +18,6 @@ def calculate_marginal_likelihood(posterior_state, params, full_fn, data):
     log_det_H = jnp.log(ggn_det)
 
     regularization_term = 0.5 * log_det_H + 0.5 * jnp.log(2 * jnp.pi) * len(params)
-
 
     log_p_D_theta_star = - len(data["input"]) * full_fn(params, data)
 
@@ -60,9 +56,6 @@ def marg_lik_with_hessian(params, full_fn, data):
     H_theta_star += epsilon * jnp.eye(size)
     log_det_H = jnp.log(linalg.det(H_theta_star))
 
-
-    # Step 4: Calculate the regularization term
     regularization_term = 0.5 * log_det_H + 0.5 * jnp.log(2 * jnp.pi) * len(params)
 
-    # Step 5: Calculate the final quantity
     return log_p_D_theta_star - regularization_term
