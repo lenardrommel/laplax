@@ -126,7 +126,7 @@ def create_ggn_mv_without_data(
     model_fn: ModelFn,
     params: Params,
     loss_fn: LossFn | str | Callable,
-    factor=Float,
+    factor: Float,
     *,
     has_batch: bool = True,
 ) -> Callable[[Params, Data], Params]:
