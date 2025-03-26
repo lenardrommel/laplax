@@ -1,5 +1,5 @@
 from laplax.eval.marginal_likelihood import calculate_marginal_likelihood, marg_lik_with_hessian, calculate_marginal_likelihood_diagonal
-from helper import get_sinusoid_example, get_hard_sinusoid_example
+from helper import get_sinusoid_example, get_sinusoid_examples_spaced
 import matplotlib.pyplot as plt
 from laplax.curv.ggn import create_ggn_mv
 from laplax.util.flatten import create_pytree_flattener, wrap_function
@@ -56,7 +56,7 @@ batch_size = 32
 rng_key = random.key(711)
 loss_fn = lambda y_pred, y_true: jnp.mean((y_pred - y_true) ** 2)  # noqa: E731
 
-X_train, y_train, train_loader, X_test = get_hard_sinusoid_example(n_data, sigma_noise, batch_size, rng_key)
+X_train, y_train, train_loader, X_test = get_sinusoid_examples_spaced(n_data, sigma_noise, batch_size, rng_key)
 train_loader = list(zip(X_train, y_train, strict=False))
 
 plt.scatter(X_train, jnp.sin(X_train), color='green', label='sin(x)')
@@ -70,7 +70,7 @@ class MLP_Simple(nnx.Module):
         self.tanh = nnx.tanh
         self.linear2 = nnx.Linear(2, 1, rngs=rngs)
         self.learning_rate = 1e-2
-        self.epochs = 40
+        self.epochs = 1
 
     def __call__(self, x):
         x = self.linear1(x)
@@ -86,7 +86,7 @@ class MLP_Reasonable(nnx.Module):
         self.tanh = nnx.tanh
         self.linear2 = nnx.Linear(10, 1, rngs=rngs)
         self.learning_rate = 1e-2
-        self.epochs = 100
+        self.epochs = 10
 
     def __call__(self, x):
         x = self.linear1(x)
@@ -130,18 +130,9 @@ class MLP_Overfit(nnx.Module):
         return x
 
 
-    def __call__(self, x):
-        x = self.linear1(x)
-        x = self.tanh(x)
-        x = self.linear2(x)
-        x = self.tanh(x)
-        x = self.linear3(x)
-        x = self.tanh(x)
-        x = self.linear4(x)
-        return x
 
 #models = [("simple", MLP_Simple), ("reasonable", MLP_Reasonable), ("good_fit", MLP_Good_Fit), ("overfit"), MLP_Overfit)]
-models = [("overfit", MLP_Overfit)]
+models = [("reasonable", MLP_Reasonable)]
 load_saved_model = False
 
 for name, model_class in models:
@@ -231,7 +222,8 @@ for name, model_class in models:
 
     #marginal_likelihood = marg_lik_with_hessian(params, full_fn, data)
     marginal_likelihood = calculate_marginal_likelihood(posterior_state, params, full_fn, data)
-
+    marginal_likelihood_2 = calculate_marginal_likelihood_diagonal(posterior_state, params, full_fn, data)
+    marginal_likelihood_3 = marg_lik_with_hessian(params, full_fn, data)
     flatten, _ = create_pytree_flattener(params)
     num_params = len(flatten(params))
     print(f"{name} ({num_params} parameters)")
