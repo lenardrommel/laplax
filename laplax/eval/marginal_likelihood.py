@@ -23,7 +23,7 @@ def calculate_marginal_likelihood(posterior_state, params, full_fn, data):
     regularization_term = 0.5 * log_det_H + 0.5 * jnp.log(2 * jnp.pi) * len(params)
 
 
-    log_p_D_theta_star = - cov_[0].size * full_fn(params, data)
+    log_p_D_theta_star = - len(data["input"]) * full_fn(params, data)
 
     log_marginal_likelihood = log_p_D_theta_star - regularization_term
 
@@ -41,7 +41,7 @@ def calculate_marginal_likelihood_diagonal(posterior_state, params, full_fn, dat
     log_det_H = jnp.sum(jnp.log(diagonal_cov))
     regularization_term = 0.5 * log_det_H + 0.5 * jnp.log(2 * jnp.pi) * len(params)
 
-    log_p_D_theta_star = - diagonal_cov[0].size * full_fn(params, data)
+    log_p_D_theta_star = - len(data["input"]) * full_fn(params, data)
 
     log_marginal_likelihood = log_p_D_theta_star - regularization_term
 
@@ -51,7 +51,6 @@ def calculate_marginal_likelihood_diagonal(posterior_state, params, full_fn, dat
 def marg_lik_with_hessian(params, full_fn, data):
 
     log_p_D_theta_star = - len(data["input"]) * full_fn(params, data)
-
     H_theta_star = jax.hessian(lambda p: full_fn(p, data))(params)
     H_theta_star = create_pytree_flattener(H_theta_star)[0](H_theta_star)
     size = int(jnp.sqrt(len(H_theta_star)))
@@ -63,7 +62,7 @@ def marg_lik_with_hessian(params, full_fn, data):
 
 
     # Step 4: Calculate the regularization term
-    regularization_term = 0.5 * log_det_H + 0.5 * jnp.log(2 * jnp.pi)
+    regularization_term = 0.5 * log_det_H + 0.5 * jnp.log(2 * jnp.pi) * len(params)
 
     # Step 5: Calculate the final quantity
     return log_p_D_theta_star - regularization_term
