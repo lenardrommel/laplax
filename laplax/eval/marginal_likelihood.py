@@ -4,9 +4,12 @@ import jax.scipy.linalg as linalg
 from laplax.util.mv import to_dense, diagonal
 from laplax.util.tree import get_size
 from laplax.util.flatten import create_pytree_flattener, wrap_function
+from laplax.types import Array, PosteriorState, Params, Data
+from jaxtyping import Float
+from collections.abc import Callable
 
 
-def calculate_marginal_likelihood(posterior_state, params, full_fn, data):
+def calculate_marginal_likelihood(posterior_state: PosteriorState, params: Params, full_fn: Callable, data: Data) -> Float:
     mv = posterior_state.cov_mv(posterior_state.state)
     flatten, unflatten = create_pytree_flattener(params)
     identity = lambda x: x
@@ -26,7 +29,7 @@ def calculate_marginal_likelihood(posterior_state, params, full_fn, data):
     return log_marginal_likelihood
 
 
-def calculate_marginal_likelihood_diagonal(posterior_state, params, full_fn, data):
+def calculate_marginal_likelihood_diagonal(posterior_state: PosteriorState, params: Params, full_fn: Callable, data: Data) -> Float:
     mv = posterior_state.cov_mv(posterior_state.state)
     flatten, unflatten = create_pytree_flattener(params)
     identity = lambda x: x
@@ -44,7 +47,7 @@ def calculate_marginal_likelihood_diagonal(posterior_state, params, full_fn, dat
     return log_marginal_likelihood
 
 
-def marg_lik_with_hessian(params, full_fn, data):
+def marg_lik_with_hessian(params: Params, full_fn: Callable, data: Data) -> Float:
 
     log_p_D_theta_star = - len(data["input"]) * full_fn(params, data)
     H_theta_star = jax.hessian(lambda p: full_fn(p, data))(params)
