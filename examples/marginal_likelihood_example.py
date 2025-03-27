@@ -1,9 +1,18 @@
+"""example of the marginal likelihood with four different models trained on the same sinoid dataset.
+The models have different levels of complexity, where one is two simple one too complex and two are a good fit for the task.
+
+The goal is to show the tradeoff between model complexity and performance and how the marginal likelihood
+can give a good indication, if the model complexity fits the complexity of the task.
+For each of the four models, the model gets plotted, the marginal likelihood gets calculated with three different
+approaches and the loss gets calculated. On one hand this shows how the marginal likelihood functions can be used,
+on the other hand it tries to show that the concept works and that it can sucessfully penalize overly complex
+or simple models."""
+
 from laplax.eval.marginal_likelihood import calculate_marginal_likelihood, marg_lik_with_hessian, calculate_marginal_likelihood_diagonal
-from helper import get_sinusoid_example, get_sinusoid_examples_spaced
+from helper import get_sinusoid_examples_spaced
 import matplotlib.pyplot as plt
 from laplax.curv.ggn import create_ggn_mv
 from laplax.util.flatten import create_pytree_flattener, wrap_function
-import jax
 import jax.numpy as jnp
 import optax
 from jax import random
@@ -11,44 +20,13 @@ from flax import nnx
 from laplax.curv.cov import create_posterior_fn
 import jax
 import pickle
-import flax.serialization as ser
 
 
 def create_model(rngs):
     model = model_class(rngs)
     return model
 
-def save_model(name, model):
-    # Get model parameters and state
-    _, params, rest = nnx.split(model, nnx.Param, ...)
 
-    # Convert parameters and state to bytes for easy saving
-
-
-    # Save parameters and state to disk with the given name
-    with open(f"models/model_params_{name}.pkl", "wb") as f:
-        pickle.dump(params,f)
-
-    with open(f"models/model_rest_{name}.pkl", "wb") as f:
-        pickle.dump(rest,f)
-
-    print("Model saved successfully!")
-
-
-# Define a function to load the model
-def load_model(name, model_class):
-    # Load the saved parameters and state from disk
-    with open(f"models/model_params_{name}.pkl", "rb") as f:
-        params = pickle.load(f)
-
-    with open(f"models/model_rest_{name}.pkl", "rb") as f:
-        rest = pickle.load(f)
-
-    return params, rest
-
-
-
-# generate training data
 # generate training data
 n_data = 150
 sigma_noise = 0.2
@@ -79,14 +57,14 @@ class MLP_Simple(nnx.Module):
         return x
 
 
-# Reasonable Complexity #1: Captures sine wave well
+# Reasonable Complexity: Captures sine wave well
 class MLP_Reasonable(nnx.Module):
     def __init__(self, rngs):
         self.linear1 = nnx.Linear(1, 10, rngs=rngs)
         self.tanh = nnx.tanh
         self.linear2 = nnx.Linear(10, 1, rngs=rngs)
         self.learning_rate = 1e-2
-        self.epochs = 10
+        self.epochs = 100
 
     def __call__(self, x):
         x = self.linear1(x)
@@ -95,6 +73,7 @@ class MLP_Reasonable(nnx.Module):
         return x
 
 
+# Good fit but complex: Better fit but also using a lot more parameters
 class MLP_Good_Fit(nnx.Module):
     def __init__(self, rngs):
         self.linear1 = nnx.Linear(1, 50, rngs=rngs)
@@ -109,6 +88,8 @@ class MLP_Good_Fit(nnx.Module):
         x = self.linear2(x)
         return x
 
+
+# extremly overfitting: too complex
 class MLP_Overfit(nnx.Module):
     def __init__(self, rngs):
         self.linear1 = nnx.Linear(1, 25, rngs=rngs)
@@ -130,10 +111,7 @@ class MLP_Overfit(nnx.Module):
         return x
 
 
-
-#models = [("simple", MLP_Simple), ("reasonable", MLP_Reasonable), ("good_fit", MLP_Good_Fit), ("overfit"), MLP_Overfit)]
-models = [("reasonable", MLP_Reasonable)]
-load_saved_model = False
+models = [("simple", MLP_Simple), ("reasonable", MLP_Reasonable), ("good_fit", MLP_Good_Fit), ("overfit", MLP_Overfit)]
 
 for name, model_class in models:
 
@@ -171,17 +149,9 @@ for name, model_class in models:
 
         return model
 
-    if load_saved_model:
-        params, rest = load_model(name, model_class)
-        # Recreate the model by merging parameters and state
-        rng = nnx.Rngs(0)
-        model = create_model(rng)
-        nnx.update(model, nnx.GraphState.merge(params, rest))
-    else:
-        rng_key = nnx.Rngs(0)
-        model = train_model(train_loader, rng_key)
-        save_model(name, model)
-        _, params, rest = nnx.split(model, nnx.Param, ...)
+    rng_key = nnx.Rngs(0)
+    model = train_model(train_loader, rng_key)
+    _, params, rest = nnx.split(model, nnx.Param, ...)
 
     data = {"input": X_train, "target": y_train}
 
@@ -220,14 +190,16 @@ for name, model_class in models:
     pred_train = model(X_train)
     train_loss = loss_fn(pred_train, y_train).item()
 
-    #marginal_likelihood = marg_lik_with_hessian(params, full_fn, data)
-    marginal_likelihood = calculate_marginal_likelihood(posterior_state, params, full_fn, data)
-    marginal_likelihood_2 = calculate_marginal_likelihood_diagonal(posterior_state, params, full_fn, data)
-    marginal_likelihood_3 = marg_lik_with_hessian(params, full_fn, data)
+    marginal_likelihood_full = calculate_marginal_likelihood(posterior_state, params, full_fn, data)
+    marginal_likelihood_diagonal = calculate_marginal_likelihood_diagonal(posterior_state, params, full_fn, data)
+    marginal_likelihood_hessian = marg_lik_with_hessian(params, full_fn, data)
+
     flatten, _ = create_pytree_flattener(params)
     num_params = len(flatten(params))
     print(f"{name} ({num_params} parameters)")
-    print("likelihood:", marginal_likelihood)
+    print("likelihood_full:", marginal_likelihood_full)
+    print("likelihood_diagonal:", marginal_likelihood_diagonal)
+    print("likelihood_hessian:", marginal_likelihood_hessian)
     print("train loss:", str(train_loss))
     print("test loss:", str(test_loss))
 
