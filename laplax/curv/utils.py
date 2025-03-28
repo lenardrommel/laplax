@@ -77,4 +77,5 @@ def get_matvec(A, *, layout=None, jit=True):
 
     if jit:
         matvec = jax.jit(matvec)
+
     return matvec, size
