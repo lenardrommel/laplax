@@ -99,7 +99,7 @@ def concatenate_model_and_loss_fn(
 
         return loss_wrapper
 
-    if loss_fn == LossFn.CROSSENTROPY:
+    if loss_fn == LossFn.CROSS_ENTROPY:
 
         def loss_wrapper(
             input: InputArray, target: TargetArray, params: Params

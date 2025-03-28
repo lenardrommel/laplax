@@ -367,7 +367,7 @@ def low_rank_square(state: LowRankTerms) -> LowRankTerms:
     This returns the LowRankTerms which correspond to the squared low rank
     approximation.
 
-    $$ (U S U^{\top} + scalar I)**2
+    $$ (U S U^{\top} + scalar I) ** 2
     = scalar**2 + U ((S + scalar) ** 2 - scalar**2) U^{\top} $$
 
     Args:
@@ -520,6 +520,7 @@ CURVATURE_STATE_TO_COV: dict[CurvatureKeyType, Callable] = {
 # General api for creating posterior functions
 # ---------------------------------------------------------------------------------
 
+
 @dataclass
 class Posterior:
     state: PosteriorState
@@ -547,14 +548,12 @@ def estimate_curvature(
     Returns:
         The estimated curvature.
     """
-    curv_estimate = CURVATURE_METHODS[curv_type](
-        mv, layout=layout, **kwargs
-    )
+    curv_estimate = CURVATURE_METHODS[curv_type](mv, layout=layout, **kwargs)
 
     # Ignore lazy evaluation
     curv_estimate = jax.tree.map(
         lambda x: x.block_until_ready() if isinstance(x, jax.Array) else x,
-        curv_estimate
+        curv_estimate,
     )
 
     return curv_estimate
@@ -659,14 +658,10 @@ def create_posterior_fn(
             posterior_state.
     """
     # Retrieve the curvature estimator based on the provided type
-    curv_estimate = estimate_curvature(
-        curv_type, mv=mv, layout=layout, **kwargs
-    )
+    curv_estimate = estimate_curvature(curv_type, mv=mv, layout=layout, **kwargs)
 
     # Set posterior fn based on curv_estimate
-    posterior_fn = set_posterior_fn(
-        curv_type, curv_estimate, layout=layout
-    )
+    posterior_fn = set_posterior_fn(curv_type, curv_estimate, layout=layout)
 
     return posterior_fn
 
