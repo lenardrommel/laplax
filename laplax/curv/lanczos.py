@@ -53,7 +53,7 @@ def lanczos_iterations(
         w = w - a * v
         if full_reorthogonalize:
             w = reorthogonalize(w, V, i)
-            # w = reorthogonalize(w, V, i)
+            w = reorthogonalize(w, V, i)
 
         b_val = jnp.linalg.norm(w, 2)
         b_val = jnp.where(b_val < tol, 0.0, b_val)
