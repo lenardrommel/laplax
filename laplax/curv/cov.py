@@ -15,6 +15,7 @@ from laplax.types import (
     Any,
     Array,
     Callable,
+    CurvatureKeyType,
     CurvatureMV,
     FlatParams,
     Float,
@@ -69,7 +70,7 @@ def create_full_curvature(
     return curv_estimate
 
 
-def full_with_prior(
+def full_curvature_to_precision(
     curv_estimate: Num[Array, "P P"],
     prior_arguments: PriorArguments,
     loss_scaling_factor: Float = 1.0,
@@ -94,7 +95,7 @@ def full_with_prior(
     ) / loss_scaling_factor
 
 
-def prec_to_scale(prec: Num[Array, "P P"]) -> Num[Array, "P P"]:
+def full_prec_to_scale(prec: Num[Array, "P P"]) -> Num[Array, "P P"]:
     """Convert precision matrix to scale matrix using Cholesky decomposition.
 
     Implementation of the corresponding torch function for converting a precision
@@ -122,7 +123,7 @@ def prec_to_scale(prec: Num[Array, "P P"]) -> Num[Array, "P P"]:
     return L
 
 
-def full_prec_to_state(
+def full_prec_to_posterior_state(
     prec: Num[Array, "P P"],
 ) -> dict[str, Num[Array, "P P"]]:
     """Convert precision matrix to scale matrix.
@@ -137,12 +138,12 @@ def full_prec_to_state(
     Returns:
         Scale matrix L where L @ L.T is the covariance matrix.
     """
-    scale = prec_to_scale(prec)
+    scale = full_prec_to_scale(prec)
 
     return {"scale": scale}
 
 
-def full_state_to_scale(
+def full_posterior_state_to_scale(
     state: dict[str, Num[Array, "P P"]],
 ) -> Callable[[FlatParams], FlatParams]:
     """Create a scale matrix-vector product function.
@@ -164,7 +165,7 @@ def full_state_to_scale(
     return scale_mv
 
 
-def full_state_to_cov(
+def full_posterior_state_to_cov(
     state: dict[str, Num[Array, "P P"]],
 ) -> Callable[[FlatParams], FlatParams]:
     """Create a covariance matrix-vector product function.
@@ -213,7 +214,7 @@ def create_diagonal_curvature(mv: CurvatureMV, layout: Layout, **kwargs) -> Flat
     return curv_diagonal
 
 
-def diag_with_prior(
+def diagonal_curvature_to_precision(
     curv_estimate: FlatParams,
     prior_arguments: PriorArguments,
     loss_scaling_factor: Float = 1.0,
@@ -238,7 +239,7 @@ def diag_with_prior(
     ) / loss_scaling_factor
 
 
-def diag_prec_to_state(prec: FlatParams) -> dict[str, FlatParams]:
+def diagonal_prec_to_posterior_state(prec: FlatParams) -> dict[str, FlatParams]:
     """Convert precision matrix to scale matrix.
 
     The provided diagonal precision matrix is converted to the corresponding scale
@@ -253,7 +254,7 @@ def diag_prec_to_state(prec: FlatParams) -> dict[str, FlatParams]:
     return {"scale": jnp.sqrt(jnp.reciprocal(prec))}
 
 
-def diag_state_to_scale(
+def diagonal_posterior_state_to_scale(
     state: dict[str, FlatParams],
 ) -> Callable[[FlatParams], FlatParams]:
     """Create a scale matrix-vector product function.
@@ -275,7 +276,7 @@ def diag_state_to_scale(
     return diag_mv
 
 
-def diag_state_to_cov(
+def diagonal_posterior_state_to_cov(
     state: dict[str, FlatParams],
 ) -> Callable[[FlatParams], FlatParams]:
     """Create a covariance matrix-vector product function.
@@ -385,7 +386,7 @@ def low_rank_square(state: LowRankTerms) -> LowRankTerms:
     )
 
 
-def low_rank_with_prior(
+def low_rank_curvature_to_precision(
     curv_estimate: LowRankTerms,
     prior_arguments: PriorArguments,
     loss_scaling_factor: Float = 1.0,
@@ -412,7 +413,9 @@ def low_rank_with_prior(
     return curv_estimate
 
 
-def low_rank_prec_to_state(curv_estimate: LowRankTerms) -> dict[str, LowRankTerms]:
+def low_rank_prec_to_posterior_state(
+    curv_estimate: LowRankTerms,
+) -> dict[str, LowRankTerms]:
     """Convert the low-rank precision representation to a posterior state.
 
     The scalar component and eigenvalues of the low-rank curvature estimate
@@ -436,7 +439,7 @@ def low_rank_prec_to_state(curv_estimate: LowRankTerms) -> dict[str, LowRankTerm
     }
 
 
-def low_rank_state_to_scale(
+def low_rank_posterior_state_to_scale(
     state: dict[str, LowRankTerms],
 ) -> Callable[[FlatParams], FlatParams]:
     """Create a matrix-vector product function for the scale matrix.
@@ -454,7 +457,7 @@ def low_rank_state_to_scale(
     return create_low_rank_mv(state["scale"])
 
 
-def low_rank_state_to_cov(
+def low_rank_posterior_state_to_cov(
     state: dict[str, LowRankTerms],
 ) -> Callable[[FlatParams], FlatParams]:
     """Create a matrix-vector product function for the covariance matrix.
@@ -476,8 +479,6 @@ def low_rank_state_to_cov(
 # General api for curvature types
 # ---------------------------------------------------------------------------------
 
-CurvatureKeyType = CurvApprox | str | None
-
 CURVATURE_METHODS: dict[CurvatureKeyType, Callable] = {
     CurvApprox.FULL: create_full_curvature,
     CurvApprox.DIAGONAL: create_diagonal_curvature,
@@ -488,31 +489,31 @@ CURVATURE_METHODS: dict[CurvatureKeyType, Callable] = {
 }
 
 CURVATURE_PRIOR_METHODS: dict[CurvatureKeyType, Callable] = {
-    CurvApprox.FULL: full_with_prior,
-    CurvApprox.DIAGONAL: diag_with_prior,
-    CurvApprox.LANCZOS: low_rank_with_prior,
-    CurvApprox.LOBPCG: low_rank_with_prior,
+    CurvApprox.FULL: full_curvature_to_precision,
+    CurvApprox.DIAGONAL: diagonal_curvature_to_precision,
+    CurvApprox.LANCZOS: low_rank_curvature_to_precision,
+    CurvApprox.LOBPCG: low_rank_curvature_to_precision,
 }
 
 CURVATURE_TO_POSTERIOR_STATE: dict[CurvatureKeyType, Callable] = {
-    CurvApprox.FULL: full_prec_to_state,
-    CurvApprox.DIAGONAL: diag_prec_to_state,
-    CurvApprox.LANCZOS: low_rank_prec_to_state,
-    CurvApprox.LOBPCG: low_rank_prec_to_state,
+    CurvApprox.FULL: full_prec_to_posterior_state,
+    CurvApprox.DIAGONAL: diagonal_prec_to_posterior_state,
+    CurvApprox.LANCZOS: low_rank_prec_to_posterior_state,
+    CurvApprox.LOBPCG: low_rank_prec_to_posterior_state,
 }
 
 CURVATURE_STATE_TO_SCALE: dict[CurvatureKeyType, Callable] = {
-    CurvApprox.FULL: full_state_to_scale,
-    CurvApprox.DIAGONAL: diag_state_to_scale,
-    CurvApprox.LANCZOS: low_rank_state_to_scale,
-    CurvApprox.LOBPCG: low_rank_state_to_scale,
+    CurvApprox.FULL: full_posterior_state_to_scale,
+    CurvApprox.DIAGONAL: diagonal_posterior_state_to_scale,
+    CurvApprox.LANCZOS: low_rank_posterior_state_to_scale,
+    CurvApprox.LOBPCG: low_rank_posterior_state_to_scale,
 }
 
 CURVATURE_STATE_TO_COV: dict[CurvatureKeyType, Callable] = {
-    CurvApprox.FULL: full_state_to_cov,
-    CurvApprox.DIAGONAL: diag_state_to_cov,
-    CurvApprox.LANCZOS: low_rank_state_to_cov,
-    CurvApprox.LOBPCG: low_rank_state_to_cov,
+    CurvApprox.FULL: full_posterior_state_to_cov,
+    CurvApprox.DIAGONAL: diagonal_posterior_state_to_cov,
+    CurvApprox.LANCZOS: low_rank_posterior_state_to_cov,
+    CurvApprox.LOBPCG: low_rank_posterior_state_to_cov,
 }
 
 
