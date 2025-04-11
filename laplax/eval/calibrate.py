@@ -166,6 +166,7 @@ def optimize_prior_prec(
     log_prior_prec_min: float = -5.0,
     log_prior_prec_max: float = 6.0,
     grid_size: int = 300,
+    **kwargs,
 ) -> Float:
     """Optimize prior precision using logarithmic grid search.
 
@@ -181,6 +182,7 @@ def optimize_prior_prec(
         log_prior_prec_max: The base-10 logarithm of the maximum prior precision
             value (default: 6.0).
         grid_size: The number of points in the grid interval (default: 300).
+        **kwargs: Additional arguments passed to `grid_search`.
 
     Returns:
         The optimized prior precision value.
@@ -193,6 +195,7 @@ def optimize_prior_prec(
     prior_prec = grid_search(
         prior_prec_interval,
         objective,
+        **kwargs,
     )
 
     return prior_prec
