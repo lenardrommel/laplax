@@ -16,7 +16,7 @@ from collections.abc import Callable
 
 import jax.numpy as jnp
 
-from laplax.curv.cov import CURVATURE_PRIOR_METHODS
+from laplax.curv.cov import CURVATURE_PRECISION_METHODS
 from laplax.curv.utils import LowRankTerms, concatenate_model_and_loss_fn
 from laplax.enums import CurvApprox, LossFn
 from laplax.types import (
@@ -50,8 +50,8 @@ def joint_log_likelihood(
     If we assume a Gaussian prior on the parameters with precision :math:`\tau^{-2}`,
     then the log-prior is given by:
     .. math::
-        \log p(\theta \vert \tau^{-2}) = -\frac{1}{2} \log |\frac{1}{2\pi} \tau^{-2}\vert
-        - \frac{1}{2} \tau^{-2} \vert \theta \vert^2
+        \log p(\theta \vert \tau^{-2}) = -\frac{1}{2} \log |\frac{1}{2\pi} \tau^{-2}
+        \vert - \frac{1}{2} \tau^{-2} \vert \theta \vert^2
 
     Args:
         full_fn: model loss function that has the parameters and the data as input and
@@ -72,8 +72,9 @@ def joint_log_likelihood(
     )
     log_prior = log_prior_term1 + log_prior_term2
 
-    # Compute the proportional log-likelihood
-    log_likelihood = -full_fn(
+    # Compute the log-likelihood
+    sigma = prior_arguments.get("sigma", 1.0)
+    log_likelihood = -(1 / (2 * sigma)) * full_fn(
         data["input"],
         data["target"],
         params,
@@ -271,14 +272,14 @@ def marginal_log_likelihood(
         loss_fn: loss function
         curv_type: curvature type
         has_batch: whether the model has a batch dimension
-        **kwargs: additional arguments (unused)
+        loss_scaling_factor: loss scaling factor
 
     Returns:
         The marginal log-likelihood.
     """
     full_fn = concatenate_model_and_loss_fn(model_fn, loss_fn, has_batch=has_batch)
 
-    posterior_precision = CURVATURE_PRIOR_METHODS[curv_type](
+    posterior_precision = CURVATURE_PRECISION_METHODS[curv_type](
         curv_estimate,
         prior_arguments,
         loss_scaling_factor=loss_scaling_factor,
