@@ -211,6 +211,7 @@ def lanczos_lowrank(
         maxiter=rank,
         tol=tol,
         full_reorthogonalize=full_reorthogonalize,
+        dtype=calc_dtype,
         mv_jittable=mv_jittable,
     )
     eigvals, eigvecs = compute_eigendecomposition(alpha, beta, V, compute_vectors=True)
