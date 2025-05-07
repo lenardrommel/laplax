@@ -7,6 +7,7 @@ class LossFn(StrEnum):
     MSE = "mse"
     CROSS_ENTROPY = "cross_entropy"
     BINARY_CROSS_ENTROPY = "binary_cross_entropy"
+    NONE = "none"
 
 
 class CurvApprox(StrEnum):
