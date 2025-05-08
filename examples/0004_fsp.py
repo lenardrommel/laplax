@@ -1,14 +1,16 @@
+import pickle
+
 import jax
 import jax.numpy as jnp
 import optax
+import orbax.checkpoint as ocp
 from flax import nnx
 from helper import DataLoader, get_sinusoid_example
+from matplotlib import pyplot as plt
 from plotting import plot_sinusoid_task  # , plot_gp_prediction
+
 from laplax.curv.cov import Posterior
 from laplax.curv.fsp import create_fsp_objective
-from matplotlib import pyplot as plt
-import pickle
-import orbax.checkpoint as ocp
 
 jax.config.update("jax_enable_x64", True)
 
@@ -206,3 +208,13 @@ def train_model(model, n_epochs, lr=1e-3):
 
     print(f"Final loss: {loss:.4f}")
     return model
+
+
+model = train_model(model, n_epochs=1000)
+
+
+X_pred = jnp.linspace(0.0, 8.0, 200).reshape(200, 1)
+y_pred = jax.vmap(model)(X_pred)
+
+_ = plot_sinusoid_task(X_train, y_train, X_test, y_test, X_pred, y_pred)
+plt.show()
