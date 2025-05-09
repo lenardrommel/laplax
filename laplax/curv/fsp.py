@@ -17,7 +17,7 @@ def create_loss_nll(
 ):
     """Create the NLL loss function for FSP training."""
     def loss_nll(data: Data, params: Params) -> Float:
-        pred = model_fn(params, data["inputs"])
+        pred = model_fn(data["inputs"], params)
         return loss_fn(pred, data["targets"])
 
     return loss_nll
