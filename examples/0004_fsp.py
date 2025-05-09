@@ -1,5 +1,4 @@
-import pickle
-
+# %%
 import jax
 import jax.numpy as jnp
 import optax
@@ -182,6 +181,7 @@ def reg_loss(model_fn, prior_fn, x):
     # return 0.5 * jax.numpy.einsum("ij,ij->", y_pred, left)
     return 0.0
 
+
 def fsp_loss(model_fn, prior_fn, x, y):
     """FSP loss function."""
     # Compute the NLL loss
@@ -204,7 +204,9 @@ def fsp_loss(model_fn, prior_fn, x, y):
 @nnx.jit
 def train_step(model, optimizer, x, y):
     def loss_fn(m):
-        return fsp_loss(m, kernel_fn, x, y) #mse_loss(m, x, y) + reg_loss(m, kernel_fn, x)
+        return fsp_loss(
+            m, kernel_fn, x, y
+        )  # mse_loss(m, x, y) + reg_loss(m, kernel_fn, x)
 
     loss, grads = nnx.value_and_grad(loss_fn)(model)
     optimizer.update(grads)  # Inplace updates
@@ -317,9 +319,22 @@ truncation_idx = jax.lax.cond(
     operand=None,
 )
 cov_sqrt = cov_sqrt[:, :truncation_idx]
-curv_estimate = estimate_curvature(
-    curv_type=curv_type,
-    mv=ggn_mv,
-    layout=params,
-    **curv_args,
+# curv_estimate = estimate_curvature(
+#     curv_type=curv_type,
+#     mv=ggn_mv,
+#     layout=params,
+#     **curv_args,
+# )
+
+# %%
+
+from laplax.curv.cov import Posterior
+from laplax.types import PosteriorState
+
+posterior_state: PosteriorState = {"scale_sqrt": cov_sqrt}
+posterior = Posterior(
+    state=posterior_state,
+    cov_mv=lambda state: lambda x: state["scale_sqrt"] @ state["scale_sqrt"].T @ x,
+    scale_mv=lambda state: lambda x: state["scale_sqrt"] @ x,
 )
+# %%
