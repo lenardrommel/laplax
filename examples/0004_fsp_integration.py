@@ -4,7 +4,7 @@ import optax
 from flax import nnx
 from helper import DataLoader, get_sinusoid_example
 from matplotlib import pyplot as plt
-from plotting import plot_sinusoid_task  # , plot_gp_prediction
+from plotting import plot_sinusoid_task, plot_gp_prediction
 
 from laplax.curv.cov import Posterior
 from laplax.curv.fsp import create_fsp_objective
@@ -40,7 +40,6 @@ X_train, y_train, X_valid, y_valid, X_test, y_test = get_sinusoid_example(
 train_loader = DataLoader(X_train, y_train, batch_size)
 
 
-
 class RBFKernel:
     def __init__(self, lengthscale=2.60):
         self.lengthscale = lengthscale
@@ -55,23 +54,11 @@ class RBFKernel:
         return jnp.exp(-0.5 * sq_dist / self.lengthscale**2)
 
 
-class L2InnerProductKernel:
-    def __init__(self, bias=1e-4):
-        self.bias = bias
-
-    def __call__(self, x1: jax.Array, x2: jax.Array | None = None) -> jax.Array:
-        """Compute L² inner product kernel between x1 and x2."""
-        if x2 is None:
-            x2 = x1
-
-        return jnp.sum(x1 * x2) + self.bias
-
-
 def build_covariance_matrix(kernel, X1, X2):
     return jnp.array([[kernel(x1, x2) for x2 in X2] for x1 in X1])
 
 
-def gp_regression(x_train, y_train, x_test, kernel, noise_variance=1e-2):
+def gp_regression(x_train, y_train, x_test, kernel, noise_variance=1e-1):
     K = build_covariance_matrix(kernel, x_train, x_train)
 
     K_noise = K + noise_variance * jnp.eye(K.shape[0])
@@ -93,6 +80,7 @@ noise_std = 0.3
 noise_variance = noise_std**2
 lengthscale = 8 / jnp.pi
 kernel = RBFKernel(lengthscale=8 / jnp.pi)
+# kernel = L2InnerProductKernel(bias=1e-4)
 
 
 def kernel_fn(x, y=None, noise_variance=noise_variance):
@@ -100,6 +88,23 @@ def kernel_fn(x, y=None, noise_variance=noise_variance):
         y = x
     K = build_covariance_matrix(kernel, x, y)
     return K + noise_variance * jnp.eye(K.shape[0])
+
+
+pred_mean, pred_cov = gp_regression(
+    X_train,
+    y_train,
+    X_test,
+    kernel,
+    noise_variance=0.3,
+)
+
+std_dev = jnp.sqrt(jnp.maximum(jnp.diag(pred_cov), 0))
+
+fig = plot_gp_prediction(
+    X_train, y_train, X_test, pred_mean, std_dev, noise_std=noise_std
+)
+plt.show()
+
 
 class Model(nnx.Module):
     def __init__(
@@ -125,7 +130,7 @@ def model_fn(input, params):
 def mse_loss(model_fn, data):
     N = data["inputs"].shape[0]
     y_pred = model_fn(data["inputs"])
-    se = jnp.sum((y_pred - data['targets']) ** 2)
+    se = jnp.sum((y_pred - data["targets"]) ** 2)
 
     return (
         0.5
@@ -160,8 +165,9 @@ def fsp_loss(model_fn, prior_fn, data):
 #         return loss_fn(y_pred, data["targets"])
 #     return loss
 
-_mse_loss = lambda x, y: jnp.sum((x - y) ** 2)
+_mse_loss = lambda x, y: (0.5 * jnp.sum((x - y) ** 2))
 from laplax.curv.fsp import create_loss_nll, create_loss_reg
+
 mse_loss_fn = create_loss_nll(model_fn, _mse_loss)
 reg_loss_fn = create_loss_reg(model_fn, jnp.zeros((150)), kernel_fn)
 fsp_loss_fn = create_fsp_objective(
@@ -171,11 +177,15 @@ fsp_loss_fn = create_fsp_objective(
     prior_cov_kernel=kernel_fn,
 )
 
+
 @nnx.jit
 def train_step(model, optimizer, x, y):
     def loss_fn(m):
         data = {"inputs": x, "targets": y}
-        return fsp_loss_fn(data, data["inputs"], params)  # mse_loss(m, x, y) + reg_loss(m, kernel_fn, x)
+        return fsp_loss_fn(
+            data, data["inputs"], params
+        )  # mse_loss(m, x, y) + reg_loss(m, kernel_fn, x)
+
     loss, grads = nnx.value_and_grad(loss_fn)(model)
     optimizer.update(grads)  # Inplace updates
 

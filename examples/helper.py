@@ -142,3 +142,86 @@ def get_sinusoid_example(
     y_test = jnp.asarray(jnp.sin(X_test) + noise, dtype=dtype)
 
     return X_train, y_train, X_valid, y_valid, X_test, y_test
+
+
+# =======================================================================================
+# # FSP Laplace approximation
+# =======================================================================================
+class RBFKernel:
+    def __init__(self, lengthscale=2.60):
+        self.lengthscale = lengthscale
+
+    def __call__(self, x, y: jax.Array | None = None) -> jax.Array:
+        """Compute RBF kernel between individual points"""
+        if y is None:
+            y = x
+
+        sq_dist = jnp.sum((x - y) ** 2)
+
+        return jnp.exp(-0.5 * sq_dist / self.lengthscale**2)
+
+
+class L2InnerProductKernel:
+    def __init__(self, bias=1e-4):
+        self.bias = bias
+
+    def __call__(self, x1: jax.Array, x2: jax.Array | None = None) -> jax.Array:
+        """Compute L² inner product kernel between x1 and x2."""
+        if x2 is None:
+            x2 = x1
+
+        return jnp.sum(x1 * x2) + self.bias
+
+
+def build_covariance_matrix(kernel, X1, X2):
+    return jnp.array([[kernel(x1, x2) for x2 in X2] for x1 in X1])
+
+
+def gp_regression(
+    x_train,
+    y_train,
+    x_test,
+    kernel_name="rbf",
+    kernel_params={"lengthscale": 2.60},
+    noise_variance=1e-2,
+):
+    """Gaussian process regression.
+    Args:
+        x_train: Training input data.
+        y_train: Training target data.
+        x_test: Testing input data.
+        kernel_name: Kernel to use for the covariance matrix.
+        noise_variance: Variance of the noise.
+    Returns:
+
+        mu
+        cov_star: Covariance matrix for the test data.
+        kernel_fn: Function to compute the covariance matrix.
+    """  # noqa: D205, D415
+    if kernel_name == "rbf":
+        kernel = RBFKernel(**kernel_params)
+    elif kernel_name == "l2":
+        kernel = L2InnerProductKernel(**kernel_params)
+    else:
+        raise ValueError(f"Unknown kernel: {kernel_name}")
+
+    K = build_covariance_matrix(kernel, x_train, x_train)
+
+    K_noise = K + noise_variance * jnp.eye(K.shape[0])
+
+    alpha = jnp.linalg.solve(K_noise, y_train)
+
+    K_star = build_covariance_matrix(kernel, x_test, x_train)
+
+    mu_star = K_star @ alpha
+
+    K_ss = build_covariance_matrix(kernel, x_test, x_test)
+    v = jnp.linalg.solve(K_noise, K_star.T)
+    cov_star = K_ss - K_star @ v
+
+    return (
+        jnp.array(mu_star),
+        jnp.array(cov_star),
+        lambda x, y, sigma=1e-4: build_covariance_matrix(kernel, x, y)
+        + sigma * jnp.eye(x.shape[0]),
+    )

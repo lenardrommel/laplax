@@ -427,3 +427,61 @@ def print_results(results_dict, title=None):
                 print(f"{key!s:<{max_key_length}} : {value.item():.6f}")  # noqa: T201
             except Exception as _:  # noqa: BLE001
                 print(f"{key!s:<{max_key_length}} : {value}")  # noqa: T201
+
+
+def plot_gp_prediction(
+    X_train: jax.Array,
+    y_train: jax.Array,
+    X_test: jax.Array,
+    pred_mean: np.ndarray,
+    std_dev: np.ndarray,
+    noise_std: float = 0.0,
+) -> plt.Figure:
+    """
+    Plot GP predictive mean and uncertainty, plus training data (with optional noise bars).
+
+    Args:
+        X_train:      shape (N_train, 1)
+        y_train:      shape (N_train,) or (N_train,1)
+        X_test:       shape (N_test, 1)
+        pred_mean:    shape (N_test,) or (N_test,1)
+        std_dev:      shape (N_test,) or (N_test,1)
+        noise_std:    observation noise std dev (to draw error bars on train data)
+    Returns:
+        matplotlib Figure
+    """
+    # flatten everything
+    x_tr = jnp.ravel(X_train)
+    y_tr = jnp.ravel(y_train)
+    x_te = jnp.ravel(X_test)
+    mu = np.ravel(pred_mean)
+    sd = np.ravel(std_dev)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    # Training points
+    ax.plot(x_tr, y_tr, "ro", label="Training data")
+    if noise_std > 0:
+        ax.errorbar(
+            x_tr,
+            y_tr,
+            yerr=noise_std,
+            fmt="none",
+            ecolor="gray",
+            alpha=0.5,
+            label="Noise σ",
+        )
+
+    # GP mean
+    ax.plot(x_te, mu, "b--", label="GP mean")
+
+    # Confidence interval
+    ax.fill_between(x_te, mu - 2 * sd, mu + 2 * sd, alpha=0.2, label="95% CI")
+
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_title("GP Prediction")
+    ax.legend()
+    ax.grid(True)
+    plt.tight_layout()
+    return fig

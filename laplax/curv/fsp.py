@@ -16,8 +16,10 @@ def create_loss_nll(
     loss_fn: LossFn,
 ):
     """Create the NLL loss function for FSP training."""
+
     def loss_nll(data: Data, params: Params) -> Float:
         pred = model_fn(data["inputs"], params)
+        N = data["inputs"].shape[0]
         return loss_fn(pred, data["targets"])
 
     return loss_nll
@@ -46,6 +48,8 @@ def create_fsp_objective(
     loss_fn: LossFn,
     prior_mean: PredArray,
     prior_cov_kernel: Callable[[PredArray, PredArray], Float],
+    num_training_samples: int = 150,
+    batch_size: int = 20,
 ):
     # Create loss functions
     loss_nll = create_loss_nll(model_fn, loss_fn)
@@ -53,7 +57,9 @@ def create_fsp_objective(
 
     # Create objective
     def fsp_objective(data: Data, context_points: PredArray, params: Params) -> Float:
-        return loss_nll(data, params) + 0 * loss_reg(context_points, params)
+        return num_training_samples / batch_size * loss_nll(data, params) + loss_reg(
+            context_points, params
+        )
 
     return fsp_objective
 
@@ -61,6 +67,7 @@ def create_fsp_objective(
 # --------------------------------------------------------------------------------------
 # FSP Laplace approximation
 # --------------------------------------------------------------------------------------
+
 
 def lanczos_jacobian_initialization(
     model_fn: ModelFn,
@@ -120,17 +127,13 @@ def fsp_laplace(
 
     # Compute
     model_vjp = jax.vmap(
-        lambda x, v: jax.vjp(
-            lambda w: model_fn(x, w), params
-        )[1](v),
+        lambda x, v: jax.vjp(lambda w: model_fn(x, w), params)[1](v),
         in_axes=(0, 0),
         out_axes=0,
     )(context_points, L)
     S = S
     # Posterior state
-    posterior_state: PosteriorState = {
-        "scale_sqrt": S
-    }
+    posterior_state: PosteriorState = {"scale_sqrt": S}
 
     posterior = Posterior(
         state=posterior_state,
@@ -143,4 +146,6 @@ def fsp_laplace(
         return posterior
 
     return posterior_fn
+
+
 # lambda prior_args: posteiror_fn(prior_args)
