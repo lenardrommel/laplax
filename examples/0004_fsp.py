@@ -11,6 +11,10 @@ from plotting import plot_sinusoid_task  # , plot_gp_prediction
 
 from laplax.curv.cov import Posterior
 from laplax.curv.fsp import create_fsp_objective
+from laplax.curv.lanczos_isqrt import lanczos_isqrt
+from jax.flatten_util import ravel_pytree
+
+from laplax.util.flatten import create_partial_pytree_flattener
 
 jax.config.update("jax_enable_x64", True)
 
@@ -210,11 +214,90 @@ def train_model(model, n_epochs, lr=1e-3):
     return model
 
 
-model = train_model(model, n_epochs=1000)
+model = train_model(model, n_epochs=10)
 
 
 X_pred = jnp.linspace(0.0, 8.0, 200).reshape(200, 1)
 y_pred = jax.vmap(model)(X_pred)
 
 _ = plot_sinusoid_task(X_train, y_train, X_test, y_test, X_pred, y_pred)
-plt.show()
+# plt.show()
+
+v = jnp.ones_like(X_train.squeeze(-1))
+L = lanczos_isqrt(kernel_fn(X_train, X_train), v)
+# M = J(X_train, X_train)^T @ kernel_matrix
+# compute vjp of model and L
+graph, params = nnx.split(model)
+print(L.shape)  # 150, rank
+print(f"Number of params: {sum(p.size for p in jax.tree.leaves(params))}")  # 193
+
+
+def f_params(params):
+    y = model_fn(X_train, params)
+    return jnp.reshape(y, (150,))
+
+
+_, pullback = jax.vjp(f_params, params)
+param_vjp_tree = jax.vmap(lambda seed: pullback(seed)[0], in_axes=1, out_axes=1)(L)
+flat_M, unravel_fn = ravel_pytree(param_vjp_tree)
+M = flat_M.reshape((-1, 7))
+flatten, unflatten = create_partial_pytree_flattener(flat_M)
+print(M.shape)
+_u, _s, _ = jnp.linalg.svd(M, full_matrices=False)
+tol = jnp.finfo(M.dtype).eps ** 2
+s = _s[_s > tol]  # (80,)
+_u = _u[:, : s.size]  # (p, rank) (161, 80)  # shape: (P, C_2)
+u = flatten(_u)
+
+flat_params, unravel_params = ravel_pytree(params)
+
+f_params_flat = lambda p: model_fn(X_train, p)
+ju = jnp.transpose(
+    jax.vmap(
+        lambda u_flat: jax.jvp(f_params_flat, (params,), (unravel_params(u_flat),))[1],
+        in_axes=1,
+    )(_u),
+    (1, 0, 2),
+)
+ju = ju.squeeze(-1)
+ggn_matrix = jnp.einsum("ji,jk->ik", ju, ju)
+eigvals, eigvecs = jnp.linalg.eigh(jnp.diag(s**2) + ggn_matrix)
+eigvals = jnp.flip(eigvals, axis=0)
+eigvecs = jnp.flip(eigvecs, axis=1)
+
+
+cov_sqrt = _u @ (eigvecs[:, ::-1] / jnp.sqrt(eigvals[::-1]))
+_, unravel_fn = jax.flatten_util.ravel_pytree(params)
+
+
+def jvp(x, v):
+    return jax.jvp(lambda p: model_fn(x, p), (params,), (v,))[1]
+
+
+def scan_fn(carry, i):
+    running_sum, truncation_idx = carry
+    lr_fac = unravel_fn(cov_sqrt[:, i])
+    sqrt_jvp = jax.vmap(lambda xc: jvp(xc, lr_fac) ** 2)(X_train)
+    pv = jnp.sum(sqrt_jvp)
+    new_running_sum = running_sum + pv
+    new_truncation_idx = jax.lax.cond(
+        (new_running_sum >= 150) & (truncation_idx == -1),
+        lambda _: i + 1,  # We found our index
+        lambda _: truncation_idx,  # Keep current value
+        operand=None,
+    )
+
+    return (new_running_sum, new_truncation_idx), sqrt_jvp
+
+
+init_carry = (0.0, -1)
+indices = jnp.arange(eigvals.shape[0])
+(_, truncation_idx), post_var = jax.lax.scan(scan_fn, init_carry, indices)
+
+truncation_idx = jax.lax.cond(
+    truncation_idx == -1,
+    lambda _: eigvals.shape[0],
+    lambda _: truncation_idx,
+    operand=None,
+)
+cov_sqrt = cov_sqrt[:, :truncation_idx]

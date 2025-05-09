@@ -31,7 +31,7 @@ def lanczos_isqrt(
         p = jax.lax.cond(k > 0, true_fn, false_fn, p)
 
         # Compute modified Lanzcos vector
-        w = A(p)
+        w = A @ p  # A(p)
         eta = p @ w
         ds = ds.at[:, k].set(p / jnp.sqrt(eta))
 
@@ -100,32 +100,28 @@ def test_lanczos_compute_efficient():
     b = jnp.ones(n) / np.sqrt(n)  # Normalized vector
 
     # Run the Lanczos algorithm
-    ds = lanczos_compute_efficient(
-        linear_op,
-        b,
-        tol=1e-8,
-        max_iter=100
-    )
-    
+    ds = lanczos_compute_efficient(linear_op, b, tol=1e-8, max_iter=100)
+
     print(f"Lanczos vectors shape: {ds.shape}")
-    
+
     # Verify orthogonality of Lanczos vectors
     D = ds.T @ ds
     print("Orthogonality check (should be close to identity):")
     print(np.round(D, 5))
-    
+
     # Verify the tridiagonal matrix T = D.T @ A @ D
     T = ds.T @ (A_jax @ ds)
     print("Tridiagonal matrix T:")
     print(np.round(T, 5))
-    
+
     # Optional: Compare with a direct eigendecomposition
     eigvals_lanczos = np.linalg.eigvalsh(T)
-    eigvals_direct = np.linalg.eigvalsh(A_np)[:ds.shape[1]]
+    eigvals_direct = np.linalg.eigvalsh(A_np)[: ds.shape[1]]
     print("Eigenvalues from L anczos:")
     print(np.sort(eigvals_lanczos))
     print("Smallest eigenvalues from direct computation:")
-    print(np.sort(eigvals_direct)[:ds.shape[1]])
+    print(np.sort(eigvals_direct)[: ds.shape[1]])
+
 
 if __name__ == "__main__":
     test_lanczos_compute_efficient()
