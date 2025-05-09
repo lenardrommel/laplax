@@ -135,9 +135,11 @@ def kernel_fn(x, y=None, noise_variance=noise_variance):
 
 # Create and train MAP model
 class Model(nnx.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, rngs):
-        self.linear1 = nnx.Linear(in_channels, hidden_channels, rngs=rngs)
-        self.linear2 = nnx.Linear(hidden_channels, out_channels, rngs=rngs)
+    def __init__(
+        self, in_channels, hidden_channels, out_channels, rngs, dtype=jnp.float64
+    ):
+        self.linear1 = nnx.Linear(in_channels, hidden_channels, rngs=rngs, dtype=dtype)
+        self.linear2 = nnx.Linear(hidden_channels, out_channels, rngs=rngs, dtype=dtype)
 
     def __call__(self, x):
         x = self.linear2(nnx.tanh(self.linear1(x)))
@@ -250,7 +252,7 @@ _u = _u[:, : s.size]  # (p, rank) (161, 80)  # shape: (P, C_2)
 u = flatten(_u)
 
 flat_params, unravel_params = ravel_pytree(params)
-
+flat_params = flat_params.astype(jnp.float64)
 f_params_flat = lambda p: model_fn(X_train, p)
 ju = jnp.transpose(
     jax.vmap(
@@ -268,6 +270,8 @@ eigvecs = jnp.flip(eigvecs, axis=1)
 
 cov_sqrt = _u @ (eigvecs[:, ::-1] / jnp.sqrt(eigvals[::-1]))
 _, unravel_fn = jax.flatten_util.ravel_pytree(params)
+
+params = jax.tree.map(lambda x: x.astype(jnp.float64), params)
 
 
 def jvp(x, v):
