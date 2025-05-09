@@ -1,4 +1,5 @@
 import jax
+import jax.flatten_util
 import jax.numpy as jnp
 
 from laplax.curv.lanczos_isqrt import lanczos_isqrt
@@ -37,8 +38,8 @@ def create_loss_reg(
         """
         f_c = jax.vmap(model_fn, in_axes=(0, None))(context_points, params)
         K_c_c = prior_cov_kernel(context_points, context_points)
-        left = jax.numpy.linalg.solve(K_c_c, f_c - prior_mean)
-        return 0.5 * jax.numpy.einsum("ij,ij->", f_c - prior_mean, left)
+        left = jax.numpy.linalg.solve(K_c_c, f_c)
+        return 0.5 * jax.numpy.einsum("ij,ij->", f_c, left)
 
     return loss_reg
 
@@ -73,30 +74,67 @@ def lanczos_jacobian_initialization(
     model_fn: ModelFn,
     params: Params,
     data: Data,
+    has_batch_dim: bool = True,
     *,
     lanczos_initialization_batch_size: int = 32,
 ):
     # Define model Jacobian vector product
-    model_jvp = jax.vmap(
-        lambda x: jax.jvp(
-            lambda w: model_fn(x, params=w),
+    if has_batch_dim:
+        model_jvp = jax.vmap(
+            lambda x: jax.jvp(
+                lambda w: model_fn(x, params=w),
+                (params,),
+                (tree.ones_like(params),),
+            )[1],
+            in_axes=0,
+            out_axes=0,
+        )
+
+        initial_vec = jax.lax.map(
+            model_jvp,
+            data["inputs"],
+            batch_size=lanczos_initialization_batch_size,
+        ).reshape(-1)
+    else:
+        initial_vec = jax.jvp(
+            lambda w: model_fn(data["inputs"], params=w),
             (params,),
             (tree.ones_like(params),),
-        )[1],
-        in_axes=0,
-        out_axes=0,
-    )
-
-    initial_vec = jax.lax.map(
-        model_jvp,
-        data["inputs"],
-        batch_size=lanczos_initialization_batch_size,
-    ).reshape(-1)
+        )[1]
 
     # Normalize
     initial_vec = initial_vec / jnp.linalg.norm(initial_vec, 2)
 
-    return initial_vec
+    return initial_vec.squeeze(-1)
+
+
+def compute_matrix_jacobian_product(
+    model_fn: ModelFn,
+    params: Params,
+    data: Data,
+    matrix: PredArray,
+    has_batch_dim: bool = True,
+):
+    """Compute the matrix Jacobian product."""
+    if has_batch_dim:
+        raise NotImplementedError(
+            "Batch dimension not implemented for matrix Jacobian product."
+        )
+
+    M_tree = jax.vmap(
+        jax.vjp(
+            lambda p: jnp.reshape(
+                model_fn(data["inputs"], params=p), (matrix.shape[0],)
+            ),
+            params,
+        )[1],
+        in_axes=1,  # 0
+        out_axes=1,  # 0
+    )(matrix)
+
+    return jax.flatten_util.ravel_pytree(
+        M_tree,
+    )
 
 
 def fsp_laplace(

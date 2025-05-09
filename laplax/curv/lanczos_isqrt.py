@@ -31,7 +31,7 @@ def lanczos_isqrt(
         p = jax.lax.cond(k > 0, true_fn, false_fn, p)
 
         # Compute modified Lanzcos vector
-        w = A @ p  # A(p)
+        w = A @ p  # A(p) or A @ p
         eta = p @ w
         ds = ds.at[:, k].set(p / jnp.sqrt(eta))
 

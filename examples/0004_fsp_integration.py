@@ -14,7 +14,22 @@ from jax.flatten_util import ravel_pytree
 from laplax.util.flatten import create_partial_pytree_flattener
 import laplax
 from laplax.curv import estimate_curvature
-from laplax.curv.fsp import create_fsp_objective
+from laplax.curv.fsp import (
+    compute_matrix_jacobian_product,
+    create_fsp_objective,
+    lanczos_jacobian_initialization,
+)
+from laplax.curv.lanczos_isqrt import lanczos_isqrt
+from helper import (
+    DataLoader,
+    get_sinusoid_example,
+    gp_regression,
+    RBFKernel,
+    build_covariance_matrix,
+)
+
+from laplax.enums import LossFn
+from laplax.types import Callable, Data, Float, ModelFn, Params, PredArray
 
 jax.config.update("jax_enable_x64", True)
 
@@ -40,78 +55,14 @@ X_train, y_train, X_valid, y_valid, X_test, y_test = get_sinusoid_example(
 train_loader = DataLoader(X_train, y_train, batch_size)
 
 
-class RBFKernel:
-    def __init__(self, lengthscale=2.60):
-        self.lengthscale = lengthscale
-
-    def __call__(self, x, y: jax.Array | None = None) -> jax.Array:
-        """Compute RBF kernel between individual points"""
-        if y is None:
-            y = x
-
-        sq_dist = jnp.sum((x - y) ** 2)
-
-        return jnp.exp(-0.5 * sq_dist / self.lengthscale**2)
+from laplax.curv.fsp import create_fsp_objective
 
 
-def build_covariance_matrix(kernel, X1, X2):
-    return jnp.array([[kernel(x1, x2) for x2 in X2] for x1 in X1])
-
-
-def gp_regression(x_train, y_train, x_test, kernel, noise_variance=1e-1):
-    K = build_covariance_matrix(kernel, x_train, x_train)
-
-    K_noise = K + noise_variance * jnp.eye(K.shape[0])
-
-    alpha = jnp.linalg.solve(K_noise, y_train)
-
-    K_star = build_covariance_matrix(kernel, x_test, x_train)
-
-    mu_star = K_star @ alpha
-
-    K_ss = build_covariance_matrix(kernel, x_test, x_test)
-    v = jnp.linalg.solve(K_noise, K_star.T)
-    cov_star = K_ss - K_star @ v
-
-    return jnp.array(mu_star), jnp.array(cov_star)
-
-
-noise_std = 0.3
-noise_variance = noise_std**2
-lengthscale = 8 / jnp.pi
-kernel = RBFKernel(lengthscale=8 / jnp.pi)
-# kernel = L2InnerProductKernel(bias=1e-4)
-
-
-def kernel_fn(x, y=None, noise_variance=noise_variance):
-    if y is None:
-        y = x
-    K = build_covariance_matrix(kernel, x, y)
-    return K + noise_variance * jnp.eye(K.shape[0])
-
-
-pred_mean, pred_cov = gp_regression(
-    X_train,
-    y_train,
-    X_test,
-    kernel,
-    noise_variance=0.3,
-)
-
-std_dev = jnp.sqrt(jnp.maximum(jnp.diag(pred_cov), 0))
-
-fig = plot_gp_prediction(
-    X_train, y_train, X_test, pred_mean, std_dev, noise_std=noise_std
-)
-plt.show()
-
-
+# Create and train MAP model
 class Model(nnx.Module):
-    def __init__(
-        self, in_channels, hidden_channels, out_channels, rngs, dtype=jnp.float64
-    ):
-        self.linear1 = nnx.Linear(in_channels, hidden_channels, rngs=rngs, dtype=dtype)
-        self.linear2 = nnx.Linear(hidden_channels, out_channels, rngs=rngs, dtype=dtype)
+    def __init__(self, in_channels, hidden_channels, out_channels, rngs):
+        self.linear1 = nnx.Linear(in_channels, hidden_channels, rngs=rngs)
+        self.linear2 = nnx.Linear(hidden_channels, out_channels, rngs=rngs)
 
     def __call__(self, x):
         x = self.linear2(nnx.tanh(self.linear1(x)))
@@ -119,7 +70,6 @@ class Model(nnx.Module):
 
 
 model = Model(in_channels=1, hidden_channels=64, out_channels=1, rngs=nnx.Rngs(0))
-
 graph_def, params = nnx.split(model)
 
 
@@ -127,52 +77,18 @@ def model_fn(input, params):
     return nnx.call((graph_def, params))(input)[0]
 
 
-def mse_loss(model_fn, data):
-    N = data["inputs"].shape[0]
-    y_pred = model_fn(data["inputs"])
-    se = jnp.sum((y_pred - data["targets"]) ** 2)
-
-    return (
-        0.5
-        * N
-        / batch_size
-        * (se / noise_variance + N * jnp.log(2 * jnp.pi * noise_variance))
-    )
+def mse_loss(x, y):
+    return 0.5 * jnp.sum((x - y) ** 2)
 
 
-def reg_loss(model_fn, prior_fn, x):
-    y_pred = model_fn(x)
-    prior = prior_fn(x)
-    left = jnp.linalg.solve(prior, y_pred)
-    # return 0.5 * jax.numpy.einsum("ij,ij->", y_pred, left)
-    return 0.0
+kernel = RBFKernel(lengthscale=2.6)
+kernel_fn = lambda x, y, sigma=1e-4: build_covariance_matrix(
+    kernel, x, y
+) + sigma * jnp.eye(x.shape[0])
 
-
-def fsp_loss(model_fn, prior_fn, data):
-    """FSP loss function."""
-    # Compute the NLL loss
-    nll_loss = mse_loss(model_fn, data)
-
-    # Compute the regularization loss
-    reg_loss_value = reg_loss(model_fn, prior_fn, data["inputs"])
-
-    return nll_loss + reg_loss_value
-
-
-# def create_loss_mse(model_fn, loss_fn):
-#     def loss(data, params):
-#         y_pred = model_fn(data["inputs"], params)
-#         return loss_fn(y_pred, data["targets"])
-#     return loss
-
-_mse_loss = lambda x, y: (0.5 * jnp.sum((x - y) ** 2))
-from laplax.curv.fsp import create_loss_nll, create_loss_reg
-
-mse_loss_fn = create_loss_nll(model_fn, _mse_loss)
-reg_loss_fn = create_loss_reg(model_fn, jnp.zeros((150)), kernel_fn)
 fsp_loss_fn = create_fsp_objective(
     model_fn,
-    loss_fn=_mse_loss,
+    loss_fn=mse_loss,
     prior_mean=jnp.zeros((150)),
     prior_cov_kernel=kernel_fn,
 )
@@ -209,3 +125,41 @@ def train_model(model, n_epochs, lr=1e-3):
 
 
 model = train_model(model, n_epochs=10)
+data = {"inputs": X_train, "targets": y_train}
+
+
+def fsp_laplace(
+    model_fn,
+    params,
+    data,
+    prior_mean,
+    prior_cov_kernel,
+    context_points,
+    **kwargs,
+):
+    # Initial vector
+    v = lanczos_jacobian_initialization(model_fn, params, data, **kwargs)
+    # Define cov operator
+    op = prior_cov_kernel(context_points, context_points)
+    op = op if isinstance(op, Callable) else lambda x: op @ x
+
+    L = lanczos_isqrt(kernel_fn(X_train, X_train), v)
+
+    M = compute_matrix_jacobian_product(
+        model_fn,
+        params,
+        data,
+        L,
+        has_batch_dim=False,
+    )
+
+
+fsp_laplace(
+    model_fn,
+    params,
+    data,
+    prior_mean=jnp.zeros((150)),
+    prior_cov_kernel=kernel_fn,
+    context_points=X_train,
+    has_batch_dim=False,
+)
