@@ -53,7 +53,7 @@ def create_fsp_objective(
 
     # Create objective
     def fsp_objective(data: Data, context_points: PredArray, params: Params) -> Float:
-        return loss_nll(data, params) + loss_reg(context_points, params)
+        return loss_nll(data, params) + 0 * loss_reg(context_points, params)
 
     return fsp_objective
 
