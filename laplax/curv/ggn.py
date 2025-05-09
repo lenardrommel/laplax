@@ -230,10 +230,20 @@ def create_fsp_ggn_mv(
     has_batch: bool = True,
     loss_hessian_mv: Callable[[PredArray, PredArray], Num[Array, "..."]] | None = None,
 ) -> Callable[[Params, Data], Params]:
-    r"""Create Generalized Gauss-Newton (GGN) matrix-vector product for FSP.
+    r"""Implements the FSP-Laplace equation (3.8) from the paper:
 
-    The GGN matrix is computed using the Jacobian of
-    """
+    Λ = Σ† w⋆ − Σ_{i=1}^n Jw⋆(x(i))⊤ L(i) w⋆ Jw⋆(x(i)).
+
+    Where:
+    - Λ is the FSP-Laplace matrix,
+    - Σ† is the pseudo-inverse of the covariance matrix Σ,
+    - w⋆ represents the optimal weights,
+    - Jw⋆(x(i)) is the Jacobian of the model with respect to the weights at input x(i),
+    - L(i) w⋆ is the loss Hessian at the optimal weights for the i-th data point.
+
+    This equation describes the FSP-Laplace approximation for the Generalized Gauss-Newton
+    matrix in the context of Bayesian deep learning.
+    """  # noqa: D415
     pass
 
 
