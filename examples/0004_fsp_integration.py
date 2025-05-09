@@ -154,13 +154,21 @@ def fsp_loss(model_fn, prior_fn, data):
     return nll_loss + reg_loss_value
 
 
-rfsp = create_fsp_objective(model_fn, mse_loss, None, kernel_fn)
+# def create_loss_mse(model_fn, loss_fn):
+#     def loss(data, params):
+#         y_pred = model_fn(data["inputs"], params)
+#         return loss_fn(y_pred, data["targets"])
+#     return loss
+
+_mse_loss = lambda x, y: jnp.sum((x - y) ** 2)
+from laplax.curv.fsp import create_loss_nll
+mse_loss_fn = create_loss_nll(model_fn, _mse_loss)
 
 @nnx.jit
 def train_step(model, optimizer, x, y):
     def loss_fn(m):
         data = {"inputs": x, "targets": y}
-        return fsp_loss(m, kernel_fn, data)
+        return mse_loss_fn(data, params)#fsp_loss(m, kernel_fn, data)
 
     loss, grads = nnx.value_and_grad(loss_fn)(model)
     optimizer.update(grads)  # Inplace updates
