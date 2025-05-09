@@ -253,8 +253,11 @@ def f_params(params):
     return jnp.reshape(y, (150,))
 
 
+from laplax.util.flatten import create_partial_pytree_flattener
+
 _, pullback = jax.vjp(f_params, params)
 param_vjp_tree = jax.vmap(lambda seed: pullback(seed)[0], in_axes=1, out_axes=1)(L)
+
 flat_M, unravel_fn = ravel_pytree(param_vjp_tree)
 M = flat_M.reshape((-1, 7))
 flatten, unflatten = create_partial_pytree_flattener(flat_M)
@@ -286,6 +289,43 @@ cov_sqrt = _u @ (eigvecs[:, ::-1] / jnp.sqrt(eigvals[::-1]))
 _, unravel_fn = jax.flatten_util.ravel_pytree(params)
 
 params = jax.tree.map(lambda x: x.astype(jnp.float64), params)
+
+from laplax.enums import LossFn
+from laplax.curv.fsp import create_ggn_mv_without_data
+from laplax.curv.ggn import create_ggn_mv_without_data
+
+alpha = 1.0
+
+
+def identity_hessian_mv(jv, pred=None, target=None, **kwargs):
+    return jv
+
+
+data = {"input": X_train, "target": y_train}
+ggn_mv = create_ggn_mv_without_data(
+    model_fn=model_fn,
+    params=params,
+    loss_fn=LossFn.NONE,
+    factor=alpha,
+    has_batch=True,  # or False if your model_fn expects no batch dim
+    loss_hessian_mv=identity_hessian_mv,
+)
+
+
+v0 = jax.tree.map(jnp.ones_like, params)
+out = ggn_mv(v0, data)
+dim = flat_params.shape[0]
+I = jnp.eye(dim)
+
+
+def flat_ggn(vec_flat):
+    v = unravel(vec_flat)
+    gz = ggn_mv(v, data)
+    gz_flat, _ = ravel_pytree(gz)
+    return gz_flat
+
+
+ggn_matrix = jax.vmap(flat_ggn)(I)
 
 
 def jvp(x, v):

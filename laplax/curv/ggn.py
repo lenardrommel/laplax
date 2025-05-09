@@ -130,9 +130,11 @@ def create_loss_hessian_mv(
         return _mse_hessian_mv
 
     if loss_fn == LossFn.NONE:
+
         def _identity(jv, pred, target, **kwargs):
             del pred, target, kwargs
             return jv
+
         return _identity
 
     if isinstance(loss_fn, Callable):
@@ -217,6 +219,22 @@ def create_ggn_mv_without_data(
         return mul(factor, arr)
 
     return ggn_mv
+
+
+def create_fsp_ggn_mv(
+    model_fn: ModelFn,
+    params: Params,
+    loss_fn: LossFn | str | Callable,
+    factor: Float,
+    *,
+    has_batch: bool = True,
+    loss_hessian_mv: Callable[[PredArray, PredArray], Num[Array, "..."]] | None = None,
+) -> Callable[[Params, Data], Params]:
+    r"""Create Generalized Gauss-Newton (GGN) matrix-vector product for FSP.
+
+    The GGN matrix is computed using the Jacobian of
+    """
+    pass
 
 
 def create_ggn_mv(

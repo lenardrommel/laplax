@@ -145,13 +145,22 @@ def fsp_laplace(
 
     L = lanczos_isqrt(kernel_fn(X_train, X_train), v)
 
-    M = compute_matrix_jacobian_product(
+    M, unravel_fn = compute_matrix_jacobian_product(
         model_fn,
         params,
         data,
         L,
         has_batch_dim=False,
     )
+
+    M = M.reshape((-1, L.shape[-1]))
+
+    _u, _s, _ = jnp.linalg.svd(M, full_matrices=False)
+    tol = jnp.finfo(M.dtype).eps ** 2
+    s = _s[_s > tol]  # (80,)
+    _u = _u[:, : s.size]
+
+    flat_params, unravel_params = ravel_pytree(params)
 
 
 fsp_laplace(

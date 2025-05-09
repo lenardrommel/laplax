@@ -2,6 +2,7 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 
+import laplax
 from laplax.curv.lanczos_isqrt import lanczos_isqrt
 from laplax.enums import LossFn
 from laplax.types import Callable, Data, Float, ModelFn, Params, PredArray
@@ -117,6 +118,8 @@ def compute_matrix_jacobian_product(
 ):
     """Compute the matrix Jacobian product."""
     if has_batch_dim:
+        flatten, unflatten = laplax.util.create_partial_pytree_flattener(params)
+
         raise NotImplementedError(
             "Batch dimension not implemented for matrix Jacobian product."
         )
@@ -132,9 +135,10 @@ def compute_matrix_jacobian_product(
         out_axes=1,  # 0
     )(matrix)
 
-    return jax.flatten_util.ravel_pytree(
+    M, unravel_fn = jax.flatten_util.ravel_pytree(
         M_tree,
     )
+    return M, unravel_fn
 
 
 def fsp_laplace(
