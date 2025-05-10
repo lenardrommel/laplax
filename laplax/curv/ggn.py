@@ -3,6 +3,7 @@
 from collections.abc import Callable
 
 import jax
+from jax import numpy as jnp
 
 from laplax.curv.hessian import hvp
 from laplax.enums import LossFn
@@ -224,8 +225,9 @@ def create_ggn_mv_without_data(
 def create_fsp_ggn_mv(
     model_fn: ModelFn,
     params: Params,
+    data: Data,
     loss_fn: LossFn | str | Callable,
-    factor: Float,
+    L: PredArray,
     *,
     has_batch: bool = True,
     loss_hessian_mv: Callable[[PredArray, PredArray], Num[Array, "..."]] | None = None,
@@ -244,7 +246,22 @@ def create_fsp_ggn_mv(
     This equation describes the FSP-Laplace approximation for the Generalized Gauss-Newton
     matrix in the context of Bayesian deep learning.
     """  # noqa: D415
-    pass
+    if has_batch:
+        msg = (
+            "FSP GGN MV is not implemented for batched data. "
+            "Please set has_batch=False."
+        )
+        raise NotImplementedError(msg)
+    return jax.vmap(
+        lambda seed: jax.vjp(
+            lambda p: jnp.reshape(
+                model_fn(data["input"], p), (data["input"].shape[0],)
+            ),
+            params,
+        )[1](seed)[0],
+        in_axes=1,
+        out_axes=1,
+    )(L)
 
 
 def create_ggn_mv(
