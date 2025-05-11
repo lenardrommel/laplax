@@ -229,7 +229,7 @@ def create_fsp_ggn_mv(
     loss_fn: LossFn | str | Callable,
     L: PredArray,
     *,
-    has_batch: bool = True,
+    has_batch: bool = False,
     loss_hessian_mv: Callable[[PredArray, PredArray], Num[Array, "..."]] | None = None,
 ) -> Callable[[Params, Data], Params]:
     r"""Implements the FSP-Laplace equation (3.8) from the paper:
@@ -255,7 +255,7 @@ def create_fsp_ggn_mv(
     return jax.vmap(
         lambda seed: jax.vjp(
             lambda p: jnp.reshape(
-                model_fn(data["input"], p), (data["input"].shape[0],)
+                model_fn(data["inputs"], p), (data["inputs"].shape[0],)
             ),
             params,
         )[1](seed)[0],

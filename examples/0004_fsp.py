@@ -279,8 +279,8 @@ ju = jnp.transpose(
     (1, 0, 2),
 )
 ju = ju.squeeze(-1)
-ggn_matrix = jnp.einsum("ji,jk->ik", ju, ju)
-eigvals, eigvecs = jnp.linalg.eigh(jnp.diag(s**2) + ggn_matrix)
+ggn_matrix = jnp.diag(s**2) + jnp.einsum("ji,jk->ik", ju, ju)
+eigvals, eigvecs = jnp.linalg.eigh(ggn_matrix)
 eigvals = jnp.flip(eigvals, axis=0)
 eigvecs = jnp.flip(eigvecs, axis=1)
 

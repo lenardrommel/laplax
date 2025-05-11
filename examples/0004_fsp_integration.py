@@ -128,6 +128,47 @@ model = train_model(model, n_epochs=10)
 data = {"inputs": X_train, "targets": y_train}
 
 
+def create_fsp_ggn_mv(
+    model_fn,
+    params,
+    M,
+    has_batch,
+    loss_hessian_mv=None,
+):
+    flat_params, unravel_fn = ravel_pytree(params)
+
+    _u, _s, _ = jnp.linalg.svd(M, full_matrices=False)
+    tol = jnp.finfo(M.dtype).eps ** 2
+    s = _s[_s > tol]  # (80,)
+    u = _u[:, : s.size]
+
+    def jac_mv(model_fn, params, x):
+        return jax.vmap(
+            lambda u_flat: jax.jvp(
+                lambda p: model_fn(x, p), (params,), (unravel_fn(u_flat),)
+            )[1],  # noqa: E501
+            in_axes=1,
+        )(u)
+
+    if has_batch:
+        msg = (
+            "FSP GGN MV is not implemented for batched data. "
+            "Please set has_batch=False."
+        )
+        raise NotImplementedError(msg)
+
+    def ggn_mv(data):
+        ju = jac_mv(
+            model_fn,
+            params,
+            data["inputs"],
+        )
+        ju = jnp.transpose(ju, (1, 0, 2)).squeeze(-1)
+        return jnp.diag(s**2) + jnp.einsum("ji,jk->ik", ju, ju)
+
+    return ggn_mv
+
+
 def fsp_laplace(
     model_fn,
     params,
@@ -160,7 +201,10 @@ def fsp_laplace(
     s = _s[_s > tol]  # (80,)
     _u = _u[:, : s.size]
 
-    flat_params, unravel_params = ravel_pytree(params)
+    ggn_matrix = create_fsp_ggn_mv(model_fn, params, M, False)(data)
+    eigvals, eigvecs = jnp.linalg.eigh(ggn_matrix)
+    eigvals = jnp.flip(eigvals, axis=0)
+    eigvecs = jnp.flip(eigvecs, axis=1)
 
 
 fsp_laplace(
