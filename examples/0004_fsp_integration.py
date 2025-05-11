@@ -169,6 +169,10 @@ def create_fsp_ggn_mv(
     return ggn_mv
 
 
+def compute_curvature():
+    pass
+
+
 def fsp_laplace(
     model_fn,
     params,
@@ -205,6 +209,42 @@ def fsp_laplace(
     eigvals, eigvecs = jnp.linalg.eigh(ggn_matrix)
     eigvals = jnp.flip(eigvals, axis=0)
     eigvecs = jnp.flip(eigvecs, axis=1)
+
+    cov_sqrt = _u @ (eigvecs[:, ::-1] / jnp.sqrt(eigvals[::-1]))
+    _, unravel_fn = jax.flatten_util.ravel_pytree(params)
+
+    params = laplax.util.tree.to_dtype(params, jnp.float64)
+
+    def jvp(x, v):
+        return jax.jvp(lambda p: model_fn(x, p), (params,), (v,))[1]
+
+    def scan_fn(carry, i):
+        running_sum, truncation_idx = carry
+        lr_fac = unravel_fn(cov_sqrt[:, i])
+        sqrt_jvp = jax.vmap(lambda xc: jvp(xc, lr_fac) ** 2)(X_train)
+        pv = jnp.sum(sqrt_jvp)
+        new_running_sum = running_sum + pv
+        new_truncation_idx = jax.lax.cond(
+            (new_running_sum >= 150) & (truncation_idx == -1),
+            lambda _: i + 1,  # We found our index
+            lambda _: truncation_idx,  # Keep current value
+            operand=None,
+        )
+
+        return (new_running_sum, new_truncation_idx), sqrt_jvp
+
+    init_carry = (0.0, -1)
+    indices = jnp.arange(eigvals.shape[0])
+    (_, truncation_idx), post_var = jax.lax.scan(scan_fn, init_carry, indices)
+
+    truncation_idx = jax.lax.cond(
+        truncation_idx == -1,
+        lambda _: eigvals.shape[0],
+        lambda _: truncation_idx,
+        operand=None,
+    )
+
+    cov_sqrt = cov_sqrt[:, :truncation_idx]
 
 
 fsp_laplace(

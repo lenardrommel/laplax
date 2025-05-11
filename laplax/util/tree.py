@@ -29,6 +29,19 @@ def get_size(tree: PyTree) -> PyTree:
     return sum(math.prod(arr.shape) for arr in flat)
 
 
+def to_dtype(tree: PyTree, dtype: Any) -> PyTree:
+    """Convert all elements of a PyTree to a specified data type.
+
+    Args:
+        tree: A PyTree whose elements are to be converted.
+        dtype: The target data type.
+
+    Returns:
+        A PyTree with all elements converted to the specified data type.
+    """
+    return jax.tree.map(lambda x: x.astype(dtype), tree)
+
+
 # ---------------------------------------------------------------
 # Tree operations
 # ---------------------------------------------------------------
