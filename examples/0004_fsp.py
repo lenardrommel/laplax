@@ -2,11 +2,12 @@
 import jax
 import jax.numpy as jnp
 import optax
+from optax import tree_utils as otu
 import orbax.checkpoint as ocp
 from flax import nnx
 from helper import DataLoader, get_sinusoid_example
 from matplotlib import pyplot as plt
-from plotting import plot_sinusoid_task  # , plot_gp_prediction
+from plotting import plot_sinusoid_task, plot_gp_prediction
 
 from laplax.curv.cov import Posterior
 from laplax.curv.fsp import create_fsp_objective
@@ -16,6 +17,7 @@ from jax.flatten_util import ravel_pytree
 from laplax.util.flatten import create_partial_pytree_flattener
 import laplax
 from laplax.curv import estimate_curvature
+from functools import partial
 
 jax.config.update("jax_enable_x64", True)
 
@@ -111,8 +113,96 @@ def kernel_fn(x, y=None, noise_variance=noise_variance):
     if y is None:
         y = x
     K = build_covariance_matrix(kernel, x, y)
-    return K + noise_variance * jnp.eye(K.shape[0])
+    return K + noise_variance**2 * jnp.eye(K.shape[0])
 
+
+def init_hyperparams():
+    # initialize log-lengthscale and log-noise
+    init_ls = jnp.log(jnp.exp(0.18))
+    init_log_noise = jnp.log(jnp.exp(-1.3))
+    log_ampl = jnp.log(jnp.exp(0.0))
+    return {"log_ls": init_ls, "log_noise": init_log_noise, "log_ampl": log_ampl}
+
+
+# --- 2) Build NLL loss ---
+def build_K(x1, x2, lengthscale):
+    # pairwise squared dists
+    sq_dists = jnp.sum((x1[:, None, :] - x2[None, :, :]) ** 2, axis=-1)
+    return jnp.exp(-0.5 * sq_dists / (lengthscale**2))
+
+
+def loss_fn(params, x, y):
+    K = jnp.exp(params["log_ampl"]) ** 2 * build_K(
+        x, x, jnp.exp(params["log_ls"])
+    ) + jnp.exp(params["log_noise"]) ** 2 * jnp.eye(x.shape[0])
+    y = y.reshape(-1)
+
+    L = jnp.linalg.cholesky(K)
+    alpha = jax.scipy.linalg.cho_solve((L, True), y)
+    data_fit = 0.5 * jnp.dot(y, alpha)
+    logdet = 2.0 * jnp.sum(jnp.log(jnp.diag(L)))
+    const = 0.5 * y.shape[0] * jnp.log(2 * jnp.pi)
+
+    return data_fit + 0.5 * logdet + const
+
+
+# jit & grad‐wrapper
+value_and_grad = jax.jit(jax.value_and_grad(loss_fn))
+
+
+def run_optimization(init_params, loss_fn, opt, max_iter, tol):
+    value_and_grad_fun = optax.value_and_grad_from_state(loss_fn)
+
+    def step(carry):
+        params, state = carry
+        loss, grad = value_and_grad_fun(params, state=state)
+
+        updates, state = opt.update(
+            grad, state, params, value=loss, grad=grad, value_fn=loss_fn
+        )
+        params = optax.apply_updates(params, updates)
+        return params, state
+
+    def continuing_criterion(carry):
+        _, state = carry
+        iter_num = otu.tree_get(state, "count")
+        grad = otu.tree_get(state, "grad")
+        err = otu.tree_l2_norm(grad)
+        return (iter_num == 0) | ((iter_num < max_iter) & (err >= tol))
+
+    init_carry = (init_params, opt.init(init_params))
+    final_params, final_state = jax.lax.while_loop(
+        continuing_criterion, step, init_carry
+    )
+    return final_params, final_state
+
+
+# --- 4) Run it on your toy data ---
+# (reuse your existing data loader / get_sinusoid_example)
+X_train, y_train, _, _, X_test, y_test = get_sinusoid_example(
+    num_train_data=num_training_samples,
+    num_valid_data=num_calibration_samples,
+    num_test_data=num_test_samples,
+    sigma_noise=noise_std,
+    intervals=[(0, 8)],
+    rng_key=key,
+    dtype=jnp.float64,
+)
+loss_wrapper = lambda params: loss_fn(params, X_train, y_train)
+optimizer = optax.lbfgs()
+
+
+def _run(init_p):
+    final_p, _ = run_optimization(init_p, loss_wrapper, optimizer, 1000, 1e-8)
+    return final_p
+
+
+init_params = init_hyperparams()
+print(f"Initial params: {init_params}")
+print(f"Initial NLL:  {loss_wrapper(init_params):.4e}")
+final_dict = _run(init_params)
+print(f"Final   NLL:  {loss_wrapper(final_dict):.4e}")
+print(final_dict)
 
 # data = {
 #     "inputs": X_train,
@@ -204,9 +294,9 @@ def fsp_loss(model_fn, prior_fn, x, y):
 @nnx.jit
 def train_step(model, optimizer, x, y):
     def loss_fn(m):
-        return fsp_loss(
-            m, kernel_fn, x, y
-        )  # mse_loss(m, x, y) + reg_loss(m, kernel_fn, x)
+        return mse_loss(m, x, y)
+
+    # fsp_loss(m, kernel_fn, x, y)  # mse_loss(m, x, y) + reg_loss(m, kernel_fn, x)
 
     loss, grads = nnx.value_and_grad(loss_fn)(model)
     optimizer.update(grads)  # Inplace updates
@@ -230,7 +320,7 @@ def train_model(model, n_epochs, lr=1e-3):
     return model
 
 
-model = train_model(model, n_epochs=10)
+model = train_model(model, n_epochs=1000)
 
 
 X_pred = jnp.linspace(0.0, 8.0, 200).reshape(200, 1)
@@ -290,42 +380,43 @@ _, unravel_fn = jax.flatten_util.ravel_pytree(params)
 
 params = jax.tree.map(lambda x: x.astype(jnp.float64), params)
 
-from laplax.enums import LossFn
-from laplax.curv.fsp import create_ggn_mv_without_data
-from laplax.curv.ggn import create_ggn_mv_without_data
+# from laplax.enums import LossFn
+# # from laplax.curv.fsp import create_ggn_mv_without_data
 
-alpha = 1.0
+# from laplax.curv.ggn import create_ggn_mv_without_data
 
-
-def identity_hessian_mv(jv, pred=None, target=None, **kwargs):
-    return jv
+# alpha = 1.0
 
 
-data = {"input": X_train, "target": y_train}
-ggn_mv = create_ggn_mv_without_data(
-    model_fn=model_fn,
-    params=params,
-    loss_fn=LossFn.NONE,
-    factor=alpha,
-    has_batch=True,  # or False if your model_fn expects no batch dim
-    loss_hessian_mv=identity_hessian_mv,
-)
+# def identity_hessian_mv(jv, pred=None, target=None, **kwargs):
+#     return jv
 
 
-v0 = jax.tree.map(jnp.ones_like, params)
-out = ggn_mv(v0, data)
-dim = flat_params.shape[0]
-I = jnp.eye(dim)
+# data = {"input": X_train, "target": y_train}
+# ggn_mv = create_ggn_mv_without_data(
+#     model_fn=model_fn,
+#     params=params,
+#     loss_fn=LossFn.NONE,
+#     factor=alpha,
+#     has_batch=True,  # or False if your model_fn expects no batch dim
+#     loss_hessian_mv=identity_hessian_mv,
+# )
 
 
-def flat_ggn(vec_flat):
-    v = unravel(vec_flat)
-    gz = ggn_mv(v, data)
-    gz_flat, _ = ravel_pytree(gz)
-    return gz_flat
+# v0 = jax.tree.map(jnp.ones_like, params)
+# out = ggn_mv(v0, data)
+# dim = flat_params.shape[0]
+# I = jnp.eye(dim)
 
 
-ggn_matrix = jax.vmap(flat_ggn)(I)
+# def flat_ggn(vec_flat):
+#     v = unravel(vec_flat)
+#     gz = ggn_mv(v, data)
+#     gz_flat, _ = ravel_pytree(gz)
+#     return gz_flat
+
+
+# ggn_matrix = jax.vmap(flat_ggn)(I)
 
 
 def jvp(x, v):
@@ -359,22 +450,28 @@ truncation_idx = jax.lax.cond(
     operand=None,
 )
 cov_sqrt = cov_sqrt[:, :truncation_idx]
-# curv_estimate = estimate_curvature(
-#     curv_type=curv_type,
-#     mv=ggn_mv,
-#     layout=params,
-#     **curv_args,
-# )
 
-# %%
 
-from laplax.curv.cov import Posterior
-from laplax.types import PosteriorState
+def sample(model_fn, params, data, unflatten_fn, S, num_samples=100):
+    def jvp(x, v):
+        return jax.jvp(lambda p: model_fn(x, p), (params,), (v,))
 
-posterior_state: PosteriorState = {"scale_sqrt": cov_sqrt}
-posterior = Posterior(
-    state=posterior_state,
-    cov_mv=lambda state: lambda x: state["scale_sqrt"] @ state["scale_sqrt"].T @ x,
-    scale_mv=lambda state: lambda x: state["scale_sqrt"] @ x,
-)
-# %%
+    def process_sample(eps):
+        Se = jnp.matmul(S, eps)
+        us = unflatten_fn(Se)
+        return jvp(data["inputs"], us)
+
+    key = jax.random.key(0)
+    epsilons = jax.random.normal(key, (num_samples, S.shape[1]))
+    f, JS_eps = jax.vmap(process_sample)(epsilons)
+    flin = f + JS_eps  # batch + output
+    return flin
+
+
+data = {"inputs": X_train, "targets": y_train}
+flin = sample(model_fn, params, data, unravel_params, cov_sqrt, num_samples=1000)
+mean = jnp.mean(flin, axis=0)
+std = jnp.std(flin, axis=0)
+
+
+print(flin.shape)  # (100, 150, 1)

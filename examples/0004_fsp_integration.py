@@ -65,6 +65,7 @@ from laplax.eval.pushforward import (
 from laplax.curv.cov import Posterior
 
 jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_debug_nans", True)
 
 
 n_epochs = 1000
@@ -86,6 +87,7 @@ X_train, y_train, X_valid, y_valid, X_test, y_test = get_sinusoid_example(
     dtype=jnp.float64,
 )
 train_loader = DataLoader(X_train, y_train, batch_size)
+data = {"inputs": X_train, "targets": y_train}
 
 
 from laplax.curv.fsp import create_fsp_objective
@@ -128,8 +130,8 @@ def mse_loss(x, y):
     return 0.5 * jnp.sum((x - y) ** 2)
 
 
-kernel = RBFKernel(lengthscale=2.6)
-kernel_fn = lambda x, y, sigma=1e-4: build_covariance_matrix(
+kernel = RBFKernel(lengthscale=2.5)
+kernel_fn = lambda x, y, sigma=1e-2: build_covariance_matrix(
     kernel, x, y
 ) + sigma * jnp.eye(x.shape[0])
 
@@ -142,9 +144,8 @@ fsp_loss_fn = create_fsp_objective(
 
 
 @nnx.jit
-def train_step(model, optimizer, x, y):
+def train_step(model, optimizer, data):
     def loss_fn(m):
-        data = {"inputs": x, "targets": y}
         return fsp_loss_fn(
             data, data["inputs"], params
         )  # mse_loss(m, x, y) + reg_loss(m, kernel_fn, x)
@@ -156,10 +157,10 @@ def train_step(model, optimizer, x, y):
 
 
 @nnx.jit
-def _train_step(model, optimizer, x, y):
+def _train_step(model, optimizer, data):
     def loss_fn(model):
-        y_pred = model(x)  # Call methods directly
-        return jnp.sum((y_pred - y) ** 2)
+        y_pred = model(data["inputs"])  # Call methods directly
+        return jnp.sum((y_pred - data["targets"]) ** 2)
 
     loss, grads = nnx.value_and_grad(loss_fn)(model)
     optimizer.update(grads)  # Inplace updates
@@ -174,7 +175,8 @@ def train_model(model, n_epochs, lr=1e-3):
     # Train epoch
     for epoch in range(n_epochs):
         for x_tr, y_tr in train_loader:
-            loss = _train_step(model, optimizer, x_tr, y_tr)
+            data = {"inputs": x_tr, "targets": y_tr}
+            loss = _train_step(model, optimizer, data)
 
         if epoch % 100 == 0:
             print(f"[epoch {epoch}]: loss: {loss:.4f}")
@@ -228,7 +230,9 @@ def create_fsp_ggn_mv(
             data["inputs"],
         )
         ju = jnp.transpose(ju, (1, 0, 2)).squeeze(-1)
-        return jnp.diag(s**2) + jnp.einsum("ji,jk->ik", ju, ju)
+        return jnp.diag(s**2) + jnp.einsum(
+            "ji,jk->ik", ju, ju
+        )  # jnp.diag(s**2) + jnp.einsum("ji,jk->ik", ju, ju)
 
     return ggn_mv
 
@@ -246,7 +250,9 @@ def compute_curvature_fn(model_fn, params, ggn):
         def jvp(x, v):
             return jax.jvp(lambda p: model_fn(x, p), (params,), (v,))[1]
 
-        def scan_fn(carry, i):
+        def scan_fn(
+            carry, i
+        ):  # TODO: implement scan to not compare the sum, but all elements of vectors
             running_sum, truncation_idx = carry
             lr_fac = unravel_fn(cov_sqrt[:, i])
             sqrt_jvp = jax.vmap(lambda xc: jvp(xc, lr_fac) ** 2)(X_train)
@@ -292,7 +298,7 @@ def fsp_laplace(
     op = prior_cov_kernel(context_points, context_points)
     op = op if isinstance(op, Callable) else lambda x: op @ x
 
-    L = lanczos_isqrt(kernel_fn(X_train, X_train), v)
+    L = lanczos_isqrt(kernel_fn(X_train, X_train), v)  # Multiply by prior variance
 
     M, unravel_fn = compute_matrix_jacobian_product(
         model_fn,
@@ -316,6 +322,13 @@ def fsp_laplace(
 
     # ==========
     params = laplax.util.tree.to_dtype(params, jnp.float64)
+
+    # Tristan ==========
+    i = 0
+    post_var = jnp.zeros((150, 1))
+    prior_var = 0
+    # Tristan ==========
+
     cov_sqrt = compute_curvature_fn(model_fn, params, ggn_matrix)(_u)
 
     posterior_state: PosteriorState = {"scale_sqrt": cov_sqrt}
@@ -327,22 +340,20 @@ def fsp_laplace(
     curv_estimate = LowRankTerms(cov_sqrt, s, 1)
     posterior_fn = set_posterior_fn("lanczos", curv_estimate, layout=params)
 
-    set_nonlin_prob_predictive = partial(
-        set_nonlin_pushforward,
+    set_prob_predictive = partial(
+        set_lin_pushforward,
         model_fn=model_fn,
         mean_params=params,
         posterior_fn=posterior_fn,
         pushforward_fns=[
-            nonlin_setup,
-            nonlin_pred_mean,
-            nonlin_pred_var,
-            nonlin_pred_std,
+            lin_setup,
+            lin_pred_mean,
+            lin_pred_var,
+            lin_pred_std,
         ],
-        key=jax.random.key(42),
-        num_samples=10000,
     )
     prior_arguments = {"prior_prec": 1.0}  # Choose any prior precision.
-    prob_predictive = set_nonlin_prob_predictive(
+    prob_predictive = set_prob_predictive(
         prior_arguments=prior_arguments,
     )
 
@@ -353,11 +364,12 @@ def fsp_laplace(
         X_train=data["inputs"],
         y_train=data["targets"],
         X_pred=X_pred,
-        y_pred=pred["pred_mean"][:, 0],
+        y_pred=y_pred.squeeze(-1),  # y_pred=pred["pred_mean"][:, 0],
         y_std=jnp.sqrt(pred["pred_var"][:, 0]),
     )
 
     plt.show()
+    print("Posterior mean:", pred["pred_mean"][:, 0])
 
 
 fsp_laplace(
