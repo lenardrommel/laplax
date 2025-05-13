@@ -175,6 +175,22 @@ class L2InnerProductKernel:
         return jnp.sum(x1 * x2) + self.bias
 
 
+class PeriodicKernel:
+    def __init__(self, lengthscale=2.60, period=1.0):
+        self.lengthscale = lengthscale
+        self.period = period
+
+    def __call__(self, x1: jax.Array, x2: jax.Array | None = None) -> jax.Array:
+        """Compute periodic kernel between x1 and x2."""
+        if x2 is None:
+            x2 = x1
+
+        sq_dist = jnp.sum((x1 - x2) ** 2)
+        periodic_part = jnp.cos(jnp.pi * sq_dist / self.period)
+
+        return jnp.exp(-0.5 * sq_dist / self.lengthscale**2) * periodic_part
+
+
 def build_covariance_matrix(kernel, X1, X2):
     """Build covariance matrix in a JAX-compatible way using vmap."""
 

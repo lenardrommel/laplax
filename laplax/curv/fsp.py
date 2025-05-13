@@ -32,8 +32,7 @@ def create_loss_mse(model_fn: ModelFn):
 
 def create_loss_nll(
     model_fn: ModelFn,
-    prior_arguments: dict = None,
-    num_training_samples: int = 150,
+    loss_fn: LossFn,
 ):
     r"""Create the NLL loss function for FSP training.
     $$
@@ -41,18 +40,11 @@ def create_loss_nll(
     $$.
     """  # noqa: D205
 
-    def loss_nll(data: Data, params: Params) -> Float:
-        scale_param = params["param"]
-        model_params = params["model"]
-        noise_scale = scale_param.value
-        preds = jax.vmap(model_fn, in_axes=(0, None))(data["input"], model_params)
-        sq_diff = jnp.square(preds - data["target"])
-        log_term = 0.5 * jnp.log(2 * jnp.pi * noise_scale**2)
-        precision_term = 0.5 * sq_diff / (noise_scale**2)
-        nll = log_term + precision_term
-
-        N = num_training_samples
-        return jnp.mean(nll) * N
+    def loss_nll(
+        data: Data, params: Params, other_params: Params | None = None
+    ) -> Float:
+        preds = jax.vmap(model_fn, in_axes=(0, None))(data["input"], params)
+        return loss_fn(preds, data["target"], other_params)
 
     return loss_nll
 
@@ -67,8 +59,8 @@ def create_loss_reg(
 
         $$1/2 (f(c^{i}) - m)^{T} K^{-1}(c^{i}, c^{i}) (f(c^{i}) - m)$$
         """
-        params = params["model"]
-        f_c = jax.vmap(model_fn, in_axes=(0, None))(context_points, params)
+        # params = params["model"]
+        f_c = jax.vmap(model_fn, in_axes=(0, None))(context_points, params) - prior_mean
         K_c_c = prior_cov_kernel(context_points, context_points)
         left = jax.numpy.linalg.solve(K_c_c, f_c)
         return 0.5 * jax.numpy.einsum("ij,ij->", f_c, left)
@@ -81,17 +73,17 @@ def create_fsp_objective(
     loss_fn: LossFn,
     prior_mean: PredArray,
     prior_cov_kernel: Callable,
-    num_training_samples: int = 150,
-    batch_size: int = 20,
 ):
     """Create FSP objective using the wrapped model with learnable scale."""
     # Create loss functions
-    loss_nll = create_loss_nll(model_fn)
+    loss_nll = create_loss_nll(model_fn, loss_fn)
     loss_reg = create_loss_reg(model_fn, prior_mean, prior_cov_kernel)
 
     # Create objective
-    def fsp_objective(data: Data, context_points: PredArray, params: Params) -> Float:
-        return loss_nll(data, params) + loss_reg(context_points, params)
+    def fsp_objective(
+        data: Data, context_points: PredArray, params: Params, other_params: Params
+    ) -> Float:
+        return loss_nll(data, params, other_params) + loss_reg(context_points, params)
 
     return fsp_objective
 

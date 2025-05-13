@@ -8,6 +8,8 @@ from flax import nnx
 from helper import (
     DataLoader,
     RBFKernel,
+    PeriodicKernel,
+    L2InnerProductKernel,
     build_covariance_matrix,
     get_sinusoid_example,
     gp_regression,
@@ -110,16 +112,27 @@ def mse_loss(x, y):
     return 0.5 * jnp.sum((x - y) ** 2)
 
 
-def train_step(model, optimizer, loss_fn, data):
-    _, params = nnx.split(model)
+def nll_loss(y_hat, y, sigma, N=150):
+    sigma = sigma.value
+    sq_diff = jnp.square(y_hat - y)
+    log_term = 0.5 * jnp.log(2 * jnp.pi * sigma**2)
+    precision_term = 0.5 * sq_diff / (sigma**2)
+    nll = log_term + precision_term
+    return jnp.mean(nll) * N
 
-    def _loss_fn(p):
-        return loss_fn(data, p)
 
-    loss, grads = nnx.value_and_grad(_loss_fn)(params)
-    optimizer.update(grads)
+# def train_step(model, optimizer, loss_fn, data):
+#     _, params = nnx.split(model)
+#     model_params = params["model"]
+#     noise_param = params["param"]
 
-    return loss
+#     def _loss_fn(p):
+#         return loss_fn(data, p, noise_param)
+
+#     loss, grads = nnx.value_and_grad(_loss_fn)(model_params)
+#     optimizer.update(grads)
+
+#     return loss
 
 
 def create_train_step(loss_fn):
@@ -131,8 +144,7 @@ def create_train_step(loss_fn):
             return loss_fn(data, p)
 
         loss, grads = nnx.value_and_grad(_loss_fn)(params)
-        optimizer.update(grads)
-
+        optimizer.update(grads)  # Only update model part
         return loss
 
     return train_step
@@ -215,59 +227,18 @@ def create_loss_fn(
 
         fsp_obj = create_fsp_objective(
             model_fn,
-            mse_loss,
+            nll_loss,
             prior_mean,
             prior_cov_kernel,
-            num_training_samples,
-            batch_size,
         )
 
         # Return a function that includes the context_points
-        return lambda data, params: fsp_obj(data, context_points, params)
+        return lambda data, params: fsp_obj(
+            data, context_points, params["model"], other_params=params["param"]
+        )
     else:
         msg = f"Unknown loss type: {loss_type}. Supported types are: mse, nll, fsp"
         raise ValueError(msg)
-
-
-# def create_fsp_ggn_mv(
-#     model_fn,
-#     params,
-#     M,
-#     has_batch,
-#     loss_hessian_mv=None,
-# ):
-#     _u, _s, _ = jnp.linalg.svd(M, full_matrices=False)
-#     tol = jnp.finfo(M.dtype).eps ** 2
-#     s = _s[_s > tol]
-#     u = _u[:, : s.size]
-
-#     if has_batch:
-#         msg = (
-#             "FSP GGN MV is not implemented for batched data. "
-#             "Please set has_batch=False."
-#         )
-#         raise NotImplementedError(msg)
-
-#     def identity_loss_hessian_mv(v, pred=None, target=None):
-#         return v
-
-#     ggn_mv = create_ggn_mv_without_data(
-#         model_fn=model_fn,
-#         params=params,
-#         loss_fn=LossFn.NONE,  # Placeholder - we're providing custom loss_hessian_mv
-#         factor=1.0,
-#         has_batch=has_batch,
-#         loss_hessian_mv=identity_loss_hessian_mv,
-#     )
-
-#     ggn_mv_wrapped = laplax.util.flatten.flatten_function(ggn_mv, layout=params)
-
-#     def fsp_ggn_mv(data):
-#         return jnp.diag(s**2) + u.T @ jax.vmap(
-#             ggn_mv_wrapped, in_axes=(-1, None), out_axes=-1
-#         )(u, data)
-
-#     return fsp_ggn_mv
 
 
 def fsp_laplace(
@@ -286,7 +257,7 @@ def fsp_laplace(
     v = lanczos_jacobian_initialization(model_fn, params, data, **kwargs)
     # Define cov operator
     op = prior_cov_kernel(context_points, context_points)
-    op = op if isinstance(op, Callable) else lambda x: op @ x
+    # op = op if isinstance(op, Callable) else lambda x: op @ x
     cov_matrix = prior_cov_kernel(data["input"], data["input"])
 
     L = lanczos_isqrt(cov_matrix, v)
@@ -414,6 +385,7 @@ def main():
         "dtype": jnp.float64,
     }
     model, model_fn, _ = create_model(config)
+    _, params = nnx.split(model)
 
     kernel_fn, prior_arguments = create_kernel_fn(
         lengthscale=4 / jnp.pi, output_scale=1.0, noise_variance=0.001
