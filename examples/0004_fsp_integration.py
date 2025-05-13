@@ -23,7 +23,7 @@ from plotting import (
 import laplax
 from laplax.curv import estimate_curvature
 from laplax.curv.cov import Posterior, set_posterior_fn
-from laplax.curv.ggn import create_ggn_mv_without_data
+from laplax.curv.ggn import create_ggn_mv_without_data, create_fsp_ggn_mv
 from laplax.curv.fsp import (
     compute_curvature_fn,
     compute_matrix_jacobian_product,
@@ -229,65 +229,45 @@ def create_loss_fn(
         raise ValueError(msg)
 
 
-def create_fsp_ggn_mv(
-    model_fn,
-    params,
-    M,
-    has_batch,
-    loss_hessian_mv=None,
-):
-    _u, _s, _ = jnp.linalg.svd(M, full_matrices=False)
-    tol = jnp.finfo(M.dtype).eps ** 2
-    s = _s[_s > tol]
-    u = _u[:, : s.size]
+# def create_fsp_ggn_mv(
+#     model_fn,
+#     params,
+#     M,
+#     has_batch,
+#     loss_hessian_mv=None,
+# ):
+#     _u, _s, _ = jnp.linalg.svd(M, full_matrices=False)
+#     tol = jnp.finfo(M.dtype).eps ** 2
+#     s = _s[_s > tol]
+#     u = _u[:, : s.size]
 
-    if has_batch:
-        msg = (
-            "FSP GGN MV is not implemented for batched data. "
-            "Please set has_batch=False."
-        )
-        raise NotImplementedError(msg)
+#     if has_batch:
+#         msg = (
+#             "FSP GGN MV is not implemented for batched data. "
+#             "Please set has_batch=False."
+#         )
+#         raise NotImplementedError(msg)
 
-    def identity_loss_hessian_mv(v, pred=None, target=None):
-        return v
+#     def identity_loss_hessian_mv(v, pred=None, target=None):
+#         return v
 
-    ggn_mv = create_ggn_mv_without_data(
-        model_fn=model_fn,
-        params=params,
-        loss_fn="identity",  # Placeholder - we're providing custom loss_hessian_mv
-        factor=1.0,
-        has_batch=has_batch,
-        loss_hessian_mv=identity_loss_hessian_mv,
-    )
+#     ggn_mv = create_ggn_mv_without_data(
+#         model_fn=model_fn,
+#         params=params,
+#         loss_fn=LossFn.NONE,  # Placeholder - we're providing custom loss_hessian_mv
+#         factor=1.0,
+#         has_batch=has_batch,
+#         loss_hessian_mv=identity_loss_hessian_mv,
+#     )
 
-    # def ggn_mv(vec, data):
-    #     # Step 1: Single jvp for entire batch, if has_batch is True
-    #     def fwd(p):
-    #         if has_batch:
-    #             return jax.vmap(lambda x: model_fn(input=x, params=p))(data["inputs"])
-    #         return model_fn(input=data["inputs"], params=p)
+#     ggn_mv_wrapped = laplax.util.flatten.flatten_function(ggn_mv, layout=params)
 
-    #     # Step 2: Linearize the forward pass
-    #     z, jvp = jax.linearize(fwd, params)
+#     def fsp_ggn_mv(data):
+#         return jnp.diag(s**2) + u.T @ jax.vmap(
+#             ggn_mv_wrapped, in_axes=(-1, None), out_axes=-1
+#         )(u, data)
 
-    #     # Step 3: Compute J^T H J v
-    #     HJv = jvp(vec)
-    #     # HJv = loss_hessian_mv(jvp(vec), pred=z, target=data["target"])
-
-    #     # Step 4: Compute the GGN vector
-    #     arr = jax.linear_transpose(jvp, vec)(HJv)[0]
-
-    #     factor = 1.0
-    #     return laplax.util.tree.mul(factor, arr)
-
-    ggn_mv_wrapped = laplax.util.flatten.flatten_function(ggn_mv, layout=params)
-
-    def fsp_ggn_mv(data):
-        return jnp.diag(s**2) + u.T @ jax.vmap(
-            ggn_mv_wrapped, in_axes=(-1, None), out_axes=-1
-        )(u, data)
-
-    return fsp_ggn_mv
+#     return fsp_ggn_mv
 
 
 def fsp_laplace(
@@ -325,7 +305,7 @@ def fsp_laplace(
     s = _s[_s > tol]  # (80,)
     _u = _u[:, : s.size]
 
-    ggn_matrix = create_fsp_ggn_mv(model_fn, params, M, False)(data)
+    ggn_matrix = create_fsp_ggn_mv(model_fn, params, M)(data)
 
     prior_var = jnp.diag(prior_cov_kernel(data["test_input"], data["test_input"]))
 
