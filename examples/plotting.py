@@ -16,11 +16,11 @@ def plot_regression_with_uncertainty(
     X_pred=None,
     y_pred=None,
     y_std=None,
+    y_samples=None,  # Changed default to None to match other optional parameters
     title=None,
     y_max=None,
 ):
-    """Plot regression data with optional prediction and uncertainty.
-
+    """Plot regression data with optional prediction, uncertainty, and samples.
     Args:
         X_train: Training input data (shape: n_samples, 1)
         y_train: Training target data (shape: n_samples, 1)
@@ -29,23 +29,25 @@ def plot_regression_with_uncertainty(
         X_pred: Prediction input data (shape: n_samples, 1), if None uses X_test
         y_pred: Prediction mean (shape: n_samples, 1), optional
         y_std: Prediction standard deviation (shape: n_samples, 1), optional
+        y_samples: Samples from the posterior (shape: n_samples, n_posterior_samples), optional
         title: Plot title, optional
-        y_max: Maximum scale for the y-axis, optional
-    """
+        y_max: Maximum scale for the y-axis, optional.
+    """  # noqa: D205
     plt.figure(figsize=(10, 6))
-
     # Convert to numpy arrays if they are JAX arrays
     if hasattr(X_train, "device_buffer"):
         X_train = np.array(X_train)
         y_train = np.array(y_train)
-        if X_test is not None:
-            X_test = np.array(X_test)
-            y_test = np.array(y_test)
-        if X_pred is not None and y_pred is not None:
-            X_pred = np.array(X_pred)
-            y_pred = np.array(y_pred)
-            if y_std is not None:
-                y_std = np.array(y_std)
+    if X_test is not None:
+        X_test = np.array(X_test)
+        y_test = np.array(y_test)
+    if X_pred is not None and y_pred is not None:
+        X_pred = np.array(X_pred)
+        y_pred = np.array(y_pred)
+    if y_std is not None:
+        y_std = np.array(y_std)
+    if y_samples is not None:
+        y_samples = np.array(y_samples)
 
     # Plot training data
     plt.scatter(X_train, y_train, color="blue", alpha=0.6, label="Training data")
@@ -58,14 +60,12 @@ def plot_regression_with_uncertainty(
     if y_pred is not None:
         # If X_pred is not provided but X_test is, use X_test for predictions
         X_plot = X_pred if X_pred is not None else X_test
-
         # Only proceed if we have points to plot predictions for
         if X_plot is not None:
             # Sort X for proper line plotting
             sort_idx = np.argsort(X_plot.flatten())
             X_plot_sorted = X_plot[sort_idx]
             y_pred_sorted = y_pred[sort_idx]
-
             plt.plot(X_plot_sorted, y_pred_sorted, color="red", label="Prediction")
 
             # Plot uncertainty if provided
@@ -79,6 +79,22 @@ def plot_regression_with_uncertainty(
                     alpha=0.2,
                     label="95% confidence interval",
                 )
+
+            # Plot posterior samples if provided
+            if y_samples is not None:
+                # Assuming y_samples shape is (n_samples, n_posterior_samples)
+                y_samples_sorted = y_samples[sort_idx]
+                # Plot each posterior sample with low opacity
+                for i in range(y_samples_sorted.shape[1]):
+                    plt.plot(
+                        X_plot_sorted,
+                        y_samples_sorted[:, i],
+                        color="purple",
+                        alpha=0.1,
+                        linewidth=1,
+                        # Only label the first sample to avoid cluttering the legend
+                        label="Posterior samples" if i == 0 else None,
+                    )
 
     # Plot true function
     x_true = np.linspace(0, 8, 1000).reshape(-1, 1)
@@ -99,7 +115,6 @@ def plot_regression_with_uncertainty(
 
     plt.legend()
     plt.grid(True, alpha=0.3)
-
     return plt.gcf()
 
 

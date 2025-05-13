@@ -23,8 +23,8 @@ from plotting import (
 import laplax
 from laplax.curv import estimate_curvature
 from laplax.curv.cov import Posterior, set_posterior_fn
+from laplax.curv.ggn import create_ggn_mv_without_data
 from laplax.curv.fsp import (
-    _compute_curvature_fn,
     compute_curvature_fn,
     compute_matrix_jacobian_product,
     create_fsp_objective,
@@ -34,7 +34,7 @@ from laplax.curv.fsp import (
     lanczos_jacobian_initialization,
 )
 from laplax.curv.lanczos_isqrt import lanczos_isqrt
-from laplax.curv.utils import LowRankTerms
+
 from laplax.enums import LossFn
 from laplax.eval.pushforward import (
     lin_pred_mean,
@@ -68,14 +68,42 @@ class Model(nnx.Module):
         return x
 
 
-class ModelWrapper(nnx.Module):  # moved to fsp.py
-    def __init__(self, model, param, data_size):
+class ModelWrapper(nnx.Module):
+    class ModelWrapper:
+        """A wrapper class for a neural network model that integrates parameters and data size.
+
+        Attributes:
+            model (Callable): The neural network model to be wrapped.
+            param (nnx.Param): A parameter object initialized with the given parameter values.
+            N (int): The size of the dataset.
+
+        Methods:
+            __call__(x):
+                Invokes the wrapped model with the input `x`.
+
+            to_float64():
+                Converts the model parameters to float64 precision.
+
+        Args:
+            model (Callable): The neural network model to be wrapped.
+            param (array-like): The initial parameter values for the model.
+            data_size (int): The size of the dataset.
+        """
+
+    def __init__(self, model, param, data_size, dtype):
         self.model = model
         self.param = nnx.Param(jnp.asarray(param))
         self.N = data_size
+        if dtype is jnp.float64:
+            self.model = self.to_float64()
 
     def __call__(self, x):
         return self.model(x)
+
+    def to_float64(self):  # noqa: F811
+        graph_def, params = nnx.split(self.model)
+        params = laplax.util.tree.to_dtype(params, jnp.float64)
+        return nnx.merge(graph_def, params)
 
 
 def mse_loss(x, y):
@@ -133,14 +161,13 @@ def create_model(config):
     rngs = config.get("rngs", nnx.Rngs(0))
     param = config.get("param", None)
     data_size = config.get("data_size", None)
+    dtype = config.get("dtype", jnp.float64)
 
-    model = to_float64(
-        Model(
-            in_channels=in_channels,
-            hidden_channels=hidden_channels,
-            out_channels=out_channels,
-            rngs=rngs,
-        )
+    model = Model(
+        in_channels=in_channels,
+        hidden_channels=hidden_channels,
+        out_channels=out_channels,
+        rngs=rngs,
     )
 
     graph_def, _ = nnx.split(model)
@@ -149,7 +176,7 @@ def create_model(config):
         return nnx.call((graph_def, params))(input)[0]
 
     if param is not None and data_size is not None:
-        model = ModelWrapper(model, param, data_size)
+        model = ModelWrapper(model, param, data_size, dtype)
 
     return model, model_fn, graph_def
 
@@ -216,13 +243,13 @@ def create_fsp_ggn_mv(
     s = _s[_s > tol]  # (80,)
     u = _u[:, : s.size]
 
-    def jac_mv(model_fn, params, x):
-        return jax.vmap(
-            lambda u_flat: jax.jvp(
-                lambda p: model_fn(x, p), (params,), (unravel_fn(u_flat),)
-            )[1],  # noqa: E501
-            in_axes=1,
-        )(u)
+    # def jac_mv(model_fn, params, x):
+    #     return jax.vmap(
+    #         lambda u_flat: jax.jvp(
+    #             lambda p: model_fn(x, p), (params,), (unravel_fn(u_flat),)
+    #         )[1],  # noqa: E501
+    #         in_axes=1,
+    #     )(u)
 
     if has_batch:
         msg = (
@@ -230,17 +257,6 @@ def create_fsp_ggn_mv(
             "Please set has_batch=False."
         )
         raise NotImplementedError(msg)
-
-    # def ggn_mv(data):
-    #     ju = jac_mv(
-    #         model_fn,
-    #         params,
-    #         data["inputs"],
-    #     )
-    #     ju = jnp.transpose(ju, (1, 0, 2)).squeeze(-1)
-    #     return jnp.diag(s**2) + jnp.einsum(
-    #         "ji,jk->ik", ju, ju
-    #     )  # jnp.diag(s**2) + jnp.einsum("ji,jk->ik", ju, ju)
 
     def ggn_mv(vec, data):
         # Step 1: Single jvp for entire batch, if has_batch is True
@@ -292,7 +308,6 @@ def fsp_laplace(
     cov_matrix = prior_cov_kernel(data["inputs"], data["inputs"])
 
     L = lanczos_isqrt(cov_matrix, v)
-    # L = laplax.curv.cov.full_prec_to_scale(cov_matrix)
     M, unravel_fn = compute_matrix_jacobian_product(
         model_fn,
         params,
@@ -321,12 +336,37 @@ def fsp_laplace(
         cov_mv=lambda state: lambda x: unflatten(
             state["scale_sqrt"] @ state["scale_sqrt"].T @ flatten(x)
         ),
-        scale_mv=lambda state: lambda x: state["scale_sqrt"] @ x,
+        scale_mv=lambda state: lambda x: unflatten(state["scale_sqrt"] @ x),
+        rank=s.shape[0],
     )
 
     posterior_fn = lambda *args, **kwargs: posterior  # noqa: E731
 
     # posterior_fn = set_posterior_fn("lanczos", curv_estimate, layout=params_correct)
+    from laplax.eval.pushforward import (
+        nonlin_pred_mean,
+        nonlin_pred_std,
+        nonlin_pred_var,
+        nonlin_setup,
+        set_nonlin_pushforward,
+    )
+
+    # set_prob_predictive = partial(
+    #     set_nonlin_pushforward,
+    #     model_fn=model_fn,
+    #     mean_params=params,
+    #     posterior_fn=posterior_fn,
+    #     pushforward_fns=[
+    #         nonlin_setup,
+    #         nonlin_pred_mean,
+    #         nonlin_pred_var,
+    #         nonlin_pred_std,
+    #     ],
+    #     key=jax.random.key(35892),
+    # )
+    from laplax.eval.pushforward import (
+        lin_samples,
+    )
 
     set_prob_predictive = partial(
         set_lin_pushforward,
@@ -338,7 +378,10 @@ def fsp_laplace(
             lin_pred_mean,
             lin_pred_var,
             lin_pred_std,
+            lin_samples,
         ],
+        key=jax.random.key(35892),
+        num_samples=100,
     )
 
     prob_predictive = set_prob_predictive(
@@ -347,20 +390,14 @@ def fsp_laplace(
 
     X_pred = jnp.linspace(0, 8, 200).reshape(200, 1)
     pred = jax.vmap(prob_predictive)(X_pred)
-    pred_model = jax.vmap(model_fn, in_axes=(0, None))(X_pred, params)
     _ = plot_regression_with_uncertainty(
         X_train=data["inputs"],
         y_train=data["targets"],
         X_pred=X_pred,
-        y_pred=pred["pred_mean"][
-            :, 0
-        ],  # pred_model[:, 0],  # pred["pred_mean"][:, 0],  # y_pred=pred["pred_mean"][:, 0],
+        y_pred=pred["pred_mean"][:, 0],
         y_std=jnp.sqrt(pred["pred_var"][:, 0]),
-        y_max=10,
+        y_samples=pred["samples"],
     )
-
-    plt.show()
-    print("Posterior mean:", pred["pred_mean"][:, 0])
 
 
 def main():
@@ -378,7 +415,7 @@ def main():
         num_valid_data=num_calibration_samples,
         num_test_data=num_test_samples,
         sigma_noise=0.3,
-        intervals=[(2, 3.1), (4.0, 4.1), (5, 6.1)],
+        intervals=[(2, 3.1), (3.9, 4.1), (4.9, 6.0)],
         rng_key=jax.random.key(0),
         dtype=jnp.float64,
     )
@@ -392,6 +429,7 @@ def main():
         "rngs": nnx.Rngs(key),
         "param": initial_log_scale,
         "data_size": num_training_samples,
+        "dtype": jnp.float64,
     }
     model, model_fn, _ = create_model(config)
 
@@ -421,7 +459,7 @@ def main():
 
     graph_def, params = nnx.split(model)
 
-    _ = plot_sinusoid_task(X_train, y_train, X_test, y_test, X_pred, y_pred)
+    # _ = plot_sinusoid_task(X_train, y_train, X_test, y_test, X_pred, y_pred)
 
     fsp_laplace(
         model_fn,

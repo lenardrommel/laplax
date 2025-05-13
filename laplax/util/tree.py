@@ -254,7 +254,7 @@ def zeros_like(tree: PyTree) -> PyTree:
     return jax.tree.map(jnp.zeros_like, tree)
 
 
-def randn_like(key: KeyType, tree: PyTree) -> PyTree:
+def randn_tree_like(key: KeyType, tree: PyTree) -> PyTree:
     """Generate a PyTree of random normal values with the same structure as the input.
 
     Args:
@@ -279,10 +279,28 @@ def randn_like(key: KeyType, tree: PyTree) -> PyTree:
     return jax.tree.unflatten(treedef, random_leaves)
 
 
+def randn_like(key: KeyType, layout: PyTree | int) -> PyTree:
+    """Generate a PyTree/Int of random normal values with the same structure as the input.
+
+    Args:
+        key: A JAX PRNG key.
+        layout: A PyTree whose structure will be replicated or rank of the 1d random vector.
+
+    Returns:
+        A PyTree of random normal values.
+    """
+    if isinstance(layout, int):
+        return jax.random.normal(key, shape=(layout,))
+
+    return randn_tree_like(key, layout)
+
+
 def normal_like(
     key: KeyType,
     mean: PyTree,
     scale_mv: Callable[[PyTree], PyTree],
+    *,
+    rank: int | None = None,
 ) -> PyTree:
     """Generate a PyTree of random normal values scaled and shifted by `mean`.
 
@@ -290,11 +308,13 @@ def normal_like(
         key: A JAX PRNG key.
         mean: A PyTree representing the mean of the distribution.
         scale_mv: A callable that scales a PyTree.
+        rank: The rank of the PyTree. If `None`, the layout is inferred from `mean`
+            assuming full rank.
 
     Returns:
         A PyTree of random normal values shifted by `mean`.
     """
-    return add(mean, scale_mv(randn_like(key, mean)))
+    return add(mean, scale_mv(randn_like(key, layout=mean if rank is None else rank)))
 
 
 def basis_vector_from_index(idx: int, tree: PyTree) -> PyTree:

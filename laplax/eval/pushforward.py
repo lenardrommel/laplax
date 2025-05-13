@@ -66,7 +66,12 @@ def set_get_weight_sample(key, mean_params, scale_mv, num_samples, **kwargs):
     keys = jax.random.split(key, num_samples)
 
     def get_weight_sample(idx):
-        return util.tree.normal_like(keys[idx], mean=mean_params, scale_mv=scale_mv)
+        return util.tree.normal_like(
+            keys[idx],
+            mean=mean_params,
+            scale_mv=scale_mv,
+            rank=kwargs.get("rank", None),  # If scale_mv assumes lower rank.
+        )
 
     return precompute_list(
         get_weight_sample,
@@ -195,6 +200,7 @@ def get_dist_state(
             mean_params=weight_sample_mean,
             scale_mv=posterior_state.scale_mv(posterior_state.state),
             num_samples=num_samples,
+            rank=posterior_state.rank,
             **kwargs,
         )
         dist_state["get_weight_samples"] = get_weight_samples

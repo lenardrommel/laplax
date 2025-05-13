@@ -537,6 +537,7 @@ class Posterior:
     state: PosteriorState
     cov_mv: Callable[[PosteriorState], Callable[[FlatParams], FlatParams]]
     scale_mv: Callable[[PosteriorState], Callable[[FlatParams], FlatParams]]
+    rank: int | None = None  # If scale_mv is low-rank, rank is the rank of the low-rank
 
 
 def estimate_curvature(
