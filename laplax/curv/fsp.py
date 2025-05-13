@@ -9,6 +9,48 @@ from laplax.enums import LossFn
 from laplax.types import Callable, Data, Float, ModelFn, Params, PredArray
 from laplax.util import tree
 
+
+# --------------------------------------------------------------------------------------
+# FSP training utilities
+# --------------------------------------------------------------------------------------
+class ModelWrapper(nnx.Module):
+    class ModelWrapper:
+        """A wrapper class for a neural network model that integrates parameters and data size.
+
+        Attributes:
+            model (Callable): The neural network model to be wrapped.
+            param (nnx.Param): A parameter object initialized with the given parameter values.
+            N (int): The size of the dataset.
+
+        Methods:
+            __call__(x):
+                Invokes the wrapped model with the input `x`.
+
+            to_float64():
+                Converts the model parameters to float64 precision.
+
+        Args:
+            model (Callable): The neural network model to be wrapped.
+            param (array-like): The initial parameter values for the model.
+            data_size (int): The size of the dataset.
+        """
+
+    def __init__(self, model, param, data_size, dtype):
+        self.model = model
+        self.param = nnx.Param(jnp.asarray(param))
+        self.N = data_size
+        if dtype is jnp.float64:
+            self.model = self.model.to_float64()
+
+    def __call__(self, x):
+        return self.model(x)
+
+    def to_float64(self):
+        graph_def, params = nnx.split(self.model)
+        params = laplax.util.tree.to_dtype(params, jnp.float64)
+        return nnx.merge(graph_def, params)
+
+
 # --------------------------------------------------------------------------------------
 # FSP training objective
 # --------------------------------------------------------------------------------------
@@ -85,7 +127,6 @@ def create_fsp_objective(
 
     # Create objective
     def fsp_objective(data: Data, context_points: PredArray, params: Params) -> Float:
-        # NLL scaling is now handled inside the loss_nll function
         return loss_nll(data, params) + loss_reg(context_points, params)
 
     return fsp_objective
@@ -164,6 +205,123 @@ def compute_matrix_jacobian_product(
         M_tree,
     )
     return M, unravel_fn
+
+
+def _compute_curvature_fn(
+    model_fn: ModelFn,
+    params: Params,
+    data: Data,
+    ggn: PredArray,
+    prior_var: PredArray,
+    u: PredArray,
+):
+    _eigvals, _eigvecs = jnp.linalg.eigh(ggn)
+    eps = jnp.finfo(ggn.dtype).eps
+    tol = eps * (_eigvals.max() ** 0.5) * _eigvals.shape[0]
+    eigvals = _eigvals[_eigvals > tol]
+    eigvecs = _eigvecs[:, _eigvals > tol]
+    eigvals = jnp.flip(eigvals, axis=0)
+    eigvecs = jnp.flip(eigvecs, axis=1)
+
+    def normalize_eigvecs(evals, u, evecs):
+        return u @ (evecs * (1 / jnp.sqrt(evals)))
+
+    def jvp(x, v):
+        return jax.jvp(lambda p: model_fn(x, params=p), (params,), (v,))[1]
+
+    i = 0
+    post_var = jnp.zeros((prior_var.shape[0],))
+    prior_var_sum = jnp.sum(prior_var)
+    cov_sqrt = []
+    _, unflatten = laplax.util.flatten.create_pytree_flattener(params)
+    while jnp.all(post_var < prior_var) and i < eigvals.shape[0]:
+        cov_sqrt += [jax.jit(normalize_eigvecs)(eigvals[i], u, eigvecs[:, i])]
+        lr_fac_i = jax.jit(unflatten)(cov_sqrt[-1])
+        post_var += jnp.concatenate(
+            [jax.jit(jvp)(x_c, lr_fac_i) ** 2 for x_c in data["test_inputs"]], axis=0
+        )
+        print(f"{i} - post_tr={post_var.sum()} - prior_tr={prior_var_sum}")
+        i += 1
+
+    truncation_idx = i if i == eigvals.shape[0] else i - 1
+    print(f"Truncation index: {truncation_idx}")
+    return jnp.stack(cov_sqrt[:truncation_idx], axis=-1)
+
+
+def compute_curvature_fn(
+    model_fn: ModelFn,
+    params: Params,
+    data: Data,  # maybe change to test_data
+    ggn: PredArray,
+    prior_var: PredArray,
+    u: PredArray,
+) -> PredArray:
+    _eigvals, _eigvecs = jnp.linalg.eigh(ggn)
+    eps = jnp.finfo(ggn.dtype).eps
+    tol = eps * (_eigvals.max() ** 0.5) * _eigvals.shape[0]
+    eigvals = _eigvals[_eigvals > tol]
+    eigvecs = _eigvecs[:, _eigvals > tol]
+    eigvals = jnp.flip(eigvals, axis=0)
+    eigvecs = jnp.flip(eigvecs, axis=1)
+
+    def create_scan_fn(
+        unflatten_fn, _u, eigvecs, eigvals, params, model_fn, data, prior_var
+    ):
+        def scan_fn(carry, i):
+            post_var, valid_indices = carry
+
+            new_cov = _u @ (eigvecs[:, i] * (1 / eigvals[i] ** 0.5))
+            lr_fac_i = unflatten_fn(new_cov)  # Use captured unflatten
+
+            all_inputs = jnp.array(
+                data["test_inputs"]
+            )  # maybe change to data["test_inputs"] used to be data["inputs"]
+
+            def compute_jvp_squared(x):
+                jvp_result = jax.jvp(lambda p: model_fn(x, p), (params,), (lr_fac_i,))[
+                    1
+                ]
+                return jnp.square(jvp_result)
+
+            jvp_squared_results = jax.vmap(compute_jvp_squared)(all_inputs)
+            jvp_squared_concat = jnp.reshape(jvp_squared_results, post_var.shape)
+
+            new_post_var = post_var + jvp_squared_concat
+            is_valid = jnp.all(new_post_var < prior_var)
+
+            new_valid_indices = jax.lax.cond(
+                is_valid,
+                lambda _: valid_indices.at[i].set(True),
+                lambda _: valid_indices,
+                None,
+            )
+
+            return (new_post_var, new_valid_indices), (new_cov, is_valid)
+
+        return scan_fn
+
+    _, unflatten = laplax.util.flatten.create_pytree_flattener(params)
+
+    scan_fn = create_scan_fn(
+        unflatten, u, eigvecs, eigvals, params, model_fn, data, prior_var
+    )
+
+    init_post_var = jnp.zeros((prior_var.shape[0],))
+    init_valid_indices = jnp.zeros(eigvals.shape[0], dtype=jnp.bool_)
+
+    (final_post_var, final_valid_indices), (covs, validity) = jax.lax.scan(
+        scan_fn, (init_post_var, init_valid_indices), jnp.arange(eigvals.shape[0])
+    )
+    cumulative_validity = jnp.cumprod(validity)
+
+    n_valid = jnp.sum(cumulative_validity)
+
+    n_valid_int = jnp.minimum(
+        jnp.array(eigvals.shape[0], dtype=jnp.int32),
+        jnp.array(n_valid, dtype=jnp.int32),
+    )
+    valid_covs = jax.lax.dynamic_slice(covs, (0, 0), (n_valid_int, covs.shape[1]))
+    return jnp.transpose(valid_covs)
 
 
 def fsp_laplace(

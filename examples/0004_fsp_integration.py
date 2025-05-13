@@ -29,6 +29,8 @@ from laplax.curv.fsp import (
     create_loss_mse,
     create_loss_nll,
     create_loss_reg,
+    compute_curvature_fn,
+    _compute_curvature_fn,
     lanczos_jacobian_initialization,
 )
 from laplax.curv.lanczos_isqrt import lanczos_isqrt
@@ -51,6 +53,7 @@ from laplax.types import (
     PredArray,
 )
 from laplax.util.flatten import create_partial_pytree_flattener
+import time
 
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_debug_nans", True)
@@ -66,7 +69,7 @@ class Model(nnx.Module):
         return x
 
 
-class ModelWrapper(nnx.Module):
+class ModelWrapper(nnx.Module):  # moved to fsp.py
     def __init__(self, model, param, data_size):
         self.model = model
         self.param = nnx.Param(jnp.asarray(param))
@@ -148,11 +151,6 @@ def create_model(config):
 
     if param is not None and data_size is not None:
         model = ModelWrapper(model, param, data_size)
-
-    # graph_def, _ = nnx.split(model)
-
-    # def model_fn(input, params):
-    #     return nnx.call((graph_def, params))(input)[0]
 
     return model, model_fn, graph_def
 
@@ -275,52 +273,6 @@ def create_fsp_ggn_mv(
     return fsp_ggn_mv
 
 
-def compute_curvature_fn(model_fn, params, ggn):
-    eigvals, eigvecs = jnp.linalg.eigh(ggn)
-    eigvals = jnp.flip(eigvals, axis=0)
-    eigvecs = jnp.flip(eigvecs, axis=1)
-
-    _, unravel_fn = ravel_pytree(params)
-
-    def _compute_cov_sqrt(_u):
-        cov_sqrt = _u @ (eigvecs[:, ::-1] / jnp.sqrt(eigvals[::-1]))
-
-        def jvp(x, v):
-            return jax.jvp(lambda p: model_fn(x, p), (params,), (v,))[1]
-
-        def scan_fn(
-            carry, i
-        ):  # TODO: implement scan to not compare the sum, but all elements of vectors
-            running_sum, truncation_idx = carry
-            lr_fac = unravel_fn(cov_sqrt[:, i])
-            sqrt_jvp = jax.vmap(lambda xc: jvp(xc, lr_fac) ** 2)(X_train)
-            pv = jnp.sum(sqrt_jvp)
-            new_running_sum = running_sum + pv
-            new_truncation_idx = jax.lax.cond(
-                (new_running_sum >= 150) & (truncation_idx == -1),
-                lambda _: i + 1,  # We found our index
-                lambda _: truncation_idx,  # Keep current value
-                operand=None,
-            )
-
-            return (new_running_sum, new_truncation_idx), sqrt_jvp
-
-        init_carry = (0.0, -1)
-        indices = jnp.arange(eigvals.shape[0])
-        (_, truncation_idx), post_var = jax.lax.scan(scan_fn, init_carry, indices)
-
-        truncation_idx = jax.lax.cond(
-            truncation_idx == -1,
-            lambda _: eigvals.shape[0],
-            lambda _: truncation_idx,
-            operand=None,
-        )
-
-        return cov_sqrt[:, :truncation_idx]
-
-    return _compute_cov_sqrt
-
-
 def fsp_laplace(
     model_fn,
     params,
@@ -340,8 +292,8 @@ def fsp_laplace(
     op = op if isinstance(op, Callable) else lambda x: op @ x
     cov_matrix = prior_cov_kernel(data["inputs"], data["inputs"])
 
-    # L = lanczos_isqrt(cov_matrix, v)
-    L = laplax.curv.cov.full_prec_to_scale(cov_matrix)
+    L = lanczos_isqrt(cov_matrix, v)
+    # L = laplax.curv.cov.full_prec_to_scale(cov_matrix)
     M, unravel_fn = compute_matrix_jacobian_product(
         model_fn,
         params,
@@ -358,45 +310,10 @@ def fsp_laplace(
     _u = _u[:, : s.size]
 
     ggn_matrix = create_fsp_ggn_mv(model_fn, params, M, False)(data)
-    _eigvals, _eigvecs = jnp.linalg.eigh(ggn_matrix)
-    eps = jnp.finfo(M.dtype).eps
-    tol = eps * (_eigvals.max() ** 0.5) * s.shape[0]
-    eigvals = _eigvals[_eigvals > tol]
-    eigvecs = _eigvecs[:, _eigvals > tol]
-    eigvals = jnp.flip(eigvals, axis=0)
-    eigvecs = jnp.flip(eigvecs, axis=1)
 
-    # ==========
-    params = laplax.util.tree.to_dtype(params, jnp.float64)
+    prior_var = jnp.diag(prior_cov_kernel(data["test_inputs"], data["test_inputs"]))
 
-    # Tristan ==========
-    i = 0
-    post_var = jnp.zeros((150, 1))
-    prior_var = jnp.diag(prior_cov_kernel(data["inputs"], data["inputs"]))
-    cov_sqrt = []
-    _, unflatten = laplax.util.flatten.create_pytree_flattener(params)
-
-    def _f1(_e, _u, _v):
-        return _u @ (_v * (1 / _e**0.5))
-
-    def _f2(_x, _v):
-        return jax.jvp(lambda _p: model_fn(_x, _p), (params,), (_v,))[1]
-
-    while jnp.all(post_var < prior_var) and i < eigvals.shape[0]:
-        cov_sqrt += [jax.jit(_f1)(eigvals[i], _u, eigvecs[:, i])]
-        lr_fac_i = jax.jit(unflatten)(cov_sqrt[-1])
-        post_var += jnp.concatenate(
-            [jax.jit(_f2)(x_c, lr_fac_i) ** 2 for x_c in data["inputs"]], axis=0
-        )
-        print(f"{i} - post_tr={post_var.sum()} - prior_tr={prior_var.sum()}")
-        i += 1
-
-    truncation_idx = i if i == eigvals.shape[0] else i - 1
-    print(f"Truncation index: {truncation_idx}")
-    S = jnp.stack(cov_sqrt[:truncation_idx], axis=-1)
-    # Tristan ==========
-
-    # cov_sqrt = compute_curvature_fn(model_fn, params, ggn_matrix)(_u)
+    S = compute_curvature_fn(model_fn, params, data, ggn_matrix, prior_var, _u)
 
     posterior_state: PosteriorState = {"scale_sqrt": S}
     flatten, unflatten = laplax.util.flatten.create_pytree_flattener(params)
@@ -407,7 +324,7 @@ def fsp_laplace(
         ),
         scale_mv=lambda state: lambda x: state["scale_sqrt"] @ x,
     )
-    # curv_estimate = LowRankTerms(S, s, 1)
+
     posterior_fn = lambda *args, **kwargs: posterior
 
     # posterior_fn = set_posterior_fn("lanczos", curv_estimate, layout=params_correct)
@@ -467,7 +384,7 @@ def main():
         dtype=jnp.float64,
     )
     train_loader = DataLoader(X_train, y_train, batch_size)
-    data = {"inputs": X_train, "targets": y_train}
+    data = {"inputs": X_train, "targets": y_train, "test_inputs": X_test}
     initial_log_scale = jnp.log(0.1)
     config = {
         "in_channels": 1,
@@ -480,7 +397,7 @@ def main():
     model, model_fn, _ = create_model(config)
 
     kernel_fn, prior_arguments = create_kernel_fn(
-        lengthscale=8 / jnp.pi, output_scale=0.001, noise_variance=0.1
+        lengthscale=4 / jnp.pi, output_scale=1.0, noise_variance=0.001
     )
 
     # Choose loss function type: 'mse', 'nll', or 'fsp'
