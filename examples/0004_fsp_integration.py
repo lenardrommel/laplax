@@ -461,8 +461,8 @@ def main():
         num_train_data=num_training_samples,
         num_valid_data=num_calibration_samples,
         num_test_data=num_test_samples,
-        sigma_noise=0.01,
-        intervals=[(3, 3.1), (4.0, 4.1), (5, 5.1)],
+        sigma_noise=0.3,
+        intervals=[(2, 3.1), (4.0, 4.1), (5, 6.1)],
         rng_key=jax.random.key(0),
         dtype=jnp.float64,
     )
@@ -480,7 +480,7 @@ def main():
     model, model_fn, _ = create_model(config)
 
     kernel_fn, prior_arguments = create_kernel_fn(
-        lengthscale=8 / jnp.pi, output_scale=0.5, noise_variance=0.001
+        lengthscale=8 / jnp.pi, output_scale=0.001, noise_variance=0.1
     )
 
     # Choose loss function type: 'mse', 'nll', or 'fsp'

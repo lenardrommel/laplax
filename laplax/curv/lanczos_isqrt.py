@@ -65,6 +65,7 @@ def lanczos_isqrt(
     rs_norm_sq = jnp.ones_like(rs, shape=max_iter + 1)
 
     # Initialize loop variables
+    tol = jnp.finfo(A.dtype).eps
     sqtol = (
         tol**2
     )  # max(tol ** 2, jnp.finfo(A.dtype).eps) if tol is not None else jnp.finfo(A.dtype).eps
