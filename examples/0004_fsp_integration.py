@@ -24,13 +24,13 @@ import laplax
 from laplax.curv import estimate_curvature
 from laplax.curv.cov import Posterior, set_posterior_fn
 from laplax.curv.fsp import (
+    _compute_curvature_fn,
+    compute_curvature_fn,
     compute_matrix_jacobian_product,
     create_fsp_objective,
     create_loss_mse,
     create_loss_nll,
     create_loss_reg,
-    compute_curvature_fn,
-    _compute_curvature_fn,
     lanczos_jacobian_initialization,
 )
 from laplax.curv.lanczos_isqrt import lanczos_isqrt
@@ -53,7 +53,6 @@ from laplax.types import (
     PredArray,
 )
 from laplax.util.flatten import create_partial_pytree_flattener
-import time
 
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_debug_nans", True)
@@ -325,7 +324,7 @@ def fsp_laplace(
         scale_mv=lambda state: lambda x: state["scale_sqrt"] @ x,
     )
 
-    posterior_fn = lambda *args, **kwargs: posterior
+    posterior_fn = lambda *args, **kwargs: posterior  # noqa: E731
 
     # posterior_fn = set_posterior_fn("lanczos", curv_estimate, layout=params_correct)
 
@@ -353,9 +352,9 @@ def fsp_laplace(
         X_train=data["inputs"],
         y_train=data["targets"],
         X_pred=X_pred,
-        y_pred=pred_model[
+        y_pred=pred["pred_mean"][
             :, 0
-        ],  # pred["pred_mean"][:, 0],  # y_pred=pred["pred_mean"][:, 0],
+        ],  # pred_model[:, 0],  # pred["pred_mean"][:, 0],  # y_pred=pred["pred_mean"][:, 0],
         y_std=jnp.sqrt(pred["pred_var"][:, 0]),
         y_max=10,
     )
