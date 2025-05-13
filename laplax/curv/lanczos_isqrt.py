@@ -8,7 +8,7 @@ def lanczos_isqrt(
     *,
     tol=1e-5,
     min_eta=1e-20,
-    max_iter=10,
+    max_iter=100,
     overwrite_b=False,
 ):
     """Conjugate gradient method to solve the linear system Ax = b.

@@ -17,6 +17,7 @@ def plot_regression_with_uncertainty(
     y_pred=None,
     y_std=None,
     title=None,
+    y_max=None,
 ):
     """Plot regression data with optional prediction and uncertainty.
 
@@ -29,6 +30,7 @@ def plot_regression_with_uncertainty(
         y_pred: Prediction mean (shape: n_samples, 1), optional
         y_std: Prediction standard deviation (shape: n_samples, 1), optional
         title: Plot title, optional
+        y_max: Maximum scale for the y-axis, optional
     """
     plt.figure(figsize=(10, 6))
 
@@ -90,6 +92,10 @@ def plot_regression_with_uncertainty(
         plt.title(title)
     else:
         plt.title("Regression with Uncertainty")
+
+    # Set y-axis limit if y_max is provided
+    if y_max is not None:
+        plt.ylim(bottom=-y_max, top=y_max)
 
     plt.legend()
     plt.grid(True, alpha=0.3)

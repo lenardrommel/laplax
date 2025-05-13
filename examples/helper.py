@@ -4,6 +4,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import random
+from flax import nnx
+import laplax
 
 jax.config.update("jax_enable_x64", True)
 
@@ -174,7 +176,12 @@ class L2InnerProductKernel:
 
 
 def build_covariance_matrix(kernel, X1, X2):
-    return jnp.array([[kernel(x1, x2) for x2 in X2] for x1 in X1])
+    """Build covariance matrix in a JAX-compatible way using vmap."""
+
+    def kernel_row(x1):
+        return jax.vmap(lambda x2: kernel(x1, x2))(X2)
+
+    return jax.vmap(kernel_row)(X1)
 
 
 def gp_regression(
@@ -225,3 +232,9 @@ def gp_regression(
         lambda x, y, sigma=1e-4: build_covariance_matrix(kernel, x, y)
         + sigma * jnp.eye(x.shape[0]),
     )
+
+
+def to_float64(model):
+    graph_def, params = nnx.split(model)
+    params = laplax.util.tree.to_dtype(params, jnp.float64)
+    return nnx.merge(graph_def, params)
