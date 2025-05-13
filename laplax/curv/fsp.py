@@ -25,7 +25,7 @@ def create_loss_mse(model_fn: ModelFn):
 
     def loss_mse(data: Data, params: Params) -> Float:
         pred = model_fn(data["inputs"], params)
-        return jnp.mean(jax.numpy.square(pred - data["targets"]))
+        return jnp.mean(jax.numpy.square(pred - data["target"]))
 
     return loss_mse
 
@@ -45,8 +45,8 @@ def create_loss_nll(
         scale_param = params["param"]
         model_params = params["model"]
         noise_scale = scale_param.value
-        preds = jax.vmap(model_fn, in_axes=(0, None))(data["inputs"], model_params)
-        sq_diff = jnp.square(preds - data["targets"])
+        preds = jax.vmap(model_fn, in_axes=(0, None))(data["input"], model_params)
+        sq_diff = jnp.square(preds - data["target"])
         log_term = 0.5 * jnp.log(2 * jnp.pi * noise_scale**2)
         precision_term = 0.5 * sq_diff / (noise_scale**2)
         nll = log_term + precision_term
@@ -123,12 +123,12 @@ def lanczos_jacobian_initialization(
 
         initial_vec = jax.lax.map(
             model_jvp,
-            data["inputs"],
+            data["input"],
             batch_size=lanczos_initialization_batch_size,
         ).reshape(-1)
     else:
         initial_vec = jax.jvp(
-            lambda w: model_fn(data["inputs"], params=w),
+            lambda w: model_fn(data["input"], params=w),
             (params,),
             (tree.ones_like(params),),
         )[1]
@@ -157,7 +157,7 @@ def compute_matrix_jacobian_product(
     M_tree = jax.vmap(
         jax.vjp(
             lambda p: jnp.reshape(
-                model_fn(data["inputs"], params=p), (matrix.shape[0],)
+                model_fn(data["input"], params=p), (matrix.shape[0],)
             ),
             params,
         )[1],
@@ -197,8 +197,8 @@ def compute_curvature_fn(
             lr_fac_i = unflatten_fn(new_cov)  # Use captured unflatten
 
             all_inputs = jnp.array(
-                data["test_inputs"]
-            )  # maybe change to data["test_inputs"] used to be data["inputs"]
+                data["test_input"]
+            )  # maybe change to data["test_input"] used to be data["input"]
 
             def compute_jvp_squared(x):
                 jvp_result = jax.jvp(lambda p: model_fn(x, p), (params,), (lr_fac_i,))[

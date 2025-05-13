@@ -144,7 +144,7 @@ def train_model(model, n_epochs, train_loader, loss_fn, lr=1e-3):
 
     for epoch in range(n_epochs):
         for x_tr, y_tr in train_loader:
-            data = {"inputs": x_tr, "targets": y_tr}
+            data = {"input": x_tr, "target": y_tr}
             loss = train_step_fn(model, optimizer, data)
 
         if epoch % 100 == 0:
@@ -236,20 +236,10 @@ def create_fsp_ggn_mv(
     has_batch,
     loss_hessian_mv=None,
 ):
-    flat_params, unravel_fn = ravel_pytree(params)
-
     _u, _s, _ = jnp.linalg.svd(M, full_matrices=False)
     tol = jnp.finfo(M.dtype).eps ** 2
-    s = _s[_s > tol]  # (80,)
+    s = _s[_s > tol]
     u = _u[:, : s.size]
-
-    # def jac_mv(model_fn, params, x):
-    #     return jax.vmap(
-    #         lambda u_flat: jax.jvp(
-    #             lambda p: model_fn(x, p), (params,), (unravel_fn(u_flat),)
-    #         )[1],  # noqa: E501
-    #         in_axes=1,
-    #     )(u)
 
     if has_batch:
         msg = (
@@ -258,25 +248,37 @@ def create_fsp_ggn_mv(
         )
         raise NotImplementedError(msg)
 
-    def ggn_mv(vec, data):
-        # Step 1: Single jvp for entire batch, if has_batch is True
-        def fwd(p):
-            if has_batch:
-                return jax.vmap(lambda x: model_fn(input=x, params=p))(data["inputs"])
-            return model_fn(input=data["inputs"], params=p)
+    def identity_loss_hessian_mv(v, pred=None, target=None):
+        return v
 
-        # Step 2: Linearize the forward pass
-        z, jvp = jax.linearize(fwd, params)
+    ggn_mv = create_ggn_mv_without_data(
+        model_fn=model_fn,
+        params=params,
+        loss_fn="identity",  # Placeholder - we're providing custom loss_hessian_mv
+        factor=1.0,
+        has_batch=has_batch,
+        loss_hessian_mv=identity_loss_hessian_mv,
+    )
 
-        # Step 3: Compute J^T H J v
-        HJv = jvp(vec)
-        # HJv = loss_hessian_mv(jvp(vec), pred=z, target=data["targets"])
+    # def ggn_mv(vec, data):
+    #     # Step 1: Single jvp for entire batch, if has_batch is True
+    #     def fwd(p):
+    #         if has_batch:
+    #             return jax.vmap(lambda x: model_fn(input=x, params=p))(data["inputs"])
+    #         return model_fn(input=data["inputs"], params=p)
 
-        # Step 4: Compute the GGN vector
-        arr = jax.linear_transpose(jvp, vec)(HJv)[0]
+    #     # Step 2: Linearize the forward pass
+    #     z, jvp = jax.linearize(fwd, params)
 
-        factor = 1.0
-        return laplax.util.tree.mul(factor, arr)
+    #     # Step 3: Compute J^T H J v
+    #     HJv = jvp(vec)
+    #     # HJv = loss_hessian_mv(jvp(vec), pred=z, target=data["target"])
+
+    #     # Step 4: Compute the GGN vector
+    #     arr = jax.linear_transpose(jvp, vec)(HJv)[0]
+
+    #     factor = 1.0
+    #     return laplax.util.tree.mul(factor, arr)
 
     ggn_mv_wrapped = laplax.util.flatten.flatten_function(ggn_mv, layout=params)
 
@@ -305,7 +307,7 @@ def fsp_laplace(
     # Define cov operator
     op = prior_cov_kernel(context_points, context_points)
     op = op if isinstance(op, Callable) else lambda x: op @ x
-    cov_matrix = prior_cov_kernel(data["inputs"], data["inputs"])
+    cov_matrix = prior_cov_kernel(data["input"], data["input"])
 
     L = lanczos_isqrt(cov_matrix, v)
     M, unravel_fn = compute_matrix_jacobian_product(
@@ -325,7 +327,7 @@ def fsp_laplace(
 
     ggn_matrix = create_fsp_ggn_mv(model_fn, params, M, False)(data)
 
-    prior_var = jnp.diag(prior_cov_kernel(data["test_inputs"], data["test_inputs"]))
+    prior_var = jnp.diag(prior_cov_kernel(data["test_input"], data["test_input"]))
 
     S = compute_curvature_fn(model_fn, params, data, ggn_matrix, prior_var, _u)
 
@@ -391,8 +393,8 @@ def fsp_laplace(
     X_pred = jnp.linspace(0, 8, 200).reshape(200, 1)
     pred = jax.vmap(prob_predictive)(X_pred)
     _ = plot_regression_with_uncertainty(
-        X_train=data["inputs"],
-        y_train=data["targets"],
+        X_train=data["input"],
+        y_train=data["target"],
         X_pred=X_pred,
         y_pred=pred["pred_mean"][:, 0],
         y_std=jnp.sqrt(pred["pred_var"][:, 0]),
@@ -420,7 +422,7 @@ def main():
         dtype=jnp.float64,
     )
     train_loader = DataLoader(X_train, y_train, batch_size)
-    data = {"inputs": X_train, "targets": y_train, "test_inputs": X_test}
+    data = {"input": X_train, "target": y_train, "test_input": X_test}
     initial_log_scale = jnp.log(0.1)
     config = {
         "in_channels": 1,
