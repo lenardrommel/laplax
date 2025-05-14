@@ -347,19 +347,19 @@ def optimize_prior_prec_gradient(
 
 def save_model_checkpoint(
     model,
-    checkpoint_dir: str = "./tmp/my-checkpoints/",
-    experiment_name: str = "test",
+    checkpoint_path: str | Path = "./tests/test-checkpoints",
 ):
     """Save model checkpoint using Orbax."""
-    ckpt_dir = Path(checkpoint_dir) / experiment_name / 'state'
+    ckpt_dir = Path(checkpoint_path)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     # Split model into graph and params for checkpointing
     _, state = nnx.split(model)
 
     # Save the checkpoint
     checkpointer = ocp.StandardCheckpointer()
-    checkpointer.save(ckpt_dir.resolve(), state)
-
+    checkpointer.save(ckpt_dir.resolve(), state, force=True)
+    checkpointer.wait_until_finished()
     logger.info(f"Model checkpoint saved to {ckpt_dir}")
     return ckpt_dir
 
@@ -370,18 +370,17 @@ def load_model_checkpoint(
     checkpoint_path,
 ):
     """Load model checkpoint using Orbax."""
-    abstract_model = nnx.eval_shape(lambda: model_class(**model_kwargs, rngs=nnx.Rngs(0)))
-    graph_def, abstract_state = nnx.split(abstract_model)
+    model = model_class(**model_kwargs, rngs=nnx.Rngs(0))
+    graph_def, abstract_state = nnx.split(model)
 
     # Restore the checkpoint
     checkpointer = ocp.StandardCheckpointer()
-    ckpt_dir = Path(checkpoint_path) / 'state'
     state_restored = checkpointer.restore(
-        ckpt_dir.resolve(),
+        Path(checkpoint_path).resolve(),
         abstract_state,
     )
 
-    # Recombine into model
+    # Merge into model
     model = nnx.merge(graph_def, state_restored)
 
     logger.info(f"Model checkpoint loaded from {checkpoint_path}")
@@ -436,7 +435,10 @@ def train_sinusoid_model(
     model = train_map_model(model, train_loader, n_epochs=n_epochs, lr=lr)
 
     # Save checkpoint
-    checkpoint_path = save_model_checkpoint(model, checkpoint_dir, experiment_name)
+    checkpoint_path = save_model_checkpoint(
+        model,
+        Path(checkpoint_dir) / experiment_name,
+    )
 
     # Return data loaders and checkpoint path for potential immediate use
     return {
@@ -702,7 +704,7 @@ if __name__ == "__main__":
     # Example usage - split approach
     # 1. Train the model once
     train_result = train_sinusoid_model(
-        n_epochs=1000,
+        n_epochs=10,
         hidden_channels=64,
         checkpoint_dir="checkpoints",
     )

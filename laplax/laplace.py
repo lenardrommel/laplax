@@ -237,7 +237,7 @@ def laplace(
         Whether the model expects a leading batch axis.
     **curv_kwargs
         Forwarded to :func:`laplax.curv.cov.estimate_curvature`.
-
+`
     Returns
     -------
     posterior_fn
@@ -345,6 +345,10 @@ def _make_mll_objective(
     )
 
 
+def _check_if_none(*args: Any) -> bool:
+    return any(x is None for x in args)
+
+
 def _build_calibration_objective(
     objective_type: CalibrationObjective | str,
     *,
@@ -360,7 +364,7 @@ def _build_calibration_objective(
 
     if (
         objective_type is CalibrationObjective.MARGINAL_LOG_LIKELIHOOD
-        and None in {curv_estimate, model_fn, params, curv_type}
+        and _check_if_none(curv_estimate, model_fn, params, curv_type)
     ):
         msg = (
             "Marginal log-likelihood objective requires "
