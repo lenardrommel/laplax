@@ -1,0 +1,472 @@
+from functools import partial
+from pathlib import Path
+from itertools import product
+
+import jax
+import jax.numpy as jnp
+import torch
+from flax import nnx
+from loguru import logger
+from torch.utils.data import DataLoader, random_split
+from torchvision import datasets, transforms
+
+from laplax.curv import estimate_curvature, set_posterior_fn
+from laplax.enums import CurvApprox, LossFn
+from laplax.laplace import (
+    GGN, 
+    PredictiveType, 
+    PushforwardType, 
+    calibration, 
+    evaluation, 
+    register_calibration_method, 
+    CalibrationObjective
+)
+from laplax.eval import apply_fns
+from laplax.eval.metrics import correctness, expected_calibration_error
+
+from ex_helper import (  # isort: skip
+    load_model_checkpoint,
+    load_with_pickle,
+    save_model_checkpoint,
+    save_with_pickle,
+    split_model,
+    train_map_model,
+    generate_experiment_name,
+    CSVLogger,
+    optimize_prior_prec_gradient
+)
+from ex_helper import LimitedLoader
+
+
+# ------------------------------------------------------------------------------
+# CIFAR-10 Data
+# ------------------------------------------------------------------------------
+
+
+def cifar10_collate_fn(batch):
+    images, labels = zip(*batch, strict=False)
+    images = torch.stack(images, dim=0)\
+        .permute(0, 2, 3, 1).detach().cpu().numpy()
+    labels = torch.tensor(labels, dtype=torch.int32) \
+        .detach().cpu().numpy()
+    return images, labels
+
+
+def setup_cifar10_data():
+    """Setup CIFAR-10 data."""
+    mean = (0.4914, 0.4822, 0.4465)
+    std = (0.2470, 0.2435, 0.2616)
+
+    train_transforms = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+    ])
+
+    test_transforms = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+    ])
+
+    # Download (or Load) datasets
+    train_set = datasets.CIFAR10(root='./data', train=True, download=True,
+                                  transform=train_transforms)
+    test_set = datasets.CIFAR10(root='./data', train=False, download=True,
+                                  transform=test_transforms)
+
+    # Split train → train/valid
+    train_size = int(0.9 * len(train_set))  # 45,000
+    valid_size = len(train_set) - train_size  # 5,000
+    train_set, valid_set = random_split(train_set, [train_size, valid_size],
+                                        generator=torch.Generator().manual_seed(42))
+
+    # Create DataLoaders
+    batch_size = 128
+    num_workers = 4  # adjust if you like
+
+    dataloader_kwargs = {
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        "pin_memory": True,
+        "collate_fn": cifar10_collate_fn,
+        "multiprocessing_context": "spawn",
+    }
+    train_loader = DataLoader(train_set, shuffle=True, **dataloader_kwargs)
+    valid_loader = DataLoader(valid_set, shuffle=False, **dataloader_kwargs)
+    test_loader = DataLoader(test_set, shuffle=False, **dataloader_kwargs)
+
+    return train_loader, valid_loader, test_loader
+
+
+# ------------------------------------------------------------------------------
+# CIFAR-10 CNN
+# ------------------------------------------------------------------------------
+
+
+class CIFAR10CNN(nnx.Module):
+    """A simple 3-conv / 2-FC CNN for CIFAR-10."""
+
+    def __init__(self, *, rngs: nnx.Rngs):
+        # Conv blocks
+        self.conv1 = nnx.Conv(3, 32, kernel_size=(3, 3), padding='SAME', rngs=rngs)
+        self.conv2 = nnx.Conv(32, 64, kernel_size=(3, 3), padding='SAME', rngs=rngs)
+        self.conv3 = nnx.Conv(64, 128, kernel_size=(3, 3), padding='SAME', rngs=rngs)
+
+        # Pooling helper
+        self.pool = partial(nnx.max_pool, window_shape=(2, 2), strides=(2, 2), padding='VALID')
+
+        # Fully-connected layers
+        # After 3×pool on 32×32 input → 4×4 feature maps of 128 channels:
+        #   32 → 16 → 8 → 4
+        flat_dim = 4 * 4 * 128
+        self.fc1 = nnx.Linear(flat_dim, 256, rngs=rngs)
+        self.final_layer = nnx.Linear(256, 10, rngs=rngs) # TODO: Rename final_layer
+
+    def __call__(self, x: jax.Array) -> jax.Array:
+        # x: [32, 32, 3] - No batch dimension assumed
+        x = nnx.relu(self.conv1(x))
+        x = self.pool(x)               # → [16,16,32]
+
+        x = nnx.relu(self.conv2(x))
+        x = self.pool(x)               # → [8, 8,64]
+
+        x = nnx.relu(self.conv3(x))
+        x = self.pool(x)               # → [4, 4,128]
+
+        x = x.reshape(-1)              # → [4*4*128]
+        x = nnx.relu(self.fc1(x))
+        x = self.final_layer(x)                # → [10]
+        return x
+
+
+# ------------------------------------------------------------------------------
+# Laplace Approximation
+# ------------------------------------------------------------------------------
+
+
+def compute_ggn(
+    model,
+    train_loader,
+    curv_type: CurvApprox = CurvApprox.LANCZOS,
+    *,
+    num_batches: int = 10,
+    max_rank: int = 10,
+    last_layer_only=False,
+    checkpoint_dir="./checkpoints/",
+):
+    """Compute the GGN of the model."""
+    # Split model
+    model_fn, params = split_model(model, last_layer_only=last_layer_only)
+
+    # Create GGN
+    ggn_name = f"ggn_c={curv_type}_n={num_batches}_r={max_rank}_ll={last_layer_only}"
+    train_loader = LimitedLoader(train_loader, num_batches)
+
+    ggn_mv = GGN(
+        model_fn,
+        params,
+        train_loader,
+        loss_fn=LossFn.CROSS_ENTROPY,
+        factor=num_batches / len(train_loader),
+        has_batch=True,
+        verbose_logging=True,
+
+    )
+
+    # Curvature estimation
+    curv_estimate = estimate_curvature(
+        curv_type=curv_type,
+        mv=ggn_mv,
+        layout=params,
+        rank=max_rank,
+        key=jax.random.key(4910),
+        has_batch=True,
+    )
+
+    # # Save GGN
+    ggn_path = Path(checkpoint_dir) / (ggn_name + ".pkl")
+    save_with_pickle(curv_estimate, ggn_path)
+
+    logger.debug("Curvature estimated: {}", ggn_name)
+    return {
+        "curv_estimate": curv_estimate,
+    }
+
+
+# ------------------------------------------------------------------------------
+# CIFAR-10 Classification
+# ------------------------------------------------------------------------------
+
+
+def train_cifar10_model(
+    lr=1e-3,
+    n_epochs=2,
+    *,
+    verbose=True,
+    model_seed=42,
+    checkpoint_dir="./checkpoints/",
+):
+    # Generate experiment name for the checkpoint
+    experiment_name = f"cifar10_model_seed{model_seed}"
+
+    # Prepare data
+    train_loader, valid_loader, test_loader = setup_cifar10_data()
+    logger.info(f"Starting model training: {experiment_name}")
+
+    # Set model
+    model = CIFAR10CNN(rngs=nnx.Rngs(model_seed))
+    model = train_map_model(
+        model,
+        train_loader,
+        n_epochs,
+        lr=lr,
+        verbose=verbose,
+        log_every_n_epochs=1,
+        loss_type="cross_entropy",
+        test_loader=test_loader,
+    )
+
+    # Save checkpoint
+    ckpt_path = Path(checkpoint_dir) / experiment_name
+    save_model_checkpoint(model, ckpt_path)
+
+    return {
+        "train_loader": train_loader,
+        "valid_loader": valid_loader,
+        "test_loader": test_loader,
+        "model": model,
+        "checkpoint_path": ckpt_path,
+    }
+
+
+def curvature_cifar10_model(
+    model_name: str = "cifar10_model_seed42",
+    curv_type: CurvApprox = CurvApprox.LANCZOS,
+    *,
+    num_batches: int = 10,
+    max_rank: int = 10,
+    last_layer_only=False,
+    checkpoint_dir="./checkpoints/",
+):
+    """Compute the GGN of the model."""
+    ckpt_path = Path(checkpoint_dir) / model_name
+    model, _, _ = load_model_checkpoint(CIFAR10CNN, {}, ckpt_path)
+    train_loader, _, _ = setup_cifar10_data()
+
+    res = compute_ggn(
+        model,
+        train_loader,
+        curv_type=curv_type,
+        num_batches=num_batches,
+        max_rank=max_rank,
+        last_layer_only=last_layer_only,
+        checkpoint_dir=checkpoint_dir,
+    )
+    return res
+
+
+def evaluate_cifar10_model(
+    # Checkpoint information
+    ckpt_dir: str = "./checkpoints/",
+    model_name: str = "cifar10_model_seed42",
+    *,
+    # Laplace settings
+    laplace_kwargs,
+    # Pushforward
+    pushforward_kwargs,
+    # Calibration settings (None to Skip)
+    clbr_kwargs={},
+    # Evaluation settings
+    eval_kwargs={},
+    # Output settings
+    output_dir="results",
+    save_logs=True,
+    csv_logger: CSVLogger | None = None
+):
+    """Evaluate the CIFAR-10 model."""
+    # Load map model   
+    ckpt_path = Path(ckpt_dir) / model_name
+    model, _, _ = load_model_checkpoint(CIFAR10CNN, {}, ckpt_path)
+    
+    # Load data
+    _, valid_loader, test_loader = setup_cifar10_data()
+
+    # Start evaluation
+    results = {}
+    csv_logger = CSVLogger(force=True) if csv_logger is None else csv_logger 
+
+    # Extract parameters
+    last_layer_only=laplace_kwargs.get('last_layer_only', False) 
+    curv_type = laplace_kwargs.get('curv_type')
+    low_rank_rank = laplace_kwargs.get('low_rank_rank', 100)
+    low_rank_seed = laplace_kwargs.get('low_rank_seed', 1950)
+    sample_seed = pushforward_kwargs.get('sample_seed', 21904)
+    pushforward_type = pushforward_kwargs.get('pushforward_type', PushforwardType.LINEAR)
+    clbr_obj = clbr_kwargs.get("calibration_objective")
+    clbr_mthd = clbr_kwargs.get("calibration_method")
+    max_rank=laplace_kwargs.get('max_rank', 10)
+    num_batches=laplace_kwargs.get('num_batches', 2)
+
+    experiment_name = generate_experiment_name(
+        ct=curv_type,
+        ll=last_layer_only,
+        co=clbr_obj,
+        cm=clbr_mthd,
+        pt=pushforward_type,
+        rk=low_rank_rank,
+    )
+    model_fn, params = split_model(model, last_layer_only=last_layer_only)
+    
+    # Load curvature and set posterior_fn
+    ggn_name = f"ggn_c={curv_type}_n={num_batches}_r={max_rank}_ll={last_layer_only}"
+    ggn_path = Path(ckpt_dir) / (ggn_name + ".pkl")
+    curv_estimate = load_with_pickle(ggn_path)
+    posterior_fn = set_posterior_fn(
+        curv_type=curv_type,
+        curv_estimate=curv_estimate,
+        layout=params,
+    )
+
+    # Calibration
+    prior_args = {"prior_prec": 1.0}
+    if len(clbr_kwargs) > 0:
+        prior_args, _ = calibration(
+            posterior_fn=posterior_fn,
+            model_fn=model_fn,
+            params=params,
+            data=next(iter(valid_loader)),
+            curv_estimate=curv_estimate,  # Make these arguments optional.
+            curv_type=curv_type,
+            loss_fn=LossFn.CROSS_ENTROPY,
+            predictive_type=PredictiveType.MC_BRIDGE,
+            pushforward_type=PushforwardType.LINEAR,
+            **clbr_kwargs,
+        )
+
+    # Evaluation
+    results, _ = evaluation(
+        posterior_fn=posterior_fn,
+        model_fn=model_fn,
+        params=params,
+        arguments=prior_args,
+        data=next(iter(test_loader)),
+        metrics=eval_kwargs.get("eval_metrics"),
+        predictive_type=PredictiveType.MC_BRIDGE,
+        pushforward_type=PushforwardType.LINEAR,
+    )
+
+    logger.info(f"Eval: {results}")
+
+
+import argparse
+
+if __name__ == "__main__":
+    """Different scripts."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="train",
+    )
+    parser.add_argument(
+        "--num_tasks",
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
+        "--n_epochs",
+        type=int,
+        default=2,
+    )
+    args = parser.parse_args()
+    
+    # -------------------------------------------
+    # Train model
+    # -------------------------------------------
+    
+    if args.task == "train":    
+        train_cifar10_model(n_epochs=args.n_epochs)
+
+
+    # -------------------------------------------
+    # GGN arguments
+    # -------------------------------------------
+    
+    curv_types = [CurvApprox.DIAGONAL, CurvApprox.LANCZOS]
+    num_batches = [10]
+    no_last_layer = [False]
+    with_last_layer = [True]
+
+    # Estimate curvatures
+    if args.task == "ggn":       
+        ggn_settings1 = list(product(curv_types, no_last_layer, num_batches))
+        ggn_settings2 = list(product([CurvApprox.FULL], with_last_layer, num_batches))
+
+        for ct, ll, nb in (ggn_settings1 + ggn_settings2)[:args.num_tasks]:
+            curvature_cifar10_model(
+                curv_type=ct,
+                num_batches=nb,
+                last_layer_only=ll
+            )
+
+
+    # -------------------------------------------
+    # Evaluation
+    # -------------------------------------------
+        
+    register_calibration_method(
+        "gradient_descent",
+        optimize_prior_prec_gradient
+    )
+
+    # Start evaluation
+    csv_logger = CSVLogger(force=True)
+
+    clbr_methods = ["gradient_descent", "grid_search"]
+    clbr_objs = [
+        CalibrationObjective.NLL,
+        CalibrationObjective.MARGINAL_LOG_LIKELIHOOD,
+    ]
+    push_methods = [PushforwardType.LINEAR, PushforwardType.NONLINEAR]
+    predictive_methods = [PredictiveType.MC_BRIDGE]
+    low_rank_ranks = [5, 10]
+
+    if args.task == "evaluate":
+        eval_settings = list(
+            product(curv_types, clbr_methods, clbr_objs, no_last_layer, push_methods)
+        ) + list(
+            product([CurvApprox.FULL], clbr_methods, clbr_objs, with_last_layer, push_methods)
+        )
+
+        for curv_type, clbr_method, clbr_obj, last_layer_only, push_mthd in eval_settings[:args.num_tasks]:
+            logger.info(f"Running Laplace with curvature type: {curv_type}")
+
+            evaluate_cifar10_model(
+                laplace_kwargs={
+                    "curv_type": curv_type,
+                    "last_layer_only": last_layer_only,
+                    "num_batches": 10,
+                    "max_rank": 10,
+                    "low_rank_rank": 10,
+                },
+                pushforward_kwargs={
+                    "pushforward_type": push_mthd,
+                },
+                clbr_kwargs={
+                    "calibration_objective": CalibrationObjective.ECE,
+                    "calibration_method": clbr_method,
+                },
+                eval_kwargs={
+                    "eval_metrics": [
+                        apply_fns(
+                            lambda map_, **kwargs: jnp.max(jax.nn.softmax(map_, axis=-1), axis=-1),
+                            lambda mc_pred_act, **kwargs: jnp.max(mc_pred_act, axis=-1),
+                            lambda map_, target, **kwargs: correctness(map_, target),
+                            lambda map, target, **kwargs: correctness(map, target),
+                            names=["confidences_map", "confidences_pred", "correctness_map", "correctness_pred"],
+                        ),
+                    ]
+                },
+                csv_logger=csv_logger
+            )                
