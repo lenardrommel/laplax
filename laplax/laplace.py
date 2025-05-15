@@ -622,7 +622,8 @@ def calibration(
     elif calibration_method in calibration_options:
         data = _validate_and_get_transform(data)(data)
         prior_args = calibration_options[calibration_method](
-            objective=partial(objective_fn, batch=data),
+            objective=objective_fn,
+            data=data,
             **calibration_kwargs,
         )
     else:

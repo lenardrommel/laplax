@@ -39,6 +39,8 @@ from ex_helper import (  # isort: skip
 )
 
 
+RESET_CSV_LOG = False
+
 # ------------------------------------------------------------------------------
 # CIFAR-10 Data
 # ------------------------------------------------------------------------------
@@ -297,7 +299,7 @@ def evaluate_cifar10_model(
     results = {}
     csv_logger = CSVLogger(
         file_name=f"{model_name}_results.csv",
-        force=True
+        force=RESET_CSV_LOG
     ) if csv_logger is None else csv_logger 
 
     # Extract parameters
@@ -515,7 +517,7 @@ if __name__ == "__main__":
 
         csv_logger = CSVLogger(
             file_name="cifar10_results.csv",
-            force=True
+            force=RESET_CSV_LOG
         )
 
         logger.info(f"Running Laplace with curvature type: {args.curv_type}")

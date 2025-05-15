@@ -1,9 +1,11 @@
 import datetime
+import itertools
 import pickle
 from pathlib import Path
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 import pandas as pd
 from flax import nnx
@@ -15,6 +17,7 @@ from laplax.types import Callable, Float, PriorArguments
 # ---------------------------------------------------------------------
 # Checkpoint Helper
 # ---------------------------------------------------------------------
+
 
 def save_with_pickle(obj, path):
     """Save object to pickle file."""
@@ -79,7 +82,11 @@ def load_model_checkpoint(
 
 class CSVLogger:
     def __init__(
-        self, output_dir="results", file_name="regression_experiments.csv", *, force: bool=True
+        self,
+        output_dir="results",
+        file_name="regression_experiments.csv",
+        *,
+        force: bool = True
     ):
         """A CSV logger for experiments.
 
@@ -264,13 +271,46 @@ def train_map_model(
     return model
 
 
+class SimpleLoader:
+    def __init__(self, input, target, batch_size=16):
+        self._input, self._target = input, target
+        self._batch_size = batch_size
+        self._rng = np.random.default_rng()
+
+    def __iter__(self):
+        # Always shuffle at the start of each epoch
+        perm = self._rng.permutation(self._input.shape[0])
+        idx_iter = iter(perm)
+
+        for batch_idx in iter(
+            lambda: list(itertools.islice(idx_iter, self._batch_size)), []
+        ):
+            input_batch = jnp.take(self._input, jnp.array(batch_idx), axis=0)
+            target_batch = jnp.take(self._target, jnp.array(batch_idx), axis=0)
+
+            yield {"input": input_batch, "target": target_batch}
+
+
+def _ensure_data_loader(data):
+    if isinstance(data, list | tuple):
+        if len(data) == 2:
+            return SimpleLoader(data[0], data[1])
+        msg = f"Unknown length of data: {len(data)}"
+        raise TypeError(msg)
+    if isinstance(data, dict):
+        return SimpleLoader(data["input"], data["target"])
+    msg = f"Unknown data type: {type(data)}"
+    raise TypeError(msg)
+
+
 def optimize_prior_prec_gradient(
     objective: Callable[[PriorArguments], float],
+    data,
     init_prior_prec: Float | None = None,
     init_sigma_noise: Float | None = None,
     *,
-    num_epochs: int = 20,
-    learning_rate: float = 1e-2,
+    num_epochs: int = 100,
+    learning_rate: float = 1,
     **kwargs,
 ) -> Float:
     """Optimize prior precision using gradient descent.
@@ -278,6 +318,7 @@ def optimize_prior_prec_gradient(
     Args:
         objective: A callable objective function that takes `PriorArguments` as input
             and returns a float result.
+        data: A batch of data.
         init_prior_prec: Initial prior precision value (default: None)
         init_sigma_noise: Initial noise standard deviation value (default: None)
         num_epochs: Number of optimization epochs (default: 20)
@@ -300,19 +341,25 @@ def optimize_prior_prec_gradient(
     if init_prior_prec is not None:
         params["prior_prec"] = jnp.array(jnp.log(init_prior_prec))
     if init_sigma_noise is not None:
-        params["sigma_noise"] = jnp.array(jnp.log(init_sigma_noise))
+        params["sigma"] = jnp.array(jnp.log(init_sigma_noise))
+
+    logger.info("Initial params: {}", params)
 
     # Initialize optimizer
+    logger.info("Initializing optimizer with learning rate: {}", learning_rate)
     optimizer = optax.adam(learning_rate)
     opt_state = optimizer.init(params)
 
+    # Create a simple data loader if not provided
+    data = _ensure_data_loader(data)
+
     # Single optimization step
     @jax.jit
-    def step(params, opt_state):
+    def step(params, data, opt_state):
         # Compute loss and gradients w.r.t. log-params
         loss, grads = jax.value_and_grad(
-            lambda p: objective(jax.tree.map(jnp.exp, p))
-            )(params)
+            lambda p: objective(jax.tree.map(jnp.exp, p), data)
+        )(params)
 
         updates, new_state = optimizer.update(grads, opt_state)
         new_params = optax.apply_updates(params, updates)
@@ -320,12 +367,13 @@ def optimize_prior_prec_gradient(
 
     # Optimization loop
     for epoch in range(1, num_epochs + 1):
-        params, opt_state, loss = step(params, opt_state)
+        for dp in data:
+            params, opt_state, loss = step(params, dp, opt_state)
         logger.debug(
             f"Epoch {epoch:02d}: loss={loss:.6f}, "
         )
 
     # Convert back from log-domain
     params = jax.tree.map(jnp.exp, params)
-      
+
     return params

@@ -9,6 +9,7 @@ from loguru import logger
 
 from laplax.enums import CurvApprox, LossFn
 from laplax.eval.pushforward import lin_samples
+from laplax.eval.utils import transfer_entry
 from laplax.laplace import (
     DEFAULT_REGRESSION_METRICS,
     CalibrationObjective,
@@ -39,6 +40,7 @@ from ex_helper import ( # isort: skip
 
 
 DEFAULT_INTERVALS = [(0, 2), (4, 5), (6, 8)]
+RESET_CSV_LOG = False
 
 
 def build_sinusoid_data(
@@ -183,7 +185,7 @@ def evaluate_regression_example(
 
     # Start evaluation
     results = {}
-    csv_logger = CSVLogger(force=True) if csv_logger is None else csv_logger
+    csv_logger = CSVLogger(force=RESET_CSV_LOG) if csv_logger is None else csv_logger
 
     # Extract parameters
     last_layer_only = laplace_kwargs.get('last_layer_only', False)
@@ -216,8 +218,6 @@ def evaluate_regression_example(
         data=train_loader,
         loss_fn=LossFn.MSE,
         curv_type=curv_type,
-        num_curv_samples=len(train_loader),
-        num_total_samples=len(train_loader),
         rank=low_rank_rank,
         key=jax.random.key(low_rank_seed),
         has_batch=True
@@ -240,13 +240,19 @@ def evaluate_regression_example(
         )
 
     # Evaluation
+    logger.info("Starting evaluation.")
+    additional_entries = ["pred_mean", "pred_std", "samples"]
+    eval_metrics = [
+        *DEFAULT_REGRESSION_METRICS,
+        transfer_entry(additional_entries)
+    ]
     results, _ = evaluation(
         posterior_fn=posterior_fn,
         model_fn=model_fn,
         params=params,
         arguments=prior_args,
         data={"input": test_loader.X, "target": test_loader.y},
-        metrics=DEFAULT_REGRESSION_METRICS,
+        metrics=eval_metrics,
         predictive_type=PredictiveType.NONE,
         pushforward_type=pushforward_type,
         pushforward_fns=[
@@ -255,14 +261,24 @@ def evaluate_regression_example(
             lin_pred_std,
             lin_samples,
         ] if pushforward_type is PushforwardType.LINEAR else None,
-        reduce=jnp.mean,
         sample_key=jax.random.key(sample_seed),
         num_samples=20,
     )
 
-    logger.info(f"Eval: {results}")
+    avg_results = {
+            "rmse": jnp.mean(results["rmse"]),
+            "nll": jnp.mean(results["nll"]),
+            "chi^2": jnp.mean(results["chi^2"]),
+            "crps": jnp.mean(results["crps"]),
+    }
+    logger.info(f"Eval: {avg_results}")
     csv_logger.log(
-        results, 
+        avg_results | {
+            "input": test_loader.X,
+            "target": test_loader.y,
+            "pred_mean": results["pred_mean"],
+            "pred_std": results["pred_std"],
+        },
         experiment_name=experiment_name,
         log_args={
             "curv_type": curv_type,
@@ -273,7 +289,7 @@ def evaluate_regression_example(
         }
     )
     csv_logger.log_samples(
-        results,
+        {k: results[k] for k in additional_entries},
         experiment_name=experiment_name
     )
 
@@ -400,7 +416,7 @@ if __name__ == "__main__":
 
         csv_logger = CSVLogger(
             file_name="regression_results.csv",
-            force=True
+            force=RESET_CSV_LOG
         )
 
         logger.info(f"Running Laplace with curvature type: {args.curv_type}")
@@ -423,6 +439,9 @@ if __name__ == "__main__":
                 "calibration_method": args.calibration_method,
                 "init_prior_prec": 1.0,
                 "init_sigma_noise": 1.0,
+                "grid_size": 1000,
+                "log_prior_prec_min": -4,
+                "log_prior_prec_max": 4
             },
             csv_logger=csv_logger
         )
