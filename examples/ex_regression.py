@@ -1,44 +1,33 @@
-import datetime
-from itertools import product
-from os import readlink
+import argparse
 from pathlib import Path
 
 import jax
 import jax.numpy as jnp
-from laplax.eval import pushforward
-import matplotlib.pyplot as plt
-import numpy as np
-import optax
-import pandas as pd
 from flax import nnx
 from helper import DataLoader, get_sinusoid_example
 from loguru import logger
-from orbax import checkpoint as ocp
-from tueplots import bundles, fonts
 
+from laplax.enums import CurvApprox, LossFn
+from laplax.eval.pushforward import lin_samples
 from laplax.laplace import (
-    laplace, 
+    DEFAULT_REGRESSION_METRICS,
     CalibrationObjective,
-    PushforwardType, 
     PredictiveType,
+    PushforwardType,
     calibration,
     evaluation,
-    lin_setup,
+    laplace,
     lin_pred_mean,
     lin_pred_std,
-    DEFAULT_REGRESSION_METRICS,
-    register_calibration_method
+    lin_setup,
+    register_calibration_method,
 )
-from laplax.eval.pushforward import lin_samples
-from laplax.enums import CurvApprox, LossFn
-from laplax.types import Callable, Float, PriorArguments
-
 
 from ex_helper import ( # isort: skip
     generate_experiment_name,
-    load_model_checkpoint, 
-    save_model_checkpoint, 
-    train_map_model, 
+    load_model_checkpoint,
+    save_model_checkpoint,
+    train_map_model,
     split_model,
     CSVLogger,
     optimize_prior_prec_gradient
@@ -122,11 +111,11 @@ def train_sinusoid_model(
     )
 
     # Set data
-    train_loader, valid_loader, test_loader = build_sinusoid_data(
+    train_loader, _, _ = build_sinusoid_data(
         num_train, num_valid, num_test,
         sigma_noise, intervals, batch_size, data_seed
     )
-        
+
     # Generate experiment name for the checkpoint
     model_name = f"regression_model_h{hidden_channels}_n{num_train}_seed{model_seed}"
     logger.info(f"Starting model training: {model_name}")
@@ -143,7 +132,7 @@ def train_sinusoid_model(
     return checkpoint_path
 
 
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # LAPLACE experiment
 # ------------------------------------------------------------------------------
 
@@ -153,30 +142,40 @@ def evaluate_regression_example(
     model_name: str = "regression_model_h64_n150_seed0",
     *,
     # Laplace settings
-    laplace_kwargs,
+    laplace_kwargs: dict,
     # Pushforward
-    pushforward_kwargs,
+    pushforward_kwargs: dict,
     # Calibration
-    clbr_kwargs=None,
+    clbr_kwargs: dict | None = None,
     # Evaluation
-    eval_kwargs=None,
+    eval_kwargs: dict | None = None,
     # Output settings
-    output_dir="results",
-    save_logs=True,
-    save_samples=True,
     csv_logger: CSVLogger | None = None
 ):
-    """Evaluate regression example."""
+    """Evaluate regression example.
+
+    Args:
+        ckpt_dir: Directory containing model checkpoints
+        model_name: Name of the model checkpoint to load
+        laplace_kwargs: Dictionary containing Laplace approximation settings
+        pushforward_kwargs: Dictionary containing pushforward settings
+        clbr_kwargs: Dictionary containing calibration settings
+        eval_kwargs: Dictionary containing evaluation settings
+        output_dir: Directory to save results
+        save_logs: Whether to save logs
+        save_samples: Whether to save samples
+        csv_logger: CSVLogger instance for logging results
+    """
     # Load map model
     ckpt_path = Path(ckpt_dir) / model_name
     model, _, _ = load_model_checkpoint(
         Model,
         model_kwargs={
-            "in_channels": 1, 
-            "hidden_channels": 64, 
+            "in_channels": 1,
+            "hidden_channels": 64,
             "out_channels": 1
         },
-        checkpoint_path=ckpt_path    
+        checkpoint_path=ckpt_path
     )
 
     # Load data
@@ -185,17 +184,19 @@ def evaluate_regression_example(
     # Start evaluation
     results = {}
     csv_logger = CSVLogger(force=True) if csv_logger is None else csv_logger
-    
+
     # Extract parameters
-    last_layer_only=laplace_kwargs.get('last_layer_only', False)
+    last_layer_only = laplace_kwargs.get('last_layer_only', False)
     curv_type = laplace_kwargs.get('curv_type')
     low_rank_rank = laplace_kwargs.get('low_rank_rank', 100)
     low_rank_seed = laplace_kwargs.get('low_rank_seed', 1950)
     sample_seed = pushforward_kwargs.get("sample_seed", 21904)
     pushforward_type = pushforward_kwargs.get('pushforward_type', PushforwardType.LINEAR)
-    clbr_obj = clbr_kwargs.get("calibration_objective")
-    clbr_mthd = clbr_kwargs.get("calibration_method")
-    
+
+    # Extract calibration parameters if provided
+    clbr_obj = clbr_kwargs.get("calibration_objective") if clbr_kwargs else None
+    clbr_mthd = clbr_kwargs.get("calibration_method") if clbr_kwargs else None
+
     experiment_name = generate_experiment_name(
         ct=curv_type,
         ll=last_layer_only,
@@ -204,7 +205,7 @@ def evaluate_regression_example(
         pt=pushforward_type
     )
     model_fn, params = split_model(
-        model, 
+        model,
         last_layer_only=last_layer_only
     )
 
@@ -212,16 +213,18 @@ def evaluate_regression_example(
     posterior_fn, curv_est = laplace(
         model_fn=model_fn,
         params=params,
-        data=train_loader, 
+        data=train_loader,
         loss_fn=LossFn.MSE,
         curv_type=curv_type,
+        num_curv_samples=len(train_loader),
+        num_total_samples=len(train_loader),
         rank=low_rank_rank,
         key=jax.random.key(low_rank_seed),
         has_batch=True
     )
 
     # Calibration
-    prior_args = {"prior_args": 1.0}
+    prior_args = {"prior_prec": 1.0}
     if clbr_kwargs is not None:
         prior_args, _ = calibration(
             posterior_fn=posterior_fn,
@@ -231,11 +234,11 @@ def evaluate_regression_example(
             curv_estimate=curv_est,
             curv_type=curv_type,
             loss_fn=LossFn.MSE,
-            # Pushforward
             predictive_type=PredictiveType.NONE,
             pushforward_type=pushforward_type,
+            **clbr_kwargs,
         )
-        
+
     # Evaluation
     results, _ = evaluation(
         posterior_fn=posterior_fn,
@@ -252,6 +255,7 @@ def evaluate_regression_example(
             lin_pred_std,
             lin_samples,
         ] if pushforward_type is PushforwardType.LINEAR else None,
+        reduce=jnp.mean,
         sample_key=jax.random.key(sample_seed),
         num_samples=20,
     )
@@ -259,16 +263,15 @@ def evaluate_regression_example(
     logger.info(f"Eval: {results}")
     csv_logger.log(
         results, 
-        experiment_name=experiment_name, 
+        experiment_name=experiment_name,
         log_args={
             "curv_type": curv_type,
             "last_layer_only": last_layer_only,
             "pushforward_type": pushforward_type,
             "calibration_objective": clbr_obj,
-            "calibration_method": clbr_mthd,  
+            "calibration_method": clbr_mthd,
         }
-    
-    )    
+    )
     csv_logger.log_samples(
         results,
         experiment_name=experiment_name
@@ -276,49 +279,150 @@ def evaluate_regression_example(
 
 
 if __name__ == "__main__":
-    # Register calibration methods
-    register_calibration_method(
-        "gradient_descent",
-        optimize_prior_prec_gradient,
+    """Different scripts."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="train",
+        choices=["train", "evaluate"],
+    )
+    parser.add_argument(
+        "--num_tasks",
+        type=int,
+        default=1,
     )
 
+    # --------------------------
+    # Train args
+    # --------------------------
+    parser.add_argument(
+        "--n_epochs",
+        type=int,
+        default=1000,
+    )
+    parser.add_argument(
+        "--hidden_channels",
+        type=int,
+        default=64,
+    )
+    parser.add_argument(
+        "--model_seed",
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
+        "--data_seed",
+        type=int,
+        default=42,
+    )
+
+    # --------------------------
+    # Laplace args
+    # --------------------------
+    parser.add_argument(
+        "--curv_type",
+        type=CurvApprox,
+        default=CurvApprox.LANCZOS,
+    )
+    parser.add_argument(
+        "--last_layer_only",
+        type=lambda x: x.lower() == "true",
+        default=False,
+    )
+    parser.add_argument(
+        "--low_rank_rank",
+        type=int,
+        default=100,
+    )
+    parser.add_argument(
+        "--low_rank_seed",
+        type=int,
+        default=1950,
+    )
+
+    # --------------------------
+    # Evaluation args
+    # --------------------------
+    parser.add_argument(
+        "--calibration_method",
+        type=str,
+        choices=["gradient_descent", "grid_search"],
+        default="gradient_descent"
+    )
+    parser.add_argument(
+        "--calibration_objective",
+        type=CalibrationObjective,
+        default=CalibrationObjective.NLL
+    )
+    parser.add_argument(
+        "--pushforward_type",
+        type=PushforwardType,
+        default=PushforwardType.LINEAR
+    )
+    parser.add_argument(
+        "--sample_seed",
+        type=int,
+        default=21904,
+    )
+    parser.add_argument(
+        "--ckpt_dir",
+        type=str,
+        default="./checkpoints/",
+    )
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="regression_model_h64_n150_seed0",
+    )
+
+    args = parser.parse_args()
+
+    # -------------------------------------------
     # Train model
-    train_result = train_sinusoid_model(n_epochs=1000)
+    # -------------------------------------------
+    if args.task == "train":
+        train_sinusoid_model(
+            n_epochs=args.n_epochs,
+            hidden_channels=args.hidden_channels,
+            model_seed=args.model_seed,
+            data_seed=args.data_seed,
+        )
 
-    # Start evaluation
-    csv_logger = CSVLogger(force=True)
+    # -------------------------------------------
+    # Evaluation
+    # -------------------------------------------
+    if args.task == "evaluate":
+        register_calibration_method(
+            "gradient_descent",
+            optimize_prior_prec_gradient,
+        )
 
-    curv_types = [CurvApprox.DIAGONAL, CurvApprox.FULL, CurvApprox.LANCZOS]
-    no_last_layer = [False]
-    clbr_methods = ["gradient_descent", "grid_search"]
-    clbr_objs = [
-        CalibrationObjective.NLL,
-        CalibrationObjective.MARGINAL_LOG_LIKELIHOOD,
-    ]
-    push_methods = [PushforwardType.LINEAR, PushforwardType.NONLINEAR]
+        csv_logger = CSVLogger(
+            file_name="regression_results.csv",
+            force=True
+        )
 
-    settings = list(
-        product(curv_types, clbr_methods, clbr_objs, no_last_layer, push_methods)
-    ) + list(
-        product(["full"], clbr_methods, clbr_objs, [True], push_methods)
-    )
-
-    for curv_type, clbr_method, clbr_obj, last_layer_only, push_mthd in settings[:]:
-        logger.info(f"Running Laplace with curvature type: {curv_type}")
+        logger.info(f"Running Laplace with curvature type: {args.curv_type}")
 
         evaluate_regression_example(
+            ckpt_dir=args.ckpt_dir,
+            model_name=args.model_name,
             laplace_kwargs={
-                "curv_type": curv_type,
-                "last_layer_only": last_layer_only,
+                "curv_type": args.curv_type,
+                "last_layer_only": args.last_layer_only,
+                "low_rank_rank": args.low_rank_rank,
+                "low_rank_seed": args.low_rank_seed,
             },
             pushforward_kwargs={
-                "pushforward_type": push_mthd,
+                "pushforward_type": args.pushforward_type,
+                "sample_seed": args.sample_seed,
             },
             clbr_kwargs={
-                "": None,
-                "calibration_objective": clbr_obj,
-                "calibration_method": clbr_method,
+                "calibration_objective": args.calibration_objective,
+                "calibration_method": args.calibration_method,
+                "init_prior_prec": 1.0,
+                "init_sigma_noise": 1.0,
             },
             csv_logger=csv_logger
-        )                
-                        
+        )

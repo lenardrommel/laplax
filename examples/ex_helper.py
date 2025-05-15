@@ -1,3 +1,4 @@
+import datetime
 import pickle
 from pathlib import Path
 
@@ -8,9 +9,8 @@ import pandas as pd
 from flax import nnx
 from loguru import logger
 from orbax import checkpoint as ocp
-import datetime
 
-from laplax.types import Callable, PriorArguments, Float
+from laplax.types import Callable, Float, PriorArguments
 
 # ---------------------------------------------------------------------
 # Checkpoint Helper
@@ -81,8 +81,7 @@ class CSVLogger:
     def __init__(
         self, output_dir="results", file_name="regression_experiments.csv", *, force: bool=True
     ):
-        """
-        A CSV logger for experiments.
+        """A CSV logger for experiments.
 
         Args:
             output_dir (str or Path): Directory in which to store the CSV.
@@ -103,7 +102,7 @@ class CSVLogger:
 
     def log(self, results: dict, experiment_name: str, *, log_args: dict = None) -> Path:
         """Append a single experiment's results to the CSV.
-        
+
         Args:
             results (dict): A dict that may contain an "evaluation" sub-dict and optional "nll" field.
             experiment_name (str): A unique name or identifier for this run.

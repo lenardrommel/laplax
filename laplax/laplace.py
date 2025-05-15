@@ -26,6 +26,8 @@ from laplax.eval.calibrate import optimize_prior_prec
 from laplax.eval.metrics import (
     DEFAULT_REGRESSION_METRICS,
     chi_squared_zero,
+    correctness,
+    expected_calibration_error,
     nll_gaussian,
 )
 from laplax.eval.pushforward import (
@@ -52,6 +54,7 @@ from laplax.types import (
     Data,
     Int,
     Iterable,
+    KeyType,
     ModelFn,
     Params,
     PriorArguments,
@@ -86,6 +89,7 @@ class CalibrationObjective(StrEnum):
     NLL = "nll"
     CHI_SQUARED = "chi_squared"
     MARGINAL_LOG_LIKELIHOOD = "marginal_log_likelihood"
+    ECE = "ece"
 
 
 class CalibrationMethod(StrEnum):
@@ -163,7 +167,7 @@ def _validate_and_get_transform(batch: Data | Any) -> Callable[[Any], Data]:
     ValueError
         If `batch` is not a tuple / dict or misses the `'input'/'target'` keys.
     """
-    if isinstance(batch, tuple):
+    if isinstance(batch, (tuple, list)):
         if len(batch) != 2:
             msg = "Tuple batches must be `(input, target)` – received len != 2."
             raise ValueError(msg)
@@ -178,10 +182,19 @@ def _validate_and_get_transform(batch: Data | Any) -> Callable[[Any], Data]:
     msg = f"Unsupported batch type: {type(batch)}. Expect tuple or mapping."
     raise ValueError(msg)
 
+# ------------------------------------------------------------------------------
+# GGN API
+# ------------------------------------------------------------------------------
+
+
+EMPTY_DICT = {}
+
 
 def _maybe_wrap_loader_or_batch(
     mv_fn: Callable[..., Any],
     data: Data | Iterable,
+    *,
+    loader_kwargs: dict = EMPTY_DICT,
 ) -> Callable[..., Any]:
     """If `data` is an iterable (loader) wrap `mv_fn`; else fix the inputs."""
     transform = _validate_and_get_transform(
@@ -198,9 +211,69 @@ def _maybe_wrap_loader_or_batch(
         mv=mv_fn,
         loader=data,
         transform=transform,
-        reduce=reduce_add,
+        reduce=loader_kwargs.pop("reduce", reduce_add),
+        **loader_kwargs,
     )
 
+
+def GGN(
+    model_fn: ModelFn,
+    params: Params,
+    data: Data | Iterable,
+    loss_fn: LossFn,
+    *,
+    factor: float = 1.0,
+    has_batch: bool = True,
+    verbose_logging: bool = True,
+):
+    """Create a GGN MV from a model and data.
+
+    Parameters
+    ----------
+    model_fn : ModelFn
+        The model function.
+    params : Params
+        The parameters of the model.
+    data : Data | Iterable
+        The data to be used for the GGN MV.
+    loss_fn : LossFn
+        The loss function to be used for the GGN MV.
+    factor : float
+        The factor to be used for the GGN MV.
+    has_batch : bool
+        Whether the model expects a leading batch axis.
+
+    Returns:
+    -------
+    mv_bound : Callable
+        The GGN MV.
+    """
+    ggn_mv = create_ggn_mv_without_data(  # type: ignore[call-arg]
+        model_fn=model_fn,
+        params=params,
+        loss_fn=loss_fn,
+        factor=factor,
+        has_batch=has_batch,
+    )
+
+    # Bind data / streaming loader
+    mv_bound = _maybe_wrap_loader_or_batch(
+        ggn_mv,
+        data,
+        loader_kwargs={
+            "verbose_logging": verbose_logging,
+        }
+    )
+
+    # Test input and output shapes
+    test = mv_bound(params)
+    if not jax.tree.all(
+        jax.tree.map(lambda x, y: x.shape == y.shape, test, params),
+    ):
+        msg = "Setup of GGN-MV failed: input and output shapes do not match."
+        raise ValueError(msg)
+
+    return mv_bound
 
 # ------------------------------------------------------------------------------
 # laplace (fit curvature)
@@ -237,8 +310,8 @@ def laplace(
         Whether the model expects a leading batch axis.
     **curv_kwargs
         Forwarded to :func:`laplax.curv.cov.estimate_curvature`.
-`
-    Returns
+
+    Returns:
     -------
     posterior_fn
         Callable `(params_mean, rng_key, **posterior_kwargs) -> sample`.
@@ -258,29 +331,20 @@ def laplace(
         factor,
     )
 
-    ggn_mv = create_ggn_mv_without_data(  # type: ignore[call-arg]
-        model_fn=model_fn,
-        params=params,
+    # Set GGN MV
+    ggn_mv = GGN(
+        model_fn,
+        params,
+        data,
         loss_fn=loss_fn,
         factor=factor,
         has_batch=has_batch,
     )
 
-    # Bind data / streaming loader
-    mv_bound = _maybe_wrap_loader_or_batch(ggn_mv, data)
-
-    # Test whether the shapes of input and output of mv_bound are compatible
-    test = mv_bound(params)
-    if not jax.tree.all(
-        jax.tree.map(lambda x, y: x.shape == y.shape, test, params),
-    ):
-        msg = "Setup of GGN-MV failed: input and output shapes do not match."
-        raise ValueError(msg)
-
     # Curvature estimation
     curv_estimate = estimate_curvature(
         curv_type=curv_type,
-        mv=mv_bound,
+        mv=ggn_mv,
         layout=params,
         **curv_kwargs,
     )
@@ -323,6 +387,29 @@ def _make_chi2_objective(set_prob_predictive: Callable) -> Callable:
             metric=chi_squared_zero,
         )
     )
+
+
+def _make_ece_objective(set_prob_predictive: Callable) -> Callable:
+    def ece(**kwargs):
+        mc_pred_act = kwargs["mc_pred_act"]
+        target = kwargs["target"]
+        conf = jnp.max(mc_pred_act, axis=-1)
+        correct = correctness(mc_pred_act, target) * 1
+        val = expected_calibration_error(
+            confidence=conf,
+            correctness=correct,
+            num_bins=15,
+        )
+        return val
+
+    # return jax.jit(
+    return lambda prior_args, batch: evaluate_for_given_prior_arguments(
+            prior_arguments=prior_args,
+            data=batch,
+            set_prob_predictive=set_prob_predictive,
+            metric=ece,
+        )
+    # )
 
 
 def _make_mll_objective(
@@ -385,6 +472,8 @@ def _build_calibration_objective(
                 curv_type=curv_type,
                 loss_fn=loss_fn,
             )
+        case CalibrationObjective.ECE:
+            return _make_ece_objective(set_prob_predictive)
         case _:
             msg = f"Unknown calibration objective: {objective_type}"
             raise ValueError(msg)
@@ -404,7 +493,7 @@ def _setup_pushforward(
     """Return `(set_pushforward, list_of_fns)` according to user specification."""
     pushforward_type = _convert_to_enum(PushforwardType, pushforward_type)
     predictive_type = _convert_to_enum(PredictiveType, predictive_type)
-    pushforward_fns = [] if pushforward_fns is None else list(pushforward_fns)
+    pushforward_fns = [] if pushforward_fns is None else pushforward_fns
 
     if pushforward_type is PushforwardType.LINEAR:
         set_pushforward = set_lin_pushforward
@@ -510,6 +599,9 @@ def calibration(
         grid_size = calibration_kwargs.get("grid_size", 50)
         patience = calibration_kwargs.get("patience", 5)
 
+        # Transform calibration batch to {"input": ..., "target": ...}
+        data = _validate_and_get_transform(data)(data)
+
         logger.debug(
             "Starting calibration with objective {} on grid [{}, {}] ({} pts, pat={})",
             calibration_objective,
@@ -528,6 +620,7 @@ def calibration(
         prior_args = {"prior_prec": prior_prec}
 
     elif calibration_method in calibration_options:
+        data = _validate_and_get_transform(data)(data)
         prior_args = calibration_options[calibration_method](
             objective=partial(objective_fn, batch=data),
             **calibration_kwargs,
@@ -580,7 +673,9 @@ def evaluation(
     predictive_type: PredictiveType | str = PredictiveType.NONE,
     pushforward_type: PushforwardType | str = PushforwardType.LINEAR,
     pushforward_fns: list[Callable] | None = None,
-    reduce: Callable = jnp.mean,
+    reduce: Callable = identity,
+    sample_key: KeyType = 0,
+    num_samples: int = 10,
 ):
     """Run predictive evaluation after calibration (or fixed prior args)."""
     metrics_list = _resolve_metrics(metrics)
@@ -598,17 +693,22 @@ def evaluation(
         mean_params=params,
         posterior_fn=posterior_fn,
         pushforward_fns=pushforward_fns,
-        key=jax.random.key(0),
-        num_samples=30,
+        key=sample_key,
+        num_samples=num_samples,
     )
 
     # Evaluate
+    batch = _validate_and_get_transform(data)(data)
     results = evaluate_metrics_on_dataset(
         pred_fn=prob_predictive,
-        data=data,
+        data=batch,
         metrics=metrics_list,
         reduce=reduce,
     )
 
-    logger.debug("Evaluation finished with metrics: {}", results)
+    # Log results.
+    logger.debug(
+        "Evaluation finished with metrics: {}",
+        results if reduce == identity else jax.tree.map(jnp.mean, results)
+    )
     return results, prob_predictive

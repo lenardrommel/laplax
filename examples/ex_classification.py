@@ -1,6 +1,6 @@
+import argparse
 from functools import partial
 from pathlib import Path
-from itertools import product
 
 import jax
 import jax.numpy as jnp
@@ -11,18 +11,19 @@ from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 
 from laplax.curv import estimate_curvature, set_posterior_fn
+from laplax.curv.cov import LowRankTerms
 from laplax.enums import CurvApprox, LossFn
-from laplax.laplace import (
-    GGN, 
-    PredictiveType, 
-    PushforwardType, 
-    calibration, 
-    evaluation, 
-    register_calibration_method, 
-    CalibrationObjective
-)
 from laplax.eval import apply_fns
 from laplax.eval.metrics import correctness, expected_calibration_error
+from laplax.laplace import (
+    GGN,
+    CalibrationObjective,
+    PredictiveType,
+    PushforwardType,
+    calibration,
+    evaluation,
+    register_calibration_method,
+)
 
 from ex_helper import (  # isort: skip
     load_model_checkpoint,
@@ -33,9 +34,9 @@ from ex_helper import (  # isort: skip
     train_map_model,
     generate_experiment_name,
     CSVLogger,
+    LimitedLoader,
     optimize_prior_prec_gradient
 )
-from ex_helper import LimitedLoader
 
 
 # ------------------------------------------------------------------------------
@@ -171,7 +172,6 @@ def compute_ggn(
         factor=num_batches / len(train_loader),
         has_batch=True,
         verbose_logging=True,
-
     )
 
     # Curvature estimation
@@ -266,47 +266,51 @@ def curvature_cifar10_model(
     return res
 
 
+EMPTY_DICT = {}
+
+
 def evaluate_cifar10_model(
     # Checkpoint information
     ckpt_dir: str = "./checkpoints/",
     model_name: str = "cifar10_model_seed42",
     *,
     # Laplace settings
-    laplace_kwargs,
+    laplace_kwargs: dict,
     # Pushforward
-    pushforward_kwargs,
+    pushforward_kwargs: dict,
     # Calibration settings (None to Skip)
-    clbr_kwargs={},
+    clbr_kwargs: dict = EMPTY_DICT,
     # Evaluation settings
-    eval_kwargs={},
+    eval_kwargs: dict = EMPTY_DICT,
     # Output settings
-    output_dir="results",
-    save_logs=True,
     csv_logger: CSVLogger | None = None
 ):
     """Evaluate the CIFAR-10 model."""
-    # Load map model   
+    # Load map model
     ckpt_path = Path(ckpt_dir) / model_name
     model, _, _ = load_model_checkpoint(CIFAR10CNN, {}, ckpt_path)
-    
+
     # Load data
     _, valid_loader, test_loader = setup_cifar10_data()
 
     # Start evaluation
     results = {}
-    csv_logger = CSVLogger(force=True) if csv_logger is None else csv_logger 
+    csv_logger = CSVLogger(
+        file_name=f"{model_name}_results.csv",
+        force=True
+    ) if csv_logger is None else csv_logger 
 
     # Extract parameters
-    last_layer_only=laplace_kwargs.get('last_layer_only', False) 
+    last_layer_only = laplace_kwargs.get('last_layer_only', False) 
     curv_type = laplace_kwargs.get('curv_type')
     low_rank_rank = laplace_kwargs.get('low_rank_rank', 100)
-    low_rank_seed = laplace_kwargs.get('low_rank_seed', 1950)
     sample_seed = pushforward_kwargs.get('sample_seed', 21904)
     pushforward_type = pushforward_kwargs.get('pushforward_type', PushforwardType.LINEAR)
+    predictive_type = pushforward_kwargs.get('predictive_type', PredictiveType.MC_BRIDGE)
     clbr_obj = clbr_kwargs.get("calibration_objective")
     clbr_mthd = clbr_kwargs.get("calibration_method")
-    max_rank=laplace_kwargs.get('max_rank', 10)
-    num_batches=laplace_kwargs.get('num_batches', 2)
+    max_rank = laplace_kwargs.get('max_rank', 10)
+    num_batches = laplace_kwargs.get('num_batches', 2)
 
     experiment_name = generate_experiment_name(
         ct=curv_type,
@@ -314,14 +318,27 @@ def evaluate_cifar10_model(
         co=clbr_obj,
         cm=clbr_mthd,
         pt=pushforward_type,
+        prt=predictive_type,
         rk=low_rank_rank,
     )
     model_fn, params = split_model(model, last_layer_only=last_layer_only)
-    
+
     # Load curvature and set posterior_fn
     ggn_name = f"ggn_c={curv_type}_n={num_batches}_r={max_rank}_ll={last_layer_only}"
     ggn_path = Path(ckpt_dir) / (ggn_name + ".pkl")
     curv_estimate = load_with_pickle(ggn_path)
+
+    # Adjust low rank
+    if curv_type is CurvApprox.LANCZOS:
+        current_rank = curv_estimate.U.shape[1]
+        logger.info(f"Current rank: {current_rank}, requested rank: {low_rank_rank}")
+        curv_estimate = LowRankTerms(
+            U=curv_estimate.U[:, :low_rank_rank],
+            S=curv_estimate.S[:low_rank_rank],
+            scalar=curv_estimate.scalar,
+        )
+
+    # Set posterior_fn
     posterior_fn = set_posterior_fn(
         curv_type=curv_type,
         curv_estimate=curv_estimate,
@@ -336,11 +353,11 @@ def evaluate_cifar10_model(
             model_fn=model_fn,
             params=params,
             data=next(iter(valid_loader)),
-            curv_estimate=curv_estimate,  # Make these arguments optional.
+            curv_estimate=curv_estimate,
             curv_type=curv_type,
             loss_fn=LossFn.CROSS_ENTROPY,
-            predictive_type=PredictiveType.MC_BRIDGE,
-            pushforward_type=PushforwardType.LINEAR,
+            predictive_type=predictive_type,
+            pushforward_type=pushforward_type,
             **clbr_kwargs,
         )
 
@@ -352,14 +369,26 @@ def evaluate_cifar10_model(
         arguments=prior_args,
         data=next(iter(test_loader)),
         metrics=eval_kwargs.get("eval_metrics"),
-        predictive_type=PredictiveType.MC_BRIDGE,
-        pushforward_type=PushforwardType.LINEAR,
+        predictive_type=predictive_type,
+        pushforward_type=pushforward_type,
+        sample_key=jax.random.key(sample_seed),
+        num_samples=100,
     )
 
+    # Compute expected calibration error
+    ece = expected_calibration_error(
+        confidence=results["confidences_pred"],
+        correctness=results["correctness_pred"],
+        num_bins=15,
+    )
+    results = jax.tree.map(lambda x: x.mean(), results)
+    results["ece"] = ece
+
+    csv_logger.log(results, experiment_name)
+
     logger.info(f"Eval: {results}")
+    logger.info(f"ECE: {ece}")
 
-
-import argparse
 
 if __name__ == "__main__":
     """Different scripts."""
@@ -368,105 +397,163 @@ if __name__ == "__main__":
         "--task",
         type=str,
         default="train",
+        choices=["train", "ggn", "evaluate"],
     )
     parser.add_argument(
         "--num_tasks",
         type=int,
         default=1,
     )
+
+    # --------------------------
+    # Train args
+    # --------------------------
     parser.add_argument(
         "--n_epochs",
         type=int,
         default=2,
     )
+
+    # --------------------------
+    # Curvature args
+    # --------------------------
+    parser.add_argument(
+        "--curv_type",
+        type=CurvApprox,
+        default=CurvApprox.LANCZOS,
+    )
+
+    parser.add_argument(
+        "--num_batches",
+        type=int,
+        default=10,
+    )
+
+    parser.add_argument(
+        "--last_layer_only",
+        type=lambda x: x.lower() == "true",
+        default=False,
+    )
+
+    parser.add_argument(
+        "--max_rank",
+        type=int,
+        default=10,
+    )
+
+    # --------------------------
+    # Evaluation args
+    # --------------------------
+
+    parser.add_argument(
+        "--calibrate",
+        type=lambda x: x.lower() == "true",
+        default=True,
+    )
+
+    parser.add_argument(
+        "--calibration_method",
+        type=str,
+        choices=["gradient_descent", "grid_search"],
+        default="gradient_descent"
+    )
+
+    parser.add_argument(
+        "--calibration_objective",
+        type=CalibrationObjective,
+        default=CalibrationObjective.ECE
+    )
+
+    parser.add_argument(
+        "--pushforward_type",
+        type=PushforwardType,
+        default=PushforwardType.LINEAR
+    )
+
+    parser.add_argument(
+        "--predictive_type",
+        type=PredictiveType,
+        default=PredictiveType.MC_BRIDGE
+    )
+
+    parser.add_argument(
+        "--low_rank_rank",
+        type=int,
+        default=10
+    )
+
     args = parser.parse_args()
-    
+
     # -------------------------------------------
     # Train model
     # -------------------------------------------
-    
-    if args.task == "train":    
+
+    if args.task == "train":
         train_cifar10_model(n_epochs=args.n_epochs)
 
-
     # -------------------------------------------
-    # GGN arguments
+    # GGN estimation
     # -------------------------------------------
-    
-    curv_types = [CurvApprox.DIAGONAL, CurvApprox.LANCZOS]
-    num_batches = [10]
-    no_last_layer = [False]
-    with_last_layer = [True]
 
-    # Estimate curvatures
-    if args.task == "ggn":       
-        ggn_settings1 = list(product(curv_types, no_last_layer, num_batches))
-        ggn_settings2 = list(product([CurvApprox.FULL], with_last_layer, num_batches))
-
-        for ct, ll, nb in (ggn_settings1 + ggn_settings2)[:args.num_tasks]:
-            curvature_cifar10_model(
-                curv_type=ct,
-                num_batches=nb,
-                last_layer_only=ll
-            )
-
+    if args.task == "ggn":
+        curvature_cifar10_model(
+            curv_type=args.curv_type,
+            num_batches=args.num_batches,
+            last_layer_only=args.last_layer_only,
+            max_rank=args.max_rank
+        )
 
     # -------------------------------------------
     # Evaluation
     # -------------------------------------------
-        
-    register_calibration_method(
-        "gradient_descent",
-        optimize_prior_prec_gradient
-    )
-
-    # Start evaluation
-    csv_logger = CSVLogger(force=True)
-
-    clbr_methods = ["gradient_descent", "grid_search"]
-    clbr_objs = [
-        CalibrationObjective.NLL,
-        CalibrationObjective.MARGINAL_LOG_LIKELIHOOD,
-    ]
-    push_methods = [PushforwardType.LINEAR, PushforwardType.NONLINEAR]
-    predictive_methods = [PredictiveType.MC_BRIDGE]
-    low_rank_ranks = [5, 10]
 
     if args.task == "evaluate":
-        eval_settings = list(
-            product(curv_types, clbr_methods, clbr_objs, no_last_layer, push_methods)
-        ) + list(
-            product([CurvApprox.FULL], clbr_methods, clbr_objs, with_last_layer, push_methods)
+        register_calibration_method(
+            "gradient_descent",
+            optimize_prior_prec_gradient
         )
 
-        for curv_type, clbr_method, clbr_obj, last_layer_only, push_mthd in eval_settings[:args.num_tasks]:
-            logger.info(f"Running Laplace with curvature type: {curv_type}")
+        csv_logger = CSVLogger(
+            file_name="cifar10_results.csv",
+            force=True
+        )
 
-            evaluate_cifar10_model(
-                laplace_kwargs={
-                    "curv_type": curv_type,
-                    "last_layer_only": last_layer_only,
-                    "num_batches": 10,
-                    "max_rank": 10,
-                    "low_rank_rank": 10,
-                },
-                pushforward_kwargs={
-                    "pushforward_type": push_mthd,
-                },
-                clbr_kwargs={
-                    "calibration_objective": CalibrationObjective.ECE,
-                    "calibration_method": clbr_method,
-                },
-                eval_kwargs={
-                    "eval_metrics": [
-                        apply_fns(
-                            lambda map_, **kwargs: jnp.max(jax.nn.softmax(map_, axis=-1), axis=-1),
-                            lambda mc_pred_act, **kwargs: jnp.max(mc_pred_act, axis=-1),
-                            lambda map_, target, **kwargs: correctness(map_, target),
-                            lambda map, target, **kwargs: correctness(map, target),
-                            names=["confidences_map", "confidences_pred", "correctness_map", "correctness_pred"],
-                        ),
-                    ]
-                },
-                csv_logger=csv_logger
-            )                
+        logger.info(f"Running Laplace with curvature type: {args.curv_type}")
+
+        evaluate_cifar10_model(
+            laplace_kwargs={
+                "curv_type": args.curv_type,
+                "last_layer_only": args.last_layer_only,
+                "num_batches": args.num_batches,
+                "max_rank": args.max_rank,
+                "low_rank_rank": args.low_rank_rank,
+            },
+            pushforward_kwargs={
+                "pushforward_type": args.pushforward_type,
+                "predictive_type": args.predictive_type,
+            },
+            clbr_kwargs={
+                "calibration_objective": args.calibration_objective,
+                "calibration_method": args.calibration_method,
+                "init_prior_prec": 1.0,
+                "init_sigma_noise": 1.0,
+            } if args.calibrate else {},
+            eval_kwargs={
+                "eval_metrics": [
+                    apply_fns(
+                        lambda map, **kwargs:
+                            jnp.max(jax.nn.softmax(map, axis=-1), axis=-1),
+                        lambda mc_pred_act, **kwargs: jnp.max(mc_pred_act, axis=-1),
+                        lambda map, target, **kwargs: correctness(map, target) * 1,
+                        lambda map, target, **kwargs: correctness(map, target) * 1,
+                        names=[
+                            "confidences_map",
+                            "confidences_pred",
+                            "correctness_map",
+                            "correctness_pred",
+                        ],
+                    ),
+                ]
+            },
+            csv_logger=csv_logger
+        )
