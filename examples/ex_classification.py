@@ -10,20 +10,20 @@ from loguru import logger
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 
+from laplax.api import (
+    GGN,
+    CalibrationObjective,
+    Predictive,
+    Pushforward,
+    calibration,
+    evaluation,
+    register_calibration_method,
+)
 from laplax.curv import estimate_curvature, set_posterior_fn
 from laplax.curv.cov import LowRankTerms
 from laplax.enums import CurvApprox, LossFn
 from laplax.eval import apply_fns
 from laplax.eval.metrics import correctness, expected_calibration_error
-from laplax.laplace import (
-    GGN,
-    CalibrationObjective,
-    PredictiveType,
-    PushforwardType,
-    calibration,
-    evaluation,
-    register_calibration_method,
-)
 
 from ex_helper import (  # isort: skip
     load_model_checkpoint,
@@ -117,14 +117,16 @@ class CIFAR10CNN(nnx.Module):
         self.conv3 = nnx.Conv(64, 128, kernel_size=(3, 3), padding='SAME', rngs=rngs)
 
         # Pooling helper
-        self.pool = partial(nnx.max_pool, window_shape=(2, 2), strides=(2, 2), padding='VALID')
+        self.pool = partial(
+            nnx.max_pool, window_shape=(2, 2), strides=(2, 2), padding='VALID'
+        )
 
         # Fully-connected layers
-        # After 3×pool on 32×32 input → 4×4 feature maps of 128 channels:
+        # After 3xpool on 32x32 input → 4x4 feature maps of 128 channels:
         #   32 → 16 → 8 → 4
         flat_dim = 4 * 4 * 128
         self.fc1 = nnx.Linear(flat_dim, 256, rngs=rngs)
-        self.final_layer = nnx.Linear(256, 10, rngs=rngs) # TODO: Rename final_layer
+        self.final_layer = nnx.Linear(256, 10, rngs=rngs)
 
     def __call__(self, x: jax.Array) -> jax.Array:
         # x: [32, 32, 3] - No batch dimension assumed
@@ -307,8 +309,8 @@ def evaluate_cifar10_model(
     curv_type = laplace_kwargs.get('curv_type')
     low_rank_rank = laplace_kwargs.get('low_rank_rank', 100)
     sample_seed = pushforward_kwargs.get('sample_seed', 21904)
-    pushforward_type = pushforward_kwargs.get('pushforward_type', PushforwardType.LINEAR)
-    predictive_type = pushforward_kwargs.get('predictive_type', PredictiveType.MC_BRIDGE)
+    pushforward_type = pushforward_kwargs.get('pushforward_type', Pushforward.LINEAR)
+    predictive_type = pushforward_kwargs.get('predictive_type', Predictive.MC_BRIDGE)
     clbr_obj = clbr_kwargs.get("calibration_objective")
     clbr_mthd = clbr_kwargs.get("calibration_method")
     max_rank = laplace_kwargs.get('max_rank', 10)
@@ -468,14 +470,14 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--pushforward_type",
-        type=PushforwardType,
-        default=PushforwardType.LINEAR
+        type=Pushforward,
+        default=Pushforward.LINEAR
     )
 
     parser.add_argument(
         "--predictive_type",
-        type=PredictiveType,
-        default=PredictiveType.MC_BRIDGE
+        type=Predictive,
+        default=Predictive.MC_BRIDGE
     )
 
     parser.add_argument(
@@ -543,11 +545,14 @@ if __name__ == "__main__":
             eval_kwargs={
                 "eval_metrics": [
                     apply_fns(
-                        lambda map, **kwargs:
+                        lambda map, **kwargs:  # noqa: ARG005
                             jnp.max(jax.nn.softmax(map, axis=-1), axis=-1),
-                        lambda mc_pred_act, **kwargs: jnp.max(mc_pred_act, axis=-1),
-                        lambda map, target, **kwargs: correctness(map, target) * 1,
-                        lambda map, target, **kwargs: correctness(map, target) * 1,
+                        lambda mc_pred_act, **kwargs:  # noqa: ARG005
+                            jnp.max(mc_pred_act, axis=-1),
+                        lambda map, target, **kwargs:  # noqa: ARG005
+                            correctness(map, target) * 1,
+                        lambda map, target, **kwargs:  # noqa: ARG005
+                            correctness(map, target) * 1,
                         names=[
                             "confidences_map",
                             "confidences_pred",

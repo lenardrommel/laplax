@@ -7,22 +7,25 @@ from flax import nnx
 from helper import DataLoader, get_sinusoid_example
 from loguru import logger
 
-from laplax.enums import CurvApprox, LossFn
-from laplax.eval.pushforward import lin_samples
-from laplax.eval.utils import transfer_entry
-from laplax.laplace import (
+from laplax.api import (
     DEFAULT_REGRESSION_METRICS,
     CalibrationObjective,
-    PredictiveType,
-    PushforwardType,
+    Predictive,
+    Pushforward,
     calibration,
     evaluation,
     laplace,
     lin_pred_mean,
     lin_pred_std,
     lin_setup,
+    nonlin_pred_mean,
+    nonlin_pred_std,
+    nonlin_setup,
     register_calibration_method,
 )
+from laplax.enums import CurvApprox, LossFn
+from laplax.eval.pushforward import lin_samples, nonlin_samples
+from laplax.eval.utils import transfer_entry
 
 from ex_helper import ( # isort: skip
     generate_experiment_name,
@@ -149,8 +152,6 @@ def evaluate_regression_example(
     pushforward_kwargs: dict,
     # Calibration
     clbr_kwargs: dict | None = None,
-    # Evaluation
-    eval_kwargs: dict | None = None,
     # Output settings
     csv_logger: CSVLogger | None = None
 ):
@@ -162,10 +163,6 @@ def evaluate_regression_example(
         laplace_kwargs: Dictionary containing Laplace approximation settings
         pushforward_kwargs: Dictionary containing pushforward settings
         clbr_kwargs: Dictionary containing calibration settings
-        eval_kwargs: Dictionary containing evaluation settings
-        output_dir: Directory to save results
-        save_logs: Whether to save logs
-        save_samples: Whether to save samples
         csv_logger: CSVLogger instance for logging results
     """
     # Load map model
@@ -193,7 +190,7 @@ def evaluate_regression_example(
     low_rank_rank = laplace_kwargs.get('low_rank_rank', 100)
     low_rank_seed = laplace_kwargs.get('low_rank_seed', 1950)
     sample_seed = pushforward_kwargs.get("sample_seed", 21904)
-    pushforward_type = pushforward_kwargs.get('pushforward_type', PushforwardType.LINEAR)
+    pushforward_type = pushforward_kwargs.get('pushforward_type', Pushforward.LINEAR)
 
     # Extract calibration parameters if provided
     clbr_obj = clbr_kwargs.get("calibration_objective") if clbr_kwargs else None
@@ -234,7 +231,7 @@ def evaluate_regression_example(
             curv_estimate=curv_est,
             curv_type=curv_type,
             loss_fn=LossFn.MSE,
-            predictive_type=PredictiveType.NONE,
+            predictive_type=Predictive.NONE,
             pushforward_type=pushforward_type,
             **clbr_kwargs,
         )
@@ -253,14 +250,19 @@ def evaluate_regression_example(
         arguments=prior_args,
         data={"input": test_loader.X, "target": test_loader.y},
         metrics=eval_metrics,
-        predictive_type=PredictiveType.NONE,
+        predictive_type=Predictive.NONE,
         pushforward_type=pushforward_type,
         pushforward_fns=[
             lin_setup,
             lin_pred_mean,
             lin_pred_std,
             lin_samples,
-        ] if pushforward_type is PushforwardType.LINEAR else None,
+        ] if pushforward_type is Pushforward.LINEAR else [
+            nonlin_setup,
+            nonlin_pred_mean,
+            nonlin_pred_std,
+            nonlin_samples,
+        ],
         sample_key=jax.random.key(sample_seed),
         num_samples=20,
     )
@@ -278,6 +280,7 @@ def evaluate_regression_example(
             "target": test_loader.y,
             "pred_mean": results["pred_mean"],
             "pred_std": results["pred_std"],
+            "samples": results["samples"],
         },
         experiment_name=experiment_name,
         log_args={
@@ -300,7 +303,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--task",
         type=str,
-        default="train",
+        default="evaluate",
         choices=["train", "evaluate"],
     )
     parser.add_argument(
@@ -373,8 +376,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--pushforward_type",
-        type=PushforwardType,
-        default=PushforwardType.LINEAR
+        type=Pushforward,
+        default=Pushforward.LINEAR
     )
     parser.add_argument(
         "--sample_seed",
