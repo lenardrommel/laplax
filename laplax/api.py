@@ -17,7 +17,15 @@ from loguru import logger
 # Laplax imports
 from laplax.curv.cov import estimate_curvature, set_posterior_fn
 from laplax.curv.ggn import create_ggn_mv_without_data
-from laplax.enums import LossFn
+from laplax.enums import (
+    CalibrationMethod,
+    CalibrationObjective,
+    CurvApprox,
+    DefaultMetrics,
+    LossFn,
+    Predictive,
+    Pushforward,
+)
 from laplax.eval import (
     evaluate_for_given_prior_arguments,
     marginal_log_likelihood,
@@ -46,11 +54,10 @@ from laplax.eval.pushforward import (
     set_lin_pushforward,
     set_nonlin_pushforward,
 )
-from laplax.eval.utils import evaluate_metrics_on_dataset
+from laplax.eval.utils import apply_fns, evaluate_metrics_on_dataset
 from laplax.types import (
     Any,
     Callable,
-    CurvApprox,
     Data,
     Int,
     Iterable,
@@ -66,98 +73,16 @@ from laplax.util.loader import (
     reduce_add,
 )
 
-# ------------------------------------------------------------------------------
-# API specific enumerations
-# ------------------------------------------------------------------------------
-
-
-def _convert_to_enum(enum_cls, value, *, str_default=False):
-    """Convert string to enum, pass through if already enum."""
-    if isinstance(value, enum_cls):
-        return value
-    try:
-        return enum_cls(value.lower())
-    except ValueError:
-        if str_default:
-            return value
-        raise
-
-
-class CalibrationObjective(StrEnum):
-    """Supported calibration objectives (minimisation!)."""
-
-    NLL = "nll"
-    CHI_SQUARED = "chi_squared"
-    MARGINAL_LOG_LIKELIHOOD = "marginal_log_likelihood"
-    ECE = "ece"
-
-
-class CalibrationMethod(StrEnum):
-    GRID_SEARCH = "grid_search"
-
-
-calibration_options = {
-    CalibrationMethod.GRID_SEARCH: optimize_prior_prec,
-}
-
-
-def register_calibration_method(method_name: str, method_fn: Callable):
-    """Register a new calibration method.
-
-    Parameters
-    ----------
-    method_name : str
-        Name of the calibration method. This will be added to the CalibrationMethod enum.
-    method_fn : Callable
-        Function implementing the calibration method. Should have the signature:
-        method_fn(objective: Callable, **kwargs) -> float
-        where objective is a function that takes a prior_prec value and returns a scalar loss.
-
-    Returns
-    -------
-    None
-        The method is registered in the calibration_options dictionary.
- 
-    Examples
-    --------
-    >>> def my_custom_calibration(objective, **kwargs):
-    ...     # Custom implementation
-    ...     return optimal_prior_prec
-    >>> register_calibration_method("my_method", my_custom_calibration)
-    >>> # Now you can use it in calibration:
-    >>> calibration(..., calibration_method="my_method")
-    """
-    # Register the method in the options dictionary
-    calibration_options[method_name] = method_fn
-
-    logger.info(f"Registered new calibration method: {method_name}")
-
-
-class PushforwardType(StrEnum):
-    LINEAR = "linear"
-    NONLINEAR = "nonlinear"
-
-
-class PredictiveType(StrEnum):
-    MC_BRIDGE = "mc_bridge"
-    LAPLACE_BRIDGE = "laplace_bridge"
-    MEAN_FIELD_0 = "mean_field_0"
-    MEAN_FIELD_1 = "mean_field_1"
-    MEAN_FIELD_2 = "mean_field_2"
-    NONE = "none"
-
-
-_SPECIAL_PREDICTIVE_TYPES = {
-    PredictiveType.LAPLACE_BRIDGE,
-    PredictiveType.MEAN_FIELD_0,
-    PredictiveType.MEAN_FIELD_1,
-    PredictiveType.MEAN_FIELD_2,
-}
-
+EMPTY_DICT = {}
 
 # ------------------------------------------------------------------------------
 # Helper functions
 # ------------------------------------------------------------------------------
+
+
+def _check_if_none(*args: Any) -> bool:
+    return any(x is None for x in args)
+
 
 def _validate_and_get_transform(batch: Data | Any) -> Callable[[Any], Data]:
     """Return the transform that converts a *single* batch to (inputs, targets).
@@ -181,13 +106,6 @@ def _validate_and_get_transform(batch: Data | Any) -> Callable[[Any], Data]:
 
     msg = f"Unsupported batch type: {type(batch)}. Expect tuple or mapping."
     raise ValueError(msg)
-
-# ------------------------------------------------------------------------------
-# GGN API
-# ------------------------------------------------------------------------------
-
-
-EMPTY_DICT = {}
 
 
 def _maybe_wrap_loader_or_batch(
@@ -215,6 +133,270 @@ def _maybe_wrap_loader_or_batch(
         **loader_kwargs,
     )
 
+
+# ------------------------------------------------------------------------------
+# Enumeration helpers
+# ------------------------------------------------------------------------------
+
+
+def _convert_to_enum(
+    enum_cls: StrEnum,
+    value: StrEnum | str,
+    *,
+    str_default: bool = False,
+) -> StrEnum | ValueError:
+    """Convert string to enum, pass through if already enum."""
+    if isinstance(value, enum_cls):
+        return value
+    try:
+        return enum_cls(value.lower())
+    except ValueError:
+        if str_default:
+            return value
+        raise
+
+# ------------------------------------------------------------------------------
+# Pushforward / predictive helpers
+# ------------------------------------------------------------------------------
+
+
+_SPECIAL_PREDICTIVES = {
+    Predictive.LAPLACE_BRIDGE,
+    Predictive.MEAN_FIELD_0,
+    Predictive.MEAN_FIELD_1,
+    Predictive.MEAN_FIELD_2,
+}
+
+
+def _setup_pushforward(
+    *,
+    pushforward_type: Pushforward | str,
+    predictive_type: Predictive | str,
+    pushforward_fns: list[Callable] | None,
+):
+    """Return `(set_pushforward, list_of_fns)` according to user specification."""
+    pushforward_type = _convert_to_enum(Pushforward, pushforward_type)
+    predictive_type = _convert_to_enum(Predictive, predictive_type)
+    pushforward_fns = [] if pushforward_fns is None else pushforward_fns
+
+    if pushforward_type is Pushforward.LINEAR:
+        set_pushforward = set_lin_pushforward
+        if not pushforward_fns:
+            pushforward_fns = [lin_setup, lin_pred_mean, lin_pred_std]
+            if predictive_type is Predictive.MC_BRIDGE:
+                pushforward_fns.append(lin_mc_pred_act)
+            elif predictive_type in _SPECIAL_PREDICTIVES:
+                pushforward_fns.append(
+                    partial(
+                        lin_special_pred_act,
+                        special_pred_type=predictive_type,
+                    )
+                )
+            elif predictive_type is not Predictive.NONE:
+                msg = f"Invalid predictive type: {predictive_type}"
+                raise ValueError(msg)
+
+    elif pushforward_type is Pushforward.NONLINEAR:
+        set_pushforward = set_nonlin_pushforward
+        if not pushforward_fns:
+            pushforward_fns = [nonlin_setup, nonlin_pred_mean, nonlin_pred_std]
+            if predictive_type is Predictive.MC_BRIDGE:
+                pushforward_fns.append(nonlin_mc_pred_act)
+            elif predictive_type in _SPECIAL_PREDICTIVES:
+                msg = (
+                    f"{predictive_type.value} not supported for non-linear pushforward."
+                )
+                raise ValueError(msg)
+    else:
+        msg = f"Invalid pushforward type: {pushforward_type}"
+        raise ValueError(msg)
+
+    return set_pushforward, pushforward_fns
+
+
+# ------------------------------------------------------------------------------
+# Calibration helpers
+# ------------------------------------------------------------------------------
+
+calibration_options = {
+    CalibrationMethod.GRID_SEARCH: optimize_prior_prec,
+}
+
+
+def register_calibration_method(method_name: str, method_fn: Callable) -> None:
+    """Register a new calibration method.
+
+    Parameters
+    ----------
+    method_name : str
+        Name of the calibration method. This will be added to the CalibrationMethod enum.
+    method_fn : Callable
+        Function implementing the calibration method. Should have the signature:
+        method_fn(objective: Callable, **kwargs) -> float
+        where objective is a function that takes a prior_prec value and returns a scalar loss.
+
+    Returns:
+    -------
+    None
+        The method is registered in the calibration_options dictionary.
+    """
+    # Register the method in the options dictionary
+    calibration_options[method_name] = method_fn
+
+    logger.info(f"Registered new calibration method: {method_name}")
+
+
+def _make_nll_objective(set_prob_predictive: Callable) -> Callable:
+    return jax.jit(
+        lambda prior_args, batch: evaluate_for_given_prior_arguments(
+            prior_arguments=prior_args,
+            data=batch,
+            set_prob_predictive=set_prob_predictive,
+            metric=nll_gaussian,
+        )
+    )
+
+
+def _make_chi2_objective(set_prob_predictive: Callable) -> Callable:
+    return jax.jit(
+        lambda prior_args, batch: evaluate_for_given_prior_arguments(
+            prior_arguments=prior_args,
+            data=batch,
+            set_prob_predictive=set_prob_predictive,
+            metric=chi_squared_zero,
+        )
+    )
+
+
+def _make_ece_objective(set_prob_predictive: Callable) -> Callable:
+    def ece(**kwargs):
+        mc_pred_act = kwargs["mc_pred_act"]
+        target = kwargs["target"]
+        conf = jnp.max(mc_pred_act, axis=-1)
+        correct = correctness(mc_pred_act, target) * 1
+        val = expected_calibration_error(
+            confidence=conf,
+            correctness=correct,
+            num_bins=15,
+        )
+        return val
+
+    # return jax.jit(
+    return lambda prior_args, batch: evaluate_for_given_prior_arguments(
+            prior_arguments=prior_args,
+            data=batch,
+            set_prob_predictive=set_prob_predictive,
+            metric=ece,
+        )
+    # )
+
+
+def _make_mll_objective(
+    curv_estimate,
+    model_fn: ModelFn,
+    params: Params,
+    curv_type: CurvApprox,
+    loss_fn: LossFn,
+):
+    return jax.jit(
+        lambda prior_args, batch: -marginal_log_likelihood(
+            curv_estimate=curv_estimate,
+            prior_arguments=prior_args,
+            data=batch,
+            model_fn=model_fn,
+            params=params,
+            loss_fn=loss_fn,
+            curv_type=curv_type,
+        )
+    )
+
+
+def _build_calibration_objective(
+    objective_type: CalibrationObjective | str,
+    *,
+    set_prob_predictive: Callable,
+    curv_estimate=None,
+    model_fn=None,
+    params=None,
+    curv_type=None,
+    loss_fn: LossFn,
+) -> Callable:
+    """Factory selecting / validating the requested calibration objective."""
+    objective_type = _convert_to_enum(CalibrationObjective, objective_type)
+
+    if (
+        objective_type is CalibrationObjective.MARGINAL_LOG_LIKELIHOOD
+        and _check_if_none(curv_estimate, model_fn, params, curv_type)
+    ):
+        msg = (
+            "Marginal log-likelihood objective requires "
+            "`curv_estimate`, `model_fn`, `params`, `curv_type`."
+        )
+        raise ValueError(msg)
+
+    match objective_type:
+        case CalibrationObjective.NLL:
+            return _make_nll_objective(set_prob_predictive)
+        case CalibrationObjective.CHI_SQUARED:
+            return _make_chi2_objective(set_prob_predictive)
+        case CalibrationObjective.MARGINAL_LOG_LIKELIHOOD:
+            return _make_mll_objective(
+                curv_estimate=curv_estimate,
+                model_fn=model_fn,
+                params=params,
+                curv_type=curv_type,
+                loss_fn=loss_fn,
+            )
+        case CalibrationObjective.ECE:
+            return _make_ece_objective(set_prob_predictive)
+        case _:
+            msg = f"Unknown calibration objective: {objective_type}"
+            raise ValueError(msg)
+
+
+# ------------------------------------------------------------------------------
+# Evaluation helpers
+# ------------------------------------------------------------------------------
+
+def _resolve_metrics(metrics: DefaultMetrics | list[Callable]) -> list[Callable]:
+    if metrics == DefaultMetrics.REGRESSION:
+        return DEFAULT_REGRESSION_METRICS
+    if metrics == DefaultMetrics.CLASSIFICATION:
+        return [
+            apply_fns(
+                lambda map, **kwargs:  # noqa: ARG005
+                    jnp.max(jax.nn.softmax(map, axis=-1), axis=-1),
+                lambda mc_pred_act, **kwargs:  # noqa: ARG005
+                    jnp.max(mc_pred_act, axis=-1),
+                lambda map, target, **kwargs:  # noqa: ARG005
+                    correctness(map, target) * 1,
+                lambda map, target, **kwargs:  # noqa: ARG005
+                    correctness(map, target) * 1,
+                names=[
+                    "confidences_map",
+                    "confidences_pred",
+                    "correctness_map",
+                    "correctness_pred",
+                ],
+            ),
+        ]
+    if isinstance(metrics, (list, tuple)):
+        if not metrics:
+            msg = "Metrics list must not be empty."
+            raise ValueError(msg)
+        return list(metrics)
+
+    msg = (
+        f"Parameter `metrics` must be DefaultMetrics.REGRESSION, "
+        f"DefaultMetrics.CLASSIFICATION, or a *non-empty* list of callables, "
+        f"got {type(metrics).__name__}"
+    )
+    raise ValueError(msg)
+
+
+# ------------------------------------------------------------------------------
+# GGN API
+# ------------------------------------------------------------------------------
 
 def GGN(
     model_fn: ModelFn,
@@ -276,7 +458,7 @@ def GGN(
     return mv_bound
 
 # ------------------------------------------------------------------------------
-# laplace (fit curvature)
+# laplace(...) (fit curvature)
 # ------------------------------------------------------------------------------
 
 
@@ -363,175 +545,7 @@ def laplace(
 
 
 # ------------------------------------------------------------------------------
-# calibration helpers
-# ------------------------------------------------------------------------------
-
-
-def _make_nll_objective(set_prob_predictive: Callable) -> Callable:
-    return jax.jit(
-        lambda prior_args, batch: evaluate_for_given_prior_arguments(
-            prior_arguments=prior_args,
-            data=batch,
-            set_prob_predictive=set_prob_predictive,
-            metric=nll_gaussian,
-        )
-    )
-
-
-def _make_chi2_objective(set_prob_predictive: Callable) -> Callable:
-    return jax.jit(
-        lambda prior_args, batch: evaluate_for_given_prior_arguments(
-            prior_arguments=prior_args,
-            data=batch,
-            set_prob_predictive=set_prob_predictive,
-            metric=chi_squared_zero,
-        )
-    )
-
-
-def _make_ece_objective(set_prob_predictive: Callable) -> Callable:
-    def ece(**kwargs):
-        mc_pred_act = kwargs["mc_pred_act"]
-        target = kwargs["target"]
-        conf = jnp.max(mc_pred_act, axis=-1)
-        correct = correctness(mc_pred_act, target) * 1
-        val = expected_calibration_error(
-            confidence=conf,
-            correctness=correct,
-            num_bins=15,
-        )
-        return val
-
-    # return jax.jit(
-    return lambda prior_args, batch: evaluate_for_given_prior_arguments(
-            prior_arguments=prior_args,
-            data=batch,
-            set_prob_predictive=set_prob_predictive,
-            metric=ece,
-        )
-    # )
-
-
-def _make_mll_objective(
-    curv_estimate,
-    model_fn: ModelFn,
-    params: Params,
-    curv_type: CurvApprox,
-    loss_fn: LossFn,
-):
-    return jax.jit(
-        lambda prior_args, batch: -marginal_log_likelihood(
-            curv_estimate=curv_estimate,
-            prior_arguments=prior_args,
-            data=batch,
-            model_fn=model_fn,
-            params=params,
-            loss_fn=loss_fn,
-            curv_type=curv_type,
-        )
-    )
-
-
-def _check_if_none(*args: Any) -> bool:
-    return any(x is None for x in args)
-
-
-def _build_calibration_objective(
-    objective_type: CalibrationObjective | str,
-    *,
-    set_prob_predictive: Callable,
-    curv_estimate=None,
-    model_fn=None,
-    params=None,
-    curv_type=None,
-    loss_fn: LossFn,
-) -> Callable:
-    """Factory selecting / validating the requested calibration objective."""
-    objective_type = _convert_to_enum(CalibrationObjective, objective_type)
-
-    if (
-        objective_type is CalibrationObjective.MARGINAL_LOG_LIKELIHOOD
-        and _check_if_none(curv_estimate, model_fn, params, curv_type)
-    ):
-        msg = (
-            "Marginal log-likelihood objective requires "
-            "`curv_estimate`, `model_fn`, `params`, `curv_type`."
-        )
-        raise ValueError(msg)
-
-    match objective_type:
-        case CalibrationObjective.NLL:
-            return _make_nll_objective(set_prob_predictive)
-        case CalibrationObjective.CHI_SQUARED:
-            return _make_chi2_objective(set_prob_predictive)
-        case CalibrationObjective.MARGINAL_LOG_LIKELIHOOD:
-            return _make_mll_objective(
-                curv_estimate=curv_estimate,
-                model_fn=model_fn,
-                params=params,
-                curv_type=curv_type,
-                loss_fn=loss_fn,
-            )
-        case CalibrationObjective.ECE:
-            return _make_ece_objective(set_prob_predictive)
-        case _:
-            msg = f"Unknown calibration objective: {objective_type}"
-            raise ValueError(msg)
-
-
-# ------------------------------------------------------------------------------
-# pushforward helpers
-# ------------------------------------------------------------------------------
-
-
-def _setup_pushforward(
-    *,
-    pushforward_type: PushforwardType | str,
-    predictive_type: PredictiveType | str,
-    pushforward_fns: list[Callable] | None,
-):
-    """Return `(set_pushforward, list_of_fns)` according to user specification."""
-    pushforward_type = _convert_to_enum(PushforwardType, pushforward_type)
-    predictive_type = _convert_to_enum(PredictiveType, predictive_type)
-    pushforward_fns = [] if pushforward_fns is None else pushforward_fns
-
-    if pushforward_type is PushforwardType.LINEAR:
-        set_pushforward = set_lin_pushforward
-        if not pushforward_fns:
-            pushforward_fns = [lin_setup, lin_pred_mean, lin_pred_std]
-            if predictive_type is PredictiveType.MC_BRIDGE:
-                pushforward_fns.append(lin_mc_pred_act)
-            elif predictive_type in _SPECIAL_PREDICTIVE_TYPES:
-                pushforward_fns.append(
-                    partial(
-                        lin_special_pred_act,
-                        special_pred_type=predictive_type,
-                    )
-                )
-            elif predictive_type is not PredictiveType.NONE:
-                msg = f"Invalid predictive type: {predictive_type}"
-                raise ValueError(msg)
-
-    elif pushforward_type is PushforwardType.NONLINEAR:
-        set_pushforward = set_nonlin_pushforward
-        if not pushforward_fns:
-            pushforward_fns = [nonlin_setup, nonlin_pred_mean, nonlin_pred_std]
-            if predictive_type is PredictiveType.MC_BRIDGE:
-                pushforward_fns.append(nonlin_mc_pred_act)
-            elif predictive_type in _SPECIAL_PREDICTIVE_TYPES:
-                msg = (
-                    f"{predictive_type.value} not supported for non-linear pushforward."
-                )
-                raise ValueError(msg)
-    else:
-        msg = f"Invalid pushforward type: {pushforward_type}"
-        raise ValueError(msg)
-
-    return set_pushforward, pushforward_fns
-
-
-# ------------------------------------------------------------------------------
-# calibration
+# calibration(...) (tune hyperparameters)
 # ------------------------------------------------------------------------------
 
 
@@ -544,8 +558,8 @@ def calibration(
     loss_fn: LossFn,
     curv_estimate,
     curv_type,
-    predictive_type: PredictiveType | str = PredictiveType.NONE,
-    pushforward_type: PushforwardType | str = PushforwardType.LINEAR,
+    predictive_type: Predictive | str = Predictive.NONE,
+    pushforward_type: Pushforward | str = Pushforward.LINEAR,
     pushforward_fns: list[Callable] | None = None,
     calibration_objective: CalibrationObjective | str = CalibrationObjective.NLL,
     calibration_method: CalibrationMethod | str = CalibrationMethod.GRID_SEARCH,
@@ -635,33 +649,8 @@ def calibration(
 
 
 # ------------------------------------------------------------------------------
-# evaluation helpers
+# evaluation(...) (evaluate predictive performance)
 # ------------------------------------------------------------------------------
-
-
-def _resolve_metrics(metrics: str | list[Callable]) -> list[Callable]:
-    if metrics == "regression":
-        return DEFAULT_REGRESSION_METRICS
-    if metrics == "classification":
-        msg = "Classification metrics are not yet implemented."
-        raise NotImplementedError(msg)
-    if isinstance(metrics, (list, tuple)):
-        if not metrics:
-            msg = "Metrics list must not be empty."
-            raise ValueError(msg)
-        return list(metrics)
-
-    msg = (
-        "Parameter `metrics` must be 'regression', 'classification', or "
-        "a *non-empty* list of callables."
-    )
-    raise ValueError(msg)
-
-
-# ------------------------------------------------------------------------------
-# evaluation
-# ------------------------------------------------------------------------------
-
 
 def evaluation(
     posterior_fn: Callable,
@@ -670,16 +659,20 @@ def evaluation(
     arguments: PriorArguments,
     data: Data,
     *,
-    metrics: str | list[Callable] = "regression",
-    predictive_type: PredictiveType | str = PredictiveType.NONE,
-    pushforward_type: PushforwardType | str = PushforwardType.LINEAR,
+    metrics: DefaultMetrics | list[Callable] | str = DefaultMetrics.REGRESSION,
+    predictive_type: Predictive | str = Predictive.NONE,
+    pushforward_type: Pushforward | str = Pushforward.LINEAR,
     pushforward_fns: list[Callable] | None = None,
     reduce: Callable = identity,
     sample_key: KeyType = 0,
     num_samples: int = 10,
 ):
     """Run predictive evaluation after calibration (or fixed prior args)."""
-    metrics_list = _resolve_metrics(metrics)
+    metrics_list = _resolve_metrics(
+        _convert_to_enum(DefaultMetrics, metrics)
+        if isinstance(metrics, str)
+        else metrics
+    )
 
     set_pushforward, pushforward_fns = _setup_pushforward(
         pushforward_type=pushforward_type,
@@ -707,9 +700,4 @@ def evaluation(
         reduce=reduce,
     )
 
-    # Log results.
-    logger.debug(
-        "Evaluation finished with metrics: {}",
-        results if reduce == identity else jax.tree.map(jnp.mean, results)
-    )
     return results, prob_predictive
