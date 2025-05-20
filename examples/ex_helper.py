@@ -1,6 +1,7 @@
 import datetime
 import itertools
 import pickle
+import random
 from pathlib import Path
 
 import jax
@@ -8,6 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import pandas as pd
+import torch
 from flax import nnx
 from loguru import logger
 from orbax import checkpoint as ocp
@@ -125,7 +127,7 @@ class CSVLogger:
             **results,
             **log_args,
             "experiment_name": experiment_name,
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S"),
         }
 
         df = pd.DataFrame([row])
@@ -155,6 +157,27 @@ def generate_experiment_name(**kwargs):
     return f"{timestamp}_{'_'.join(name_parts)}"
 
 # ---------------------------------------------------------------------
+# Fix randomness
+# ---------------------------------------------------------------------
+
+
+def fix_random_seed(seed: int):
+    """Fix random seed in numpy, scipy and torch backend."""
+    # Python built-in RNG
+    random.seed(seed + 1)
+    # NumPy RNG (also covers SciPy)
+    np.random.seed(seed + 2)  # noqa: NPY002
+    # PyTorch CPU RNG
+    torch.manual_seed(seed + 3)
+    # PyTorch GPU RNG (if available)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed + 4)
+    # Ensure deterministic behavior in cuDNN (may slow down training)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+# # ---------------------------------------------------------------------
 # DataLoader Helper
 # ---------------------------------------------------------------------
 

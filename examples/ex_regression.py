@@ -3,10 +3,13 @@ from pathlib import Path
 
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 from flax import nnx
 from helper import DataLoader, get_sinusoid_example
 from loguru import logger
+from plotting import plot_regression_with_uncertainty
 
+import wandb  # Add wandb import
 from laplax.api import (
     DEFAULT_REGRESSION_METRICS,
     CalibrationObjective,
@@ -34,7 +37,8 @@ from ex_helper import ( # isort: skip
     train_map_model,
     split_model,
     CSVLogger,
-    optimize_prior_prec_gradient
+    optimize_prior_prec_gradient,
+    fix_random_seed
 )
 
 # ------------------------------------------------------------------------------
@@ -54,6 +58,7 @@ def build_sinusoid_data(
     intervals=DEFAULT_INTERVALS,
     batch_size=20,
     rng_seed=0,
+    test_interval=(0.0, 8.0),
 ):
     key = jax.random.key(rng_seed)
     X_train, y_train, X_valid, y_valid, X_test, y_test = get_sinusoid_example(
@@ -63,6 +68,7 @@ def build_sinusoid_data(
         sigma_noise=sigma_noise,
         intervals=intervals,
         rng_key=key,
+        test_interval=test_interval,
     )
 
     train_loader = DataLoader(X_train, y_train, batch_size)
@@ -92,7 +98,7 @@ def train_sinusoid_model(
     # Data settings
     num_train=150,
     num_valid=50,
-    num_test=150,
+    num_test=300,
     sigma_noise=0.3,
     intervals=DEFAULT_INTERVALS,
     batch_size=20,
@@ -153,7 +159,8 @@ def evaluate_regression_example(
     # Calibration
     clbr_kwargs: dict | None = None,
     # Output settings
-    csv_logger: CSVLogger | None = None
+    csv_logger: CSVLogger | None = None,
+    use_wandb: bool = False,
 ):
     """Evaluate regression example.
 
@@ -164,6 +171,7 @@ def evaluate_regression_example(
         pushforward_kwargs: Dictionary containing pushforward settings
         clbr_kwargs: Dictionary containing calibration settings
         csv_logger: CSVLogger instance for logging results
+        use_wandb: Whether to log results to Weights & Biases
     """
     # Load map model
     ckpt_path = Path(ckpt_dir) / model_name
@@ -178,7 +186,9 @@ def evaluate_regression_example(
     )
 
     # Load data
-    train_loader, valid_loader, test_loader = build_sinusoid_data()
+    train_loader, valid_loader, test_loader = build_sinusoid_data(
+        num_test=300, test_interval=(-2.0, 10.0)
+    )
 
     # Start evaluation
     results = {}
@@ -203,10 +213,32 @@ def evaluate_regression_example(
         cm=clbr_mthd,
         pt=pushforward_type
     )
+
+    # Initialize wandb if enabled
+    if use_wandb:
+        wandb.init(
+            project="laplax-regression",
+            name=experiment_name,
+            config={
+                "curv_type": laplace_kwargs.get('curv_type'),
+                "last_layer_only": laplace_kwargs.get('last_layer_only'),
+                "pushforward_type": pushforward_kwargs.get('pushforward_type'),
+                "calibration_objective": (
+                    clbr_kwargs.get("calibration_objective") if clbr_kwargs else None
+                ),
+                "calibration_method": (
+                    clbr_kwargs.get("calibration_method") if clbr_kwargs else None
+                ),
+            }
+        )
+
+    # Split model
     model_fn, params = split_model(
         model,
         last_layer_only=last_layer_only
     )
+
+
 
     # Approximate curvature
     posterior_fn, curv_est = laplace(
@@ -274,6 +306,26 @@ def evaluate_regression_example(
             "crps": jnp.mean(results["crps"]),
     }
     logger.info(f"Eval: {avg_results}")
+
+    # Log to wandb if enabled
+    if use_wandb:
+        # Log metrics
+        wandb.log(avg_results)
+
+        # Create and log regression plot with uncertainty
+        fig = plot_regression_with_uncertainty(
+            X_train=train_loader.X,
+            y_train=train_loader.y,
+            X_test=test_loader.X,
+            y_test=test_loader.y,
+            X_pred=test_loader.X,
+            y_pred=results["pred_mean"],
+            y_std=results["pred_std"],
+            title=f"Regression with {curv_type} Curvature"
+        )
+        wandb.log({"regression_plot": wandb.Image(fig)})
+        plt.close(fig)
+
     csv_logger.log(
         avg_results | {
             "input": test_loader.X,
@@ -395,7 +447,18 @@ if __name__ == "__main__":
         default="regression_model_h64_n150_seed0",
     )
 
+    # --------------------------
+    # Wandb args
+    # --------------------------
+    parser.add_argument(
+        "--wandb",
+        type=lambda x: x.lower() == "true",
+        default=True,
+        help="Enable Weights & Biases logging",
+    )
+
     args = parser.parse_args()
+    fix_random_seed(args.data_seed + 2103)
 
     # -------------------------------------------
     # Train model
@@ -446,5 +509,6 @@ if __name__ == "__main__":
                 "log_prior_prec_min": -4,
                 "log_prior_prec_max": 4
             },
-            csv_logger=csv_logger
+            csv_logger=csv_logger,
+            use_wandb=args.wandb
         )

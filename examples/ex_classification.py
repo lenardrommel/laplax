@@ -4,12 +4,15 @@ from pathlib import Path
 
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import torch
 from flax import nnx
 from loguru import logger
+from plotting import create_proportion_diagram, create_reliability_diagram
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 
+import wandb
 from laplax.api import (
     GGN,
     CalibrationObjective,
@@ -35,7 +38,8 @@ from ex_helper import (  # isort: skip
     generate_experiment_name,
     CSVLogger,
     LimitedLoader,
-    optimize_prior_prec_gradient
+    optimize_prior_prec_gradient,
+    fix_random_seed
 )
 
 
@@ -287,7 +291,8 @@ def evaluate_cifar10_model(
     # Evaluation settings
     eval_kwargs: dict = EMPTY_DICT,
     # Output settings
-    csv_logger: CSVLogger | None = None
+    csv_logger: CSVLogger | None = None,
+    use_wandb: bool = False,
 ):
     """Evaluate the CIFAR-10 model."""
     # Load map model
@@ -325,6 +330,24 @@ def evaluate_cifar10_model(
         prt=predictive_type,
         rk=low_rank_rank,
     )
+
+    # Initialize wandb if enabled
+    if use_wandb:
+        wandb.init(
+            project="laplax-classification",
+            name=experiment_name,
+            config={
+                "curv_type": curv_type,
+                "last_layer_only": last_layer_only,
+                "pushforward_type": pushforward_type,
+                "predictive_type": predictive_type,
+                "calibration_objective": clbr_obj,
+                "calibration_method": clbr_mthd,
+                "low_rank_rank": low_rank_rank,
+                "num_batches": num_batches,
+            }
+        )
+
     model_fn, params = split_model(model, last_layer_only=last_layer_only)
 
     # Load curvature and set posterior_fn
@@ -388,6 +411,30 @@ def evaluate_cifar10_model(
     results = jax.tree.map(lambda x: x.mean(), results)
     results["ece"] = ece
 
+    # Log to wandb if enabled
+    if use_wandb:
+        # Log metrics
+        wandb.log(results)
+
+        # Create and log reliability diagram
+        fig = plt.figure(figsize=(10, 6))
+        create_reliability_diagram(
+            bin_confidences=jnp.linspace(0, 1, 15),
+            bin_accuracies=results["confidences_pred"],
+            num_bins=15,
+        )
+        wandb.log({"reliability_diagram": wandb.Image(fig)})
+        plt.close(fig)
+
+        # Create and log proportion diagram
+        fig = plt.figure(figsize=(10, 6))
+        create_proportion_diagram(
+            bin_proportions=results["confidences_pred"],
+            num_bins=15,
+        )
+        wandb.log({"proportion_diagram": wandb.Image(fig)})
+        plt.close(fig)
+
     csv_logger.log(results, experiment_name)
 
     logger.info(f"Eval: {results}")
@@ -402,11 +449,6 @@ if __name__ == "__main__":
         type=str,
         default="train",
         choices=["train", "ggn", "evaluate"],
-    )
-    parser.add_argument(
-        "--num_tasks",
-        type=int,
-        default=1,
     )
 
     # --------------------------
@@ -442,7 +484,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max_rank",
         type=int,
-        default=10,
+        default=200,
     )
 
     # --------------------------
@@ -483,10 +525,22 @@ if __name__ == "__main__":
     parser.add_argument(
         "--low_rank_rank",
         type=int,
-        default=10
+        default=100
+    )
+
+    # --------------------------
+    # Wandb args
+    # --------------------------
+    parser.add_argument(
+        "--wandb",
+        type=lambda x: x.lower() == "true",
+        default=True,
+        help="Enable Weights & Biases logging",
     )
 
     args = parser.parse_args()
+
+    fix_random_seed(args.data_seed + 2103)
 
     # -------------------------------------------
     # Train model
@@ -562,5 +616,6 @@ if __name__ == "__main__":
                     ),
                 ]
             },
-            csv_logger=csv_logger
+            csv_logger=csv_logger,
+            use_wandb=args.wandb
         )

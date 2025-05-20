@@ -79,7 +79,9 @@ def plot_regression_with_uncertainty(
                 )
 
     # Plot true function
-    x_true = np.linspace(0, 8, 1000).reshape(-1, 1)
+    min_point = min(X_train.min(), X_test.min(), 0.0)
+    max_point = max(X_train.max(), X_test.max(), 8.0)
+    x_true = np.linspace(min_point, max_point, 1000).reshape(-1, 1)
     y_true = np.sin(x_true)
     plt.plot(x_true, y_true, color="black", linestyle="--", label="True function")
 

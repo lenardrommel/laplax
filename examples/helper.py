@@ -50,6 +50,7 @@ def get_sinusoid_example(
     num_test_data: int = 100,
     sigma_noise: float = 0.3,
     intervals: list[tuple[float, float]] = DEFAULT_INTERVALS,
+    test_interval: tuple[float, float] = (0.0, 8.0),
     rng_key=None,
 ) -> tuple[
     jnp.ndarray, jnp.ndarray, Iterator[tuple[jnp.ndarray, jnp.ndarray]], jnp.ndarray
@@ -62,6 +63,8 @@ def get_sinusoid_example(
         num_train_data: Number of training data points.
         num_valid_data: Number of validation data points.
         sigma_noise: Standard deviation of the noise.
+        intervals: List of (min, max) tuples defining intervals for train/valid data.
+        test_interval: (min, max) tuple defining interval for test data.
         rng_key: Random number generator key.
 
     Returns:
@@ -103,7 +106,7 @@ def get_sinusoid_example(
     y_valid = jnp.sin(X_valid) + noise
 
     # Generate testing data
-    X_test = jnp.linspace(0.0, 8.0, num_test_data).reshape(-1, 1)
+    X_test = jnp.linspace(test_interval[0], test_interval[1], num_test_data).reshape(-1, 1)
     noise = random.normal(rng_noise_test, X_test.shape) * sigma_noise
     y_test = jnp.sin(X_test) + noise
 
