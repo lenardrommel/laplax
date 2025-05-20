@@ -43,7 +43,7 @@ class DataLoader:
 DEFAULT_INTERVALS = [
     (0, 2),
     (4, 5),
-    (6, 8),
+    (6, 12),
 ]
 
 
@@ -54,6 +54,7 @@ def get_sinusoid_example(
     num_test_data: int = 100,
     sigma_noise: float = 0.3,
     intervals: list[tuple[float, float]] = DEFAULT_INTERVALS,
+    period: float = 1.0,
     rng_key=None,
     dtype=jnp.float32,
 ) -> tuple[
@@ -67,6 +68,8 @@ def get_sinusoid_example(
         num_test_data: Number of test data points.
         sigma_noise: Standard deviation of the noise.
         intervals: List of tuples containing the intervals for random data generation.
+        period: Period of the sine wave. Default is 1.0, which gives sin(x).
+                For sin(2πx), use period=1/(2π).
         rng_key: Random number generator key.
         dtype: Data type for the generated arrays.
 
@@ -122,7 +125,9 @@ def get_sinusoid_example(
     noise = jnp.asarray(
         random.normal(rng_noise_train, X_train.shape) * sigma_noise, dtype=dtype
     )
-    y_train = jnp.asarray(jnp.sin(X_train) + noise, dtype=dtype)
+    # Apply the period parameter to adjust frequency
+    frequency = 2 * jnp.pi * (1.0 / period)
+    y_train = jnp.asarray(jnp.sin(frequency * X_train) + noise, dtype=dtype)
 
     # Generate calibration data
     X_valid = jnp.asarray(
@@ -132,16 +137,16 @@ def get_sinusoid_example(
     noise = jnp.asarray(
         random.normal(rng_noise_valid, X_valid.shape) * sigma_noise, dtype=dtype
     )
-    y_valid = jnp.asarray(jnp.sin(X_valid) + noise, dtype=dtype)
+    y_valid = jnp.asarray(jnp.sin(frequency * X_valid) + noise, dtype=dtype)
 
     # Generate testing data
     X_test = jnp.asarray(
-        jnp.linspace(0.0, 8.0, num_test_data).reshape(-1, 1), dtype=dtype
+        jnp.linspace(-2.0, 2.0, num_test_data).reshape(-1, 1), dtype=dtype
     )
     noise = jnp.asarray(
         random.normal(rng_noise_test, X_test.shape) * sigma_noise, dtype=dtype
     )
-    y_test = jnp.asarray(jnp.sin(X_test) + noise, dtype=dtype)
+    y_test = jnp.asarray(jnp.sin(frequency * X_test) + noise, dtype=dtype)
 
     return X_train, y_train, X_valid, y_valid, X_test, y_test
 
@@ -298,3 +303,22 @@ def to_float64(model):
     graph_def, params = nnx.split(model)
     params = laplax.util.tree.to_dtype(params, jnp.float64)
     return nnx.merge(graph_def, params)
+
+
+def get_standard_data():
+    num_training_samples = 300
+    num_calibration_samples = 50
+    num_test_samples = 300
+
+    batch_size = 20
+    X_train, y_train, X_valid, y_valid, X_test, y_test = get_sinusoid_example(
+        num_train_data=num_training_samples,
+        num_valid_data=num_calibration_samples,
+        num_test_data=num_test_samples,
+        sigma_noise=0.1,
+        intervals=[(-1.0, -0.5), (0.5, 1.0)],
+        rng_key=jax.random.key(0),
+        dtype=jnp.float64,
+    )
+    train_loader = DataLoader(X_train, y_train, batch_size)
+    return X_train, y_train, X_valid, y_valid, X_test, y_test, train_loader

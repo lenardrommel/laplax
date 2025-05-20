@@ -24,7 +24,7 @@ def create_loss_mse(model_fn: ModelFn):
     """Create the MSE loss function for FSP training."""
 
     def loss_mse(data: Data, params: Params) -> Float:
-        pred = model_fn(data["inputs"], params)
+        pred = model_fn(data["input"], params)
         return jnp.mean(jax.numpy.square(pred - data["target"]))
 
     return loss_mse
@@ -59,7 +59,6 @@ def create_loss_reg(
 
         $$1/2 (f(c^{i}) - m)^{T} K^{-1}(c^{i}, c^{i}) (f(c^{i}) - m)$$
         """
-        # params = params["model"]
         f_c = jax.vmap(model_fn, in_axes=(0, None))(context_points, params) - prior_mean
         K_c_c = prior_cov_kernel(context_points, context_points)
         left = jax.numpy.linalg.solve(K_c_c, f_c)
@@ -249,7 +248,6 @@ def fsp_laplace(
     **kwargs,
 ):
     """FSP Laplace approximation."""
-    # Initial vector
 
     # Define cov operator
     op = prior_cov_kernel(context_points, context_points)

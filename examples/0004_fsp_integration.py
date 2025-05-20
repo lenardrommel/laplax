@@ -7,10 +7,9 @@ import optax
 from flax import nnx
 from helper import (
     DataLoader,
-    RBFKernel,
-    PeriodicKernel,
     L2InnerProductKernel,
-    build_covariance_matrix,
+    RBFKernel,
+    _create_kernel_fn,
     get_sinusoid_example,
     gp_regression,
     to_float64,
@@ -21,11 +20,14 @@ from plotting import (
     plot_regression_with_uncertainty,
     plot_sinusoid_task,
 )
+from pathlib import Path
+import pickle
 
+# from regression import *
+import gpjax as gpx
 import laplax
 from laplax.curv import estimate_curvature
 from laplax.curv.cov import Posterior, set_posterior_fn
-from laplax.curv.ggn import create_ggn_mv_without_data, create_fsp_ggn_mv
 from laplax.curv.fsp import (
     compute_curvature_fn,
     compute_matrix_jacobian_product,
@@ -35,13 +37,14 @@ from laplax.curv.fsp import (
     create_loss_reg,
     lanczos_jacobian_initialization,
 )
+from laplax.curv.ggn import create_fsp_ggn_mv, create_ggn_mv_without_data
 from laplax.curv.lanczos_isqrt import lanczos_isqrt
-
 from laplax.enums import LossFn
 from laplax.eval.pushforward import (
     lin_pred_mean,
     lin_pred_std,
     lin_pred_var,
+    lin_samples,
     lin_setup,
     set_lin_pushforward,
 )
@@ -121,20 +124,6 @@ def nll_loss(y_hat, y, sigma, N=150):
     return jnp.mean(nll) * N
 
 
-# def train_step(model, optimizer, loss_fn, data):
-#     _, params = nnx.split(model)
-#     model_params = params["model"]
-#     noise_param = params["param"]
-
-#     def _loss_fn(p):
-#         return loss_fn(data, p, noise_param)
-
-#     loss, grads = nnx.value_and_grad(_loss_fn)(model_params)
-#     optimizer.update(grads)
-
-#     return loss
-
-
 def create_train_step(loss_fn):
     @nnx.jit
     def train_step(model, optimizer, data):
@@ -166,7 +155,7 @@ def train_model(model, n_epochs, train_loader, loss_fn, lr=1e-3):
     return model
 
 
-def create_model(config):
+def create_model(config, loss_type):
     in_channels = config.get("in_channels", 1)
     hidden_channels = config.get("hidden_channels", 64)
     out_channels = config.get("out_channels", 1)
@@ -187,24 +176,13 @@ def create_model(config):
     def model_fn(input, params):
         return nnx.call((graph_def, params))(input)[0]
 
+    if loss_type.lower() != "fsp":
+        return model, model_fn, graph_def
+
     if param is not None and data_size is not None:
         model = ModelWrapper(model, param, data_size, dtype)
 
     return model, model_fn, graph_def
-
-
-def create_kernel_fn(lengthscale=8 / jnp.pi, output_scale=0.5, noise_variance=0.001):
-    kernel = RBFKernel(lengthscale=lengthscale)
-
-    prior_arguments = {"prior_prec": output_scale, "noise_variance": noise_variance}
-
-    def kernel_fn(x, y=None, output_scale=output_scale, noise_variance=noise_variance):
-        if y is None:
-            y = x
-        K = build_covariance_matrix(kernel, x, y)
-        return jnp.exp(output_scale) * (K + noise_variance**2 * jnp.eye(K.shape[0]))
-
-    return kernel_fn, prior_arguments
 
 
 def create_loss_fn(
@@ -233,8 +211,15 @@ def create_loss_fn(
         )
 
         # Return a function that includes the context_points
+        context_points = jnp.linspace(-10, 10, 150).reshape(150, 1)
+        random_vector = jax.random.normal(jax.random.key(42), context_points.shape)
+        context_points += random_vector
+
         return lambda data, params: fsp_obj(
-            data, context_points, params["model"], other_params=params["param"]
+            data,
+            context_points,
+            params["model"],
+            other_params=params["param"],
         )
     else:
         msg = f"Unknown loss type: {loss_type}. Supported types are: mse, nll, fsp"
@@ -295,32 +280,6 @@ def fsp_laplace(
 
     posterior_fn = lambda *args, **kwargs: posterior  # noqa: E731
 
-    # posterior_fn = set_posterior_fn("lanczos", curv_estimate, layout=params_correct)
-    from laplax.eval.pushforward import (
-        nonlin_pred_mean,
-        nonlin_pred_std,
-        nonlin_pred_var,
-        nonlin_setup,
-        set_nonlin_pushforward,
-    )
-
-    # set_prob_predictive = partial(
-    #     set_nonlin_pushforward,
-    #     model_fn=model_fn,
-    #     mean_params=params,
-    #     posterior_fn=posterior_fn,
-    #     pushforward_fns=[
-    #         nonlin_setup,
-    #         nonlin_pred_mean,
-    #         nonlin_pred_var,
-    #         nonlin_pred_std,
-    #     ],
-    #     key=jax.random.key(35892),
-    # )
-    from laplax.eval.pushforward import (
-        lin_samples,
-    )
-
     set_prob_predictive = partial(
         set_lin_pushforward,
         model_fn=model_fn,
@@ -341,16 +300,18 @@ def fsp_laplace(
         prior_arguments=prior_arguments,
     )
 
-    X_pred = jnp.linspace(0, 8, 200).reshape(200, 1)
-    pred = jax.vmap(prob_predictive)(X_pred)
-    _ = plot_regression_with_uncertainty(
-        X_train=data["input"],
-        y_train=data["target"],
-        X_pred=X_pred,
-        y_pred=pred["pred_mean"][:, 0],
-        y_std=jnp.sqrt(pred["pred_var"][:, 0]),
-        y_samples=pred["samples"],
-    )
+    return prob_predictive, posterior
+
+    # X_pred = jnp.linspace(-4, 12, 200).reshape(200, 1)
+    # pred = jax.vmap(prob_predictive)(X_pred)
+    # _ = plot_regression_with_uncertainty(
+    #     X_train=data["input"],
+    #     y_train=data["target"],
+    #     X_pred=X_pred,
+    #     y_pred=pred["pred_mean"][:, 0],
+    #     y_std=jnp.sqrt(pred["pred_var"][:, 0]),
+    #     y_samples=pred["samples"],
+    # )
 
 
 def main():
@@ -367,14 +328,37 @@ def main():
         num_train_data=num_training_samples,
         num_valid_data=num_calibration_samples,
         num_test_data=num_test_samples,
-        sigma_noise=0.3,
-        intervals=[(2, 3.1), (3.9, 4.1), (4.9, 6.0)],
+        sigma_noise=0.0,
+        intervals=[(0, 2), (4, 5), (6, 8)],
         rng_key=jax.random.key(0),
-        dtype=jnp.float64,
     )
     train_loader = DataLoader(X_train, y_train, batch_size)
     data = {"input": X_train, "target": y_train, "test_input": X_test}
-    initial_log_scale = jnp.log(0.1)
+
+    # final_params = optimize(data)
+    # print("Tuned params:", {k: float(v) for k, v in final_params.items()})
+    # make kernel_fn and prior_args
+    # kernel_fn, prior_args = make_tuned_kernel_fn(final_params)
+    # kernel_fn, prior_args = _create_kernel_fn(lengthscale=2.0)
+    from gpjax.kernels.computations import DenseKernelComputation
+    from gpjax.kernels import Periodic, Matern12
+
+    kernel = Periodic(
+        lengthscale=2.5,
+        period=6.2,
+        variance=10.0,
+    )
+    # kernel = Matern12(lengthscale=2.5)
+
+    def kernel_fn(x, y):
+        if y is None:
+            y = x
+        K = DenseKernelComputation().cross_covariance(kernel, x, y)
+        return (K + K.T) / 2.0 + 1e-4 * jnp.eye(x.shape[0])
+
+    prior_args = {"prior_prec": 1, "noise_variance": 1}
+
+    initial_log_scale = jnp.log(0.01)
     config = {
         "in_channels": 1,
         "hidden_channels": 64,
@@ -384,15 +368,12 @@ def main():
         "data_size": num_training_samples,
         "dtype": jnp.float64,
     }
-    model, model_fn, _ = create_model(config)
+
+    loss_type = "fsp"
+    model, model_fn, _ = create_model(config, loss_type)
     _, params = nnx.split(model)
 
-    kernel_fn, prior_arguments = create_kernel_fn(
-        lengthscale=4 / jnp.pi, output_scale=1.0, noise_variance=0.001
-    )
-
     # Choose loss function type: 'mse', 'nll', or 'fsp'
-    loss_type = "fsp"
 
     loss_fn = create_loss_fn(
         loss_type,
@@ -415,15 +396,29 @@ def main():
 
     # _ = plot_sinusoid_task(X_train, y_train, X_test, y_test, X_pred, y_pred)
 
-    fsp_laplace(
+    prob_predictive, posterior = fsp_laplace(
         model_fn,
         params["model"],
         data,
-        prior_arguments=prior_arguments,
+        prior_arguments=prior_args,
         prior_mean=jnp.zeros((150)),
         prior_cov_kernel=kernel_fn,
         context_points=X_train,
         has_batch_dim=False,
+    )
+
+    X_pred = jnp.linspace(-4, 12, 200).reshape(200, 1)
+    pred = jax.vmap(prob_predictive)(X_pred)
+    with Path("prob_predictive.pkl").open("wb") as f:
+        pickle.dump({"X_pred": X_pred, "pred": pred}, f)
+
+    _ = plot_regression_with_uncertainty(
+        X_train=data["input"],
+        y_train=data["target"],
+        X_pred=X_pred,
+        y_pred=pred["pred_mean"][:, 0],
+        y_std=jnp.sqrt(pred["pred_var"][:, 0]),
+        y_samples=pred["samples"],
     )
     plt.show()
 

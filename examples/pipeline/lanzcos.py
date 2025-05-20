@@ -2,13 +2,12 @@ import jax
 import jax.numpy as jnp
 
 
-def lanczos_isqrt(
+def lanczos_compute_efficient(
     A,
     b,
-    *,
-    tol=1e-3,  # 1e-5
+    tol=1e-3,
     min_eta=1e-20,
-    max_iter=500,
+    max_iter=1000,
     overwrite_b=False,
 ):
     """Conjugate gradient method to solve the linear system Ax = b.
@@ -31,7 +30,7 @@ def lanczos_isqrt(
         p = jax.lax.cond(k > 0, true_fn, false_fn, p)
 
         # Compute modified Lanzcos vector
-        w = A @ p  # A(p) or A @ p
+        w = A @ p
         eta = p @ w
         ds = ds.at[:, k].set(p / jnp.sqrt(eta))
 
@@ -54,8 +53,8 @@ def lanczos_isqrt(
         return ds, rs, rs_norm_sq, p, eta, k + 1
 
     def _cond_fun(values):
-        ds, rs, rs_norm_sq, p, eta, k = values
-        return (rs_norm_sq[k] > tol**2) & (k < max_iter) & (eta > min_eta)
+        ds, _, rs_norm_sq, _, eta, k = values
+        return (rs_norm_sq[k] > sqtol) & (k < max_iter)  # & (eta > min_eta)
 
     # Initialization
     b /= jnp.linalg.norm(b, 2)
@@ -64,11 +63,10 @@ def lanczos_isqrt(
     rs_norm_sq = jnp.ones_like(rs, shape=max_iter + 1)
 
     # Initialize loop variables
-    # tol = jnp.finfo(A.dtype).eps
     sqtol = (
         tol**2
     )  # max(tol ** 2, jnp.finfo(A.dtype).eps) if tol is not None else jnp.finfo(A.dtype).eps
-    # min_eta = min_eta  # max(min_eta, jnp.finfo(A.dtype).eps) if min_eta is not None else jnp.finfo(A.dtype).eps
+    min_eta = min_eta  # max(min_eta, jnp.finfo(A.dtype).eps) if min_eta is not None else jnp.finfo(A.dtype).eps
     eta = jnp.inf  # to make sure the first iteration is done
     rs = rs.at[:, 0].set(b)
     p = b if overwrite_b else b.copy()
@@ -79,49 +77,3 @@ def lanczos_isqrt(
     )
 
     return ds[:, :k]
-
-
-import numpy as np
-
-
-def test_lanczos_compute_efficient():
-    # Create a simple positive definite matrix
-    n = 100
-    np.random.seed(42)
-    A_np = np.random.randn(n, n)
-    A_np = A_np @ A_np.T + n * np.eye(n)  # Make it positive definite
-    A_jax = jnp.array(A_np)
-
-    # Define the linear operator
-    def linear_op(x):
-        return A_jax @ x
-
-    # Create a random vector b
-    b = jnp.ones(n) / np.sqrt(n)  # Normalized vector
-
-    # Run the Lanczos algorithm
-    ds = lanczos_compute_efficient(linear_op, b, tol=1e-8, max_iter=100)
-
-    print(f"Lanczos vectors shape: {ds.shape}")
-
-    # Verify orthogonality of Lanczos vectors
-    D = ds.T @ ds
-    print("Orthogonality check (should be close to identity):")
-    print(np.round(D, 5))
-
-    # Verify the tridiagonal matrix T = D.T @ A @ D
-    T = ds.T @ (A_jax @ ds)
-    print("Tridiagonal matrix T:")
-    print(np.round(T, 5))
-
-    # Optional: Compare with a direct eigendecomposition
-    eigvals_lanczos = np.linalg.eigvalsh(T)
-    eigvals_direct = np.linalg.eigvalsh(A_np)[: ds.shape[1]]
-    print("Eigenvalues from L anczos:")
-    print(np.sort(eigvals_lanczos))
-    print("Smallest eigenvalues from direct computation:")
-    print(np.sort(eigvals_direct)[: ds.shape[1]])
-
-
-if __name__ == "__main__":
-    test_lanczos_compute_efficient()
