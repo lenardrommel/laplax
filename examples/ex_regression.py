@@ -12,7 +12,6 @@ from flax import nnx
 from helper import DataLoader, get_sinusoid_example
 from loguru import logger
 from orbax import checkpoint as ocp
-from tueplots import bundles, fonts
 
 from laplax import laplace
 from laplax.types import Callable, Float, PriorArguments

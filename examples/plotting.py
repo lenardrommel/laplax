@@ -97,8 +97,8 @@ def plot_regression_with_uncertainty(
                     )
 
     # Plot true function
-    x_true = np.linspace(0, 8, 1000).reshape(-1, 1)
-    y_true = np.sin(x_true)
+    x_true = np.linspace(-1, 1, 1000).reshape(-1, 1)
+    y_true = np.sin(2 * jnp.pi * x_true)
     plt.plot(x_true, y_true, color="black", linestyle="--", label="True function")
 
     # Add labels and title
@@ -406,8 +406,8 @@ def plot_sinusoid_task(
             )
 
     # Plot true function
-    x_true = np.linspace(0, 8, 1000).reshape(-1, 1)
-    y_true = np.sin(x_true)
+    x_true = np.linspace(-1, 1, 1000).reshape(-1, 1)
+    y_true = np.sin(2 * jnp.pi * x_true)
     plt.plot(x_true, y_true, color="black", linestyle="--", label="True function")
 
     # Add labels and title
