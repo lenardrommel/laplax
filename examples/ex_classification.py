@@ -1,3 +1,16 @@
+import os, sys
+
+# What GPU(s) does the OS expose?
+print("CUDA_VISIBLE_DEVICES=", os.environ.get("CUDA_VISIBLE_DEVICES", "<unset>"))
+print("nvidia-smi output:")
+os.system("nvidia-smi")
+
+# What does JAX see?
+import jax
+print("jax.__version__:", jax.__version__)
+print("jaxlib version:", jax.lib.xla_bridge.get_backend().platform)
+print("jax.devices():", jax.devices())
+
 import argparse
 from functools import partial
 from pathlib import Path
@@ -21,12 +34,13 @@ from laplax.api import (
     calibration,
     evaluation,
     register_calibration_method,
+    _nll_gaussian_classification,
 )
 from laplax.curv import estimate_curvature, set_posterior_fn
 from laplax.curv.cov import LowRankTerms
 from laplax.enums import CurvApprox, LossFn
 from laplax.eval import apply_fns
-from laplax.eval.metrics import correctness, expected_calibration_error
+from laplax.eval.metrics import calculate_bin_metrics, correctness, expected_calibration_error
 
 from ex_helper import (  # isort: skip
     load_model_checkpoint,
@@ -214,9 +228,18 @@ def train_cifar10_model(
     verbose=True,
     model_seed=42,
     checkpoint_dir="./checkpoints/",
+    use_wandb: bool = True,
 ):
     # Generate experiment name for the checkpoint
     experiment_name = f"cifar10_model_seed{model_seed}"
+
+    # WANDB Logging
+    if use_wandb:
+        wandb.init(
+            project="laplax_train",
+            name=experiment_name,
+            config={"n_epochs": n_epochs, "lr": lr, "model_seed": model_seed}
+        )
 
     # Prepare data
     train_loader, valid_loader, test_loader = setup_cifar10_data()
@@ -239,6 +262,9 @@ def train_cifar10_model(
     ckpt_path = Path(checkpoint_dir) / experiment_name
     save_model_checkpoint(model, ckpt_path)
 
+    if use_wandb: 
+        wandb.finish()
+
     return {
         "train_loader": train_loader,
         "valid_loader": valid_loader,
@@ -253,7 +279,7 @@ def curvature_cifar10_model(
     curv_type: CurvApprox = CurvApprox.LANCZOS,
     *,
     num_batches: int = 10,
-    max_rank: int = 10,
+    max_rank: int = 100,
     last_layer_only=False,
     checkpoint_dir="./checkpoints/",
 ):
@@ -385,6 +411,7 @@ def evaluate_cifar10_model(
             loss_fn=LossFn.CROSS_ENTROPY,
             predictive_type=predictive_type,
             pushforward_type=pushforward_type,
+            num_samples=100,
             **clbr_kwargs,
         )
 
@@ -394,7 +421,7 @@ def evaluate_cifar10_model(
         model_fn=model_fn,
         params=params,
         arguments=prior_args,
-        data=next(iter(test_loader)),
+        data=test_loader,
         metrics=eval_kwargs.get("eval_metrics"),
         predictive_type=predictive_type,
         pushforward_type=pushforward_type,
@@ -403,43 +430,77 @@ def evaluate_cifar10_model(
     )
 
     # Compute expected calibration error
-    ece = expected_calibration_error(
+    ece_pred = expected_calibration_error(
         confidence=results["confidences_pred"],
         correctness=results["correctness_pred"],
         num_bins=15,
     )
-    results = jax.tree.map(lambda x: x.mean(), results)
-    results["ece"] = ece
+    ece_map = expected_calibration_error(
+        confidence=results["confidences_map"],
+        correctness=results["correctness_map"],
+        num_bins=15
+    )
+    results_avg = jax.tree.map(jnp.mean, results)
+    results_avg["ece_pred"] = ece_pred
+    results_avg["ece_map"] = ece_map
+
 
     # Log to wandb if enabled
     if use_wandb:
         # Log metrics
-        wandb.log(results)
+        wandb.log(results_avg)
 
         # Create and log reliability diagram
-        fig = plt.figure(figsize=(10, 6))
-        create_reliability_diagram(
-            bin_confidences=jnp.linspace(0, 1, 15),
-            bin_accuracies=results["confidences_pred"],
+        bin_prop_pred, bin_conf_pred, bin_acc_pred = calculate_bin_metrics(
+            confidence=results["confidences_pred"], 
+            correctness=results["correctness_pred"],
+            num_bins=15
+        )
+        fig_rel = create_reliability_diagram(
+            bin_confidences=bin_conf_pred,
+            bin_accuracies=bin_acc_pred,
             num_bins=15,
         )
-        wandb.log({"reliability_diagram": wandb.Image(fig)})
-        plt.close(fig)
+        wandb.log({"reliability_pred": wandb.Image(fig_rel)})
+        plt.close(fig_rel)
 
         # Create and log proportion diagram
-        fig = plt.figure(figsize=(10, 6))
-        create_proportion_diagram(
-            bin_proportions=results["confidences_pred"],
+        fig_prop = create_proportion_diagram(
+            bin_proportions=bin_prop_pred,
             num_bins=15,
         )
-        wandb.log({"proportion_diagram": wandb.Image(fig)})
-        plt.close(fig)
+        wandb.log({"proportion_pred": wandb.Image(fig_prop)})
+        plt.close(fig_prop)
+
+        # Create and log reliability diagram
+        bin_prop_map, bin_conf_map, bin_acc_map = calculate_bin_metrics(
+            confidence=results["confidences_map"], 
+            correctness=results["correctness_map"],
+            num_bins=15
+        )
+        fig_rel_map = create_reliability_diagram(
+            bin_confidences=bin_conf_map,
+            bin_accuracies=bin_acc_map,
+
+            num_bins=15,
+        )
+        wandb.log({"reliability_map": wandb.Image(fig_rel_map)})
+        plt.close(fig_rel_map)
+
+        # Create and log proportion diagram
+        fig_prop_map = create_proportion_diagram(
+            bin_proportions=bin_prop_map,
+            num_bins=15,
+        )
+        wandb.log({"proportion_map": wandb.Image(fig_prop_map)})
+        plt.close(fig_prop_map)
+
 
     csv_logger.log(results, experiment_name)
 
     logger.info(f"Eval: {results}")
-    logger.info(f"ECE: {ece}")
-
+    logger.info(f"ECE (Pred): {ece_pred}")
+    logger.info(f"ECE (MAP): {ece_map}")
 
 if __name__ == "__main__":
     """Different scripts."""
@@ -449,6 +510,12 @@ if __name__ == "__main__":
         type=str,
         default="train",
         choices=["train", "ggn", "evaluate"],
+    )
+    
+    parser.add_argument(
+        "--data_seed",
+        type=int,
+        default=42,
     )
 
     # --------------------------
@@ -547,7 +614,7 @@ if __name__ == "__main__":
     # -------------------------------------------
 
     if args.task == "train":
-        train_cifar10_model(n_epochs=args.n_epochs)
+        train_cifar10_model(n_epochs=args.n_epochs, use_wandb=args.wandb)
 
     # -------------------------------------------
     # GGN estimation
@@ -593,20 +660,24 @@ if __name__ == "__main__":
             clbr_kwargs={
                 "calibration_objective": args.calibration_objective,
                 "calibration_method": args.calibration_method,
+                "log_prior_prec_min": -4.0, 
+                "log_prior_prec_max": 4.0,
+                "grid_size": 200,
                 "init_prior_prec": 1.0,
                 "init_sigma_noise": 1.0,
+
             } if args.calibrate else {},
             eval_kwargs={
                 "eval_metrics": [
                     apply_fns(
                         lambda map, **kwargs:  # noqa: ARG005
                             jnp.max(jax.nn.softmax(map, axis=-1), axis=-1),
-                        lambda mc_pred_act, **kwargs:  # noqa: ARG005
-                            jnp.max(mc_pred_act, axis=-1),
+                        lambda pred_act, **kwargs:  # noqa: ARG005
+                            jnp.max(pred_act, axis=-1),
                         lambda map, target, **kwargs:  # noqa: ARG005
                             correctness(map, target) * 1,
-                        lambda map, target, **kwargs:  # noqa: ARG005
-                            correctness(map, target) * 1,
+                        lambda pred_mean, target, **kwargs:  # noqa: ARG005
+                            correctness(pred_mean, target) * 1,
                         names=[
                             "confidences_map",
                             "confidences_pred",
@@ -614,6 +685,10 @@ if __name__ == "__main__":
                             "correctness_pred",
                         ],
                     ),
+                    apply_fns(
+                        _nll_gaussian_classification,
+                        names=["nll_gaussian_pred"]
+                    ),                    
                 ]
             },
             csv_logger=csv_logger,

@@ -278,6 +278,7 @@ def create_reliability_diagram(
     else:
         plt.show()
 
+    return plt.gcf()
 
 def create_proportion_diagram(
     bin_proportions: jax.Array,
@@ -316,6 +317,8 @@ def create_proportion_diagram(
 
     else:
         plt.show()
+
+    return plt.gcf()
 
 
 def plot_sinusoid_task(

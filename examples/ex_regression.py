@@ -239,7 +239,6 @@ def evaluate_regression_example(
     )
 
 
-
     # Approximate curvature
     posterior_fn, curv_est = laplace(
         model_fn=model_fn,
