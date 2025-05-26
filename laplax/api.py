@@ -13,6 +13,7 @@ Public entry points
 from enum import StrEnum
 from functools import partial
 from typing import cast
+from typing_extensions import Iterator
 
 import jax
 import jax.numpy as jnp
@@ -58,7 +59,7 @@ from laplax.eval.pushforward import (
     set_lin_pushforward,
     set_nonlin_pushforward,
 )
-from laplax.eval.utils import apply_fns, evaluate_metrics_on_dataset
+from laplax.eval.utils import apply_fns, evaluate_metrics_on_dataset, evaluate_metrics_on_generator
 from laplax.types import (
     Any,
     Array,
@@ -151,6 +152,9 @@ def _validate_and_get_transform(batch: Data | Any) -> Callable[[Any], Data]:
     raise ValueError(msg)
 
 
+def _is_data_loader(data: Data | tuple | Iterable):
+    return isinstance(data, Iterable) and not isinstance(data, (tuple, dict, list))
+
 def _maybe_wrap_loader_or_batch(
     mv_fn: Callable[..., Params],
     data: Data | Iterable,
@@ -174,8 +178,7 @@ def _maybe_wrap_loader_or_batch(
         Wrapped matrix-vector function.
     """
     transform = _validate_and_get_transform(
-        next(iter(data)) if isinstance(data, Iterable)
-        and not isinstance(data, (tuple, dict)) else data
+        next(iter(data)) if _is_data_loader(data) else data 
     )
 
     if isinstance(data, (tuple, dict)):
@@ -229,6 +232,17 @@ def _convert_to_enum(
         raise
 
 
+def get_pred_act(
+    results: dict[str, Array], aux: dict[str, Any], **kwargs
+) -> tuple[dict[str, Array], dict[str, Any]]:
+    if "mc_pred_act" in results:
+        results["pred_act"] = results["mc_pred_act"]
+    if "special_pred_act" in results:
+        results["pred_act"] = results["special_pred_act"]    
+
+    return results, aux
+
+
 def _setup_pushforward(
     *,
     pushforward_type: Pushforward | str,
@@ -266,6 +280,7 @@ def _setup_pushforward(
             pushforward_fns = [lin_setup, lin_pred_mean, lin_pred_std]
             if predictive_type is Predictive.MC_BRIDGE:
                 pushforward_fns.append(lin_mc_pred_act)
+                pushforward_fns.append(get_pred_act)
             elif predictive_type in _SPECIAL_PREDICTIVES:
                 pushforward_fns.append(
                     partial(
@@ -273,6 +288,7 @@ def _setup_pushforward(
                         special_pred_type=predictive_type,
                     )
                 )
+                pushforward_fns.append(get_pred_act)
             elif predictive_type is not Predictive.NONE:
                 msg = f"Invalid predictive type: {predictive_type}"
                 raise ValueError(msg)
@@ -314,8 +330,19 @@ def register_calibration_method(method_name: str, method_fn: Callable) -> None:
     logger.info(f"Registered new calibration method: {method_name}")
 
 
+def _nll_gaussian_classification(
+        pred_mean: Array, 
+        pred_std: Array, 
+        target: Array, 
+        **kwargs
+    ) -> Float:
+    del kwargs
+    target = jax.nn.one_hot(target, num_classes=pred_mean.shape[-1])
+    return nll_gaussian(pred_mean, pred_std, target)
+
+
 def _make_nll_objective(
-    set_prob_predictive: Callable,
+    set_prob_predictive: Callable, *, is_classification: bool = False
 ) -> Callable[[PriorArguments, Data], Float]:
     """Create negative log-likelihood objective for calibration.
 
@@ -334,7 +361,7 @@ def _make_nll_objective(
             prior_arguments=prior_args,
             data=batch,
             set_prob_predictive=set_prob_predictive,
-            metric=nll_gaussian,
+            metric=_nll_gaussian_classification if is_classification else nll_gaussian,
         )
     )
 
@@ -379,10 +406,10 @@ def _make_ece_objective(
     Callable[[PriorArguments, Data], Float]
         Objective function computing ECE.
     """
-    def ece(*, mc_pred_act: Array, target: Array, **kwargs) -> Float:
+    def ece(*, map: Array, pred_act: Array, target: Array, **kwargs) -> Float:
         del kwargs
-        conf = jnp.max(mc_pred_act, axis=-1)
-        correct = correctness(mc_pred_act, target) * 1
+        conf = jnp.max(pred_act, axis=-1)
+        correct = correctness(map, target) * 1 # USE MAP
         val = expected_calibration_error(
             confidence=conf,
             correctness=correct,
@@ -404,6 +431,7 @@ def _make_mll_objective(
     params: Params,
     curv_type: CurvApprox,
     loss_fn: LossFn,
+    has_batch: bool = True
 ) -> Callable[[PriorArguments, Data], Float]:
     """Create marginal log-likelihood objective for calibration.
 
@@ -419,6 +447,8 @@ def _make_mll_objective(
         Type of curvature approximation.
     loss_fn : LossFn
         Loss function used.
+    has_batch : bool
+        If data has batch dimension, which the model doesn't support.
 
     Returns:
     -------
@@ -434,6 +464,7 @@ def _make_mll_objective(
             params=params,
             loss_fn=loss_fn,
             curv_type=curv_type,
+            has_batch=has_batch,
         )
     )
 
@@ -447,6 +478,8 @@ def _build_calibration_objective(
     params: Params | None = None,
     curv_type: CurvApprox | None = None,
     loss_fn: LossFn,
+    has_batch: bool = True,
+    is_classification: bool = False,
 ) -> Callable[[PriorArguments, Data], Float]:
     """Build calibration objective function based on type.
 
@@ -466,6 +499,8 @@ def _build_calibration_objective(
         Type of curvature approximation.
     loss_fn : LossFn
         Loss function used.
+    has_batch : bool
+        If data has a batch dimension, which the model doesn't support.
 
     Returns:
     -------
@@ -493,9 +528,17 @@ def _build_calibration_objective(
         msg = "model_fn and curv_type must not be None for MLL objective"
         raise ValueError(msg)
 
+    if is_classification and objective_type == CalibrationObjective.CHI_SQUARED:
+        msg = ("chi^2 objective not supported for classification")
+        raise ValueError(msg)
+
+    if not is_classification and objective_type == CalibrationObjective.ECE:
+        msg = ("ece objective not supported for regression")
+        raise ValueError(msg)
+
     match objective_type:
         case CalibrationObjective.NLL:
-            return _make_nll_objective(set_prob_predictive)
+            return _make_nll_objective(set_prob_predictive, is_classification=is_classification)
         case CalibrationObjective.CHI_SQUARED:
             return _make_chi2_objective(set_prob_predictive)
         case CalibrationObjective.MARGINAL_LOG_LIKELIHOOD:
@@ -505,6 +548,7 @@ def _build_calibration_objective(
                 params=params,
                 curv_type=curv_type,
                 loss_fn=loss_fn,
+                has_batch=has_batch,
             )
         case CalibrationObjective.ECE:
             return _make_ece_objective(set_prob_predictive)
@@ -543,12 +587,12 @@ def _resolve_metrics(
             apply_fns(
                 lambda map, **kwargs:  # noqa: ARG005
                     jnp.max(jax.nn.softmax(map, axis=-1), axis=-1),
-                lambda mc_pred_act, **kwargs:  # noqa: ARG005
-                    jnp.max(mc_pred_act, axis=-1),
+                lambda pred_act, **kwargs:  # noqa: ARG005
+                    jnp.max(pred_act, axis=-1),
                 lambda map, target, **kwargs:  # noqa: ARG005
                     correctness(map, target) * 1,
-                lambda map, target, **kwargs:  # noqa: ARG005
-                    correctness(map, target) * 1,
+                lambda pred_mean, target, **kwargs:  # noqa: ARG005
+                    correctness(pred_mean, target) * 1,
                 names=[
                     "confidences_map",
                     "confidences_pred",
@@ -556,6 +600,16 @@ def _resolve_metrics(
                     "correctness_pred",
                 ],
             ),
+            apply_fns(
+                lambda pred_mean, pred_std, target: 
+                    nll_gaussian(
+                            pred_mean, 
+                            pred_std, 
+                            jax.nn.one_hot(target, num_classes=pred_mean.shape[-1])
+                    ),
+                names=["nll_gaussian"]
+            )
+            
         ]
     if isinstance(metrics, (list, tuple)):
         if not metrics:
@@ -755,6 +809,7 @@ def calibration(
     num_samples: int = 30,
     calibration_objective: CalibrationObjective | str = CalibrationObjective.NLL,
     calibration_method: CalibrationMethod | str = CalibrationMethod.GRID_SEARCH,
+    has_batch: bool = True,
     **calibration_kwargs,
 ) -> tuple[PriorArguments, Callable[[InputArray], dict[str, Array]]]:
     """Calibrate hyperparameters of the Laplace approximation.
@@ -789,6 +844,8 @@ def calibration(
         Objective function to optimize during calibration, by default CalibrationObjective.NLL.
     calibration_method : CalibrationMethod | str, optional
         Method to use for calibration, by default CalibrationMethod.GRID_SEARCH.
+    has_batch : bool
+        If data has batch dimension, which the model doesn't support.
     **calibration_kwargs
         Additional arguments for the calibration method.
 
@@ -812,6 +869,9 @@ def calibration(
     Supported calibration methods:
     - GRID_SEARCH: Grid search over prior precision
     """
+    # If task is classification, then no NLL objective
+    is_classification = predictive_type != Predictive.NONE   
+    
     # Pushforward construction
     set_pushforward, pushforward_fns = _setup_pushforward(
         pushforward_type=pushforward_type,
@@ -838,6 +898,8 @@ def calibration(
         params=params,
         loss_fn=loss_fn,
         curv_type=curv_type,
+        has_batch=has_batch,
+        is_classification=is_classification
     )
 
     calibration_method = _convert_to_enum(
@@ -849,7 +911,7 @@ def calibration(
         log_prior_prec_min = calibration_kwargs.get("log_prior_prec_min", -3.0)
         log_prior_prec_max = calibration_kwargs.get("log_prior_prec_max", 3.0)
         grid_size = calibration_kwargs.get("grid_size", 50)
-        patience = calibration_kwargs.get("patience", 5)
+        patience = calibration_kwargs.get("patience", None)
 
         # Transform calibration batch to {"input": ..., "target": ...}
         data = _validate_and_get_transform(data)(data)
@@ -895,7 +957,7 @@ def evaluation(
     model_fn: ModelFn,
     params: Params,
     arguments: PriorArguments,
-    data: Data,
+    data: Data | Iterator[Data],
     *,
     metrics: DefaultMetrics | list[Callable] | str = DefaultMetrics.REGRESSION,
     predictive_type: Predictive | str = Predictive.NONE,
@@ -977,10 +1039,24 @@ def evaluation(
     )
 
     # Evaluate
-    batch = _validate_and_get_transform(data)(data)
-    results = evaluate_metrics_on_dataset(
+    isDataLoader = _is_data_loader(data)
+    transform = _validate_and_get_transform(
+        next(iter(data)) if isDataLoader else data 
+    )
+
+    if isDataLoader:
+        results = evaluate_metrics_on_generator(
+            pred_fn=prob_predictive,
+            data_generator=data,
+            metrics=metrics_list,
+            transform=transform,
+            reduce=jnp.concatenate,
+            has_batch=True,
+        )
+    else:
+        results = evaluate_metrics_on_dataset(
         pred_fn=prob_predictive,
-        data=batch,
+        data=transform(data),
         metrics=metrics_list,
         reduce=reduce,
     )

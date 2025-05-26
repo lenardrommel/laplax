@@ -284,8 +284,9 @@ def evaluate_metrics_on_generator(
     *,
     metrics: list | None = None,
     metrics_dict: dict[str, Callable] | None = None,
+    transform: Callable = identity,
     reduce: Callable = identity,
-    has_batch: bool = False,
+    has_batch: bool = True,
     **kwargs,
 ) -> dict:
     """Evaluate a set of metrics on a data generator.
@@ -306,7 +307,7 @@ def evaluate_metrics_on_generator(
             names and values are callables.
         reduce: A callable to transform the evaluated metrics (default: identity).
         has_batch: Data batches from generator have unaccounted batch dimension
-            (default: False).
+            (default: True).
         **kwargs: Additional keyword arguments passed to the metrics functions.
 
     Returns:
@@ -341,7 +342,7 @@ def evaluate_metrics_on_generator(
     evaluate_data = jax.jit(evaluate_data)
 
     # Evaluate metrics by iterating over the generator
-    all_results = [evaluate_data(dp) for dp in data_generator]
+    all_results = [evaluate_data(transform(dp)) for dp in data_generator]
 
     # Combine and reduce results
     if not all_results:
