@@ -11,7 +11,7 @@ from plotting import plot_sinusoid_task, plot_gp_prediction
 
 from laplax.curv.cov import Posterior
 from laplax.curv.fsp import create_fsp_objective
-from laplax.curv.lanczos_isqrt import lanczos_isqrt
+from laplax.extra.fsp.lanczos_isqrt import lanczos_isqrt
 from jax.flatten_util import ravel_pytree
 
 from laplax.util.flatten import create_partial_pytree_flattener

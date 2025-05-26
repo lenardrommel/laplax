@@ -1,8 +1,9 @@
 import jax
 import jax.numpy as jnp
+from laplax.util import tree
 
 
-def lanczos_isqrt(
+def lanczos_invert_sqrt(
     A,
     b,
     *,
@@ -81,47 +82,62 @@ def lanczos_isqrt(
     return ds[:, :k]
 
 
-import numpy as np
+def lanczos_jacobian_initialization(
+    model_fn,
+    params,
+    data,
+    *,
+    lanczos_initialization_batch_size: int = 20,
+):
+    # Define model Jacobian vector product
+    initial_vec = jax.jvp(
+        lambda w: model_fn(data["input"], params=w),
+        (params,),
+        (tree.ones_like(params),),
+    )[1]
+    initial_vec = initial_vec / jnp.linalg.norm(initial_vec, 2)
+
+    return initial_vec.squeeze(-1)
 
 
-def test_lanczos_compute_efficient():
-    # Create a simple positive definite matrix
-    n = 100
-    np.random.seed(42)
-    A_np = np.random.randn(n, n)
-    A_np = A_np @ A_np.T + n * np.eye(n)  # Make it positive definite
-    A_jax = jnp.array(A_np)
+# def test_lanczos_compute_efficient():
+#     # Create a simple positive definite matrix
+#     n = 100
+#     np.random.seed(42)
+#     A_np = np.random.randn(n, n)
+#     A_np = A_np @ A_np.T + n * np.eye(n)  # Make it positive definite
+#     A_jax = jnp.array(A_np)
 
-    # Define the linear operator
-    def linear_op(x):
-        return A_jax @ x
+#     # Define the linear operator
+#     def linear_op(x):
+#         return A_jax @ x
 
-    # Create a random vector b
-    b = jnp.ones(n) / np.sqrt(n)  # Normalized vector
+#     # Create a random vector b
+#     b = jnp.ones(n) / np.sqrt(n)  # Normalized vector
 
-    # Run the Lanczos algorithm
-    ds = lanczos_compute_efficient(linear_op, b, tol=1e-8, max_iter=100)
+#     # Run the Lanczos algorithm
+#     ds = lanczos_compute_efficient(linear_op, b, tol=1e-8, max_iter=100)
 
-    print(f"Lanczos vectors shape: {ds.shape}")
+#     print(f"Lanczos vectors shape: {ds.shape}")
 
-    # Verify orthogonality of Lanczos vectors
-    D = ds.T @ ds
-    print("Orthogonality check (should be close to identity):")
-    print(np.round(D, 5))
+#     # Verify orthogonality of Lanczos vectors
+#     D = ds.T @ ds
+#     print("Orthogonality check (should be close to identity):")
+#     print(np.round(D, 5))
 
-    # Verify the tridiagonal matrix T = D.T @ A @ D
-    T = ds.T @ (A_jax @ ds)
-    print("Tridiagonal matrix T:")
-    print(np.round(T, 5))
+#     # Verify the tridiagonal matrix T = D.T @ A @ D
+#     T = ds.T @ (A_jax @ ds)
+#     print("Tridiagonal matrix T:")
+#     print(np.round(T, 5))
 
-    # Optional: Compare with a direct eigendecomposition
-    eigvals_lanczos = np.linalg.eigvalsh(T)
-    eigvals_direct = np.linalg.eigvalsh(A_np)[: ds.shape[1]]
-    print("Eigenvalues from L anczos:")
-    print(np.sort(eigvals_lanczos))
-    print("Smallest eigenvalues from direct computation:")
-    print(np.sort(eigvals_direct)[: ds.shape[1]])
+#     # Optional: Compare with a direct eigendecomposition
+#     eigvals_lanczos = np.linalg.eigvalsh(T)
+#     eigvals_direct = np.linalg.eigvalsh(A_np)[: ds.shape[1]]
+#     print("Eigenvalues from L anczos:")
+#     print(np.sort(eigvals_lanczos))
+#     print("Smallest eigenvalues from direct computation:")
+#     print(np.sort(eigvals_direct)[: ds.shape[1]])
 
 
-if __name__ == "__main__":
-    test_lanczos_compute_efficient()
+# if __name__ == "__main__":
+#     test_lanczos_compute_efficient()

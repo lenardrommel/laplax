@@ -2,7 +2,6 @@ import pickle
 from functools import partial
 from pathlib import Path
 
-import gpjax as gpx
 import jax
 import matplotlib.pyplot as plt
 import optax
@@ -23,7 +22,7 @@ from laplax.curv.fsp import (
     lanczos_jacobian_initialization,
 )
 from laplax.curv.ggn import create_fsp_ggn_mv
-from laplax.curv.lanczos_isqrt import lanczos_isqrt
+from laplax.extra.fsp.lanczos_isqrt import lanczos_isqrt
 from laplax.eval.pushforward import (
     lin_pred_mean,
     lin_pred_std,

@@ -1,14 +1,34 @@
+from functools import partial
+
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
 from flax import nnx
 
 import laplax
-from laplax.curv.lanczos_isqrt import lanczos_isqrt
+from laplax.curv.cov import Posterior
+from laplax.curv.ggn import create_fsp_ggn_mv, create_ggn_mv_without_data
+from laplax.extra.fsp.objective import select_context_points
 from laplax.enums import LossFn
-from laplax.types import Callable, Data, Float, ModelFn, Params, PredArray
+from laplax.eval.pushforward import (
+    lin_pred_mean,
+    lin_pred_std,
+    lin_pred_var,
+    lin_samples,
+    lin_setup,
+    set_lin_pushforward,
+)
+from laplax.extra.fsp.lanczos_isqrt import lanczos_invert_sqrt
+from laplax.types import (
+    Callable,
+    Data,
+    Float,
+    ModelFn,
+    Params,
+    PosteriorState,
+    PredArray,
+)
 from laplax.util import tree
-
 
 # --------------------------------------------------------------------------------------
 # FSP training utilities
@@ -139,7 +159,7 @@ def compute_matrix_jacobian_product(
 ):
     """Compute the matrix Jacobian product."""
     if has_batch_dim:
-        flatten, unflatten = laplax.util.create_partial_pytree_flattener(params)
+        flatten, unflatten = laplax.util.flatten.create_partial_pytree_flattener(params)
 
         raise NotImplementedError(
             "Batch dimension not implemented for matrix Jacobian product."
@@ -156,16 +176,16 @@ def compute_matrix_jacobian_product(
         out_axes=1,  # 0
     )(matrix)
 
-    M, unravel_fn = jax.flatten_util.ravel_pytree(
+    flat_M, unravel_fn = jax.flatten_util.ravel_pytree(
         M_tree,
     )
-    return M, unravel_fn
+    return flat_M.reshape((-1, matrix.shape[-1])), unravel_fn
 
 
 def compute_curvature_fn(
     model_fn: ModelFn,
     params: Params,
-    data: Data,  # maybe change to test_data
+    data: Data,
     ggn: PredArray,
     prior_var: PredArray,
     u: PredArray,
@@ -177,6 +197,14 @@ def compute_curvature_fn(
     eigvecs = _eigvecs[:, _eigvals > tol]
     eigvals = jnp.flip(eigvals, axis=0)
     eigvecs = jnp.flip(eigvecs, axis=1)
+    x_context = select_context_points(
+        int(data["input"].shape[0]),
+        "grid",
+        data["input"].max(axis=0),
+        data["input"].min(axis=0),
+        data["input"].shape,
+        key=jax.random.key(0),
+    )
 
     def create_scan_fn(
         unflatten_fn, _u, eigvecs, eigvals, params, model_fn, data, prior_var
@@ -187,9 +215,7 @@ def compute_curvature_fn(
             new_cov = _u @ (eigvecs[:, i] * (1 / eigvals[i] ** 0.5))
             lr_fac_i = unflatten_fn(new_cov)  # Use captured unflatten
 
-            all_inputs = jnp.array(
-                data["test_input"]
-            )  # maybe change to data["test_input"] used to be data["input"]
+            all_inputs = jnp.array(x_context)
 
             def compute_jvp_squared(x):
                 jvp_result = jax.jvp(lambda p: model_fn(x, p), (params,), (lr_fac_i,))[
@@ -239,51 +265,89 @@ def compute_curvature_fn(
 
 
 def fsp_laplace(
-    model_fn: ModelFn,
-    params: Params,
-    data: Data,
-    prior_mean: PredArray,
-    prior_cov_kernel: Callable[[PredArray, PredArray], Float],
-    context_points: PredArray,
+    model_fn,
+    params,
+    data,
+    prior_arguments,
+    prior_mean,
+    prior_cov_kernel,
+    context_points,
     **kwargs,
 ):
-    """FSP Laplace approximation."""
-
+    # Initial vector
+    v = lanczos_jacobian_initialization(model_fn, params, data, **kwargs)
     # Define cov operator
-    op = prior_cov_kernel(context_points, context_points)
-    op = op if isinstance(op, Callable) else lambda x: op @ x
+    # op = op if isinstance(op, Callable) else lambda x: op @ x
+    cov_matrix = prior_cov_kernel(data["input"])
 
-    # Compute low rank terms
-    # USE INVERSE OF COV MATRIX
-    initial_vec = lanczos_jacobian_initialization(
+    L = lanczos_invert_sqrt(cov_matrix, v)
+    M, unravel_fn = compute_matrix_jacobian_product(
         model_fn,
         params,
         data,
-        **kwargs,
+        L,
+        has_batch_dim=False,
     )
-    L = lanczos_isqrt(op, initial_vec, **kwargs)
 
-    # Compute
-    model_vjp = jax.vmap(
-        lambda x, v: jax.vjp(lambda w: model_fn(x, w), params)[1](v),
-        in_axes=(0, 0),
-        out_axes=0,
-    )(context_points, L)
-    S = S
-    # Posterior state
+    M = M.reshape((-1, L.shape[-1]))
+
+    _u, _s, _ = jnp.linalg.svd(M, full_matrices=False)
+    tol = jnp.finfo(M.dtype).eps ** 2
+    s = _s[_s > tol]  # (80,)
+    _u = _u[:, : s.size]
+
+    ggn_matrix = create_fsp_ggn_mv(model_fn, params, M)(data)
+    x_context = select_context_points(
+        int(data["input"].shape[0]),
+        "grid",
+        data["input"].max(axis=0),
+        data["input"].min(axis=0),
+        data["input"].shape,
+        key=jax.random.key(0),
+    )
+    x_context = select_context_points(
+        150,
+        "grid",
+        [3],
+        [-3],
+        data["input"].shape[1:],
+    )
+
+    prior_var = jnp.diag(prior_cov_kernel(x_context))
+
+    S = compute_curvature_fn(model_fn, params, data, ggn_matrix, prior_var, _u)
+
     posterior_state: PosteriorState = {"scale_sqrt": S}
-
+    flatten, unflatten = laplax.util.flatten.create_pytree_flattener(params)
     posterior = Posterior(
         state=posterior_state,
-        cov_mv=lambda state: lambda x: state["scale_sqrt"] @ state["scale_sqrt"].T @ x,
-        scale_mv=lambda state: lambda x: state["scale_sqrt"] @ x,
+        cov_mv=lambda state: lambda x: unflatten(
+            state["scale_sqrt"] @ state["scale_sqrt"].T @ flatten(x)
+        ),
+        scale_mv=lambda state: lambda x: unflatten(state["scale_sqrt"] @ x),
+        rank=s.shape[0],
     )
 
-    def posterior_fn(*args, **kwargs):
-        del args, kwargs
-        return posterior
+    posterior_fn = lambda *args, **kwargs: posterior  # noqa: E731
 
-    return posterior_fn
+    set_prob_predictive = partial(
+        set_lin_pushforward,
+        model_fn=model_fn,
+        mean_params=params,
+        posterior_fn=posterior_fn,
+        pushforward_fns=[
+            lin_setup,
+            lin_pred_mean,
+            lin_pred_var,
+            lin_pred_std,
+            lin_samples,
+        ],
+        key=jax.random.key(35892),
+        num_samples=100,
+    )
 
+    prob_predictive = set_prob_predictive(
+        prior_arguments=prior_arguments,
+    )
 
-# lambda prior_args: posteiror_fn(prior_args)
+    return prob_predictive, posterior

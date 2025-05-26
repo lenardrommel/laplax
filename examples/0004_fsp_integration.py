@@ -38,7 +38,7 @@ from laplax.curv.fsp import (
     lanczos_jacobian_initialization,
 )
 from laplax.curv.ggn import create_fsp_ggn_mv, create_ggn_mv_without_data
-from laplax.curv.lanczos_isqrt import lanczos_isqrt
+from laplax.extra.fsp.lanczos_isqrt import lanczos_isqrt
 from laplax.enums import LossFn
 from laplax.eval.pushforward import (
     lin_pred_mean,
