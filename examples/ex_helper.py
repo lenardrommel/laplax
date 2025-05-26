@@ -295,7 +295,7 @@ def train_map_model(
 
 
 class SimpleLoader:
-    def __init__(self, input, target, batch_size=16):
+    def __init__(self, input, target, batch_size=50):
         self._input, self._target = input, target
         self._batch_size = batch_size
         self._rng = np.random.default_rng()
@@ -334,6 +334,7 @@ def optimize_prior_prec_gradient(
     *,
     num_epochs: int = 100,
     learning_rate: float = 1,
+    warmup_steps: int = 10,
     **kwargs,
 ) -> Float:
     """Optimize prior precision using gradient descent.
@@ -344,8 +345,9 @@ def optimize_prior_prec_gradient(
         data: A batch of data.
         init_prior_prec: Initial prior precision value (default: None)
         init_sigma_noise: Initial noise standard deviation value (default: None)
-        num_epochs: Number of optimization epochs (default: 20)
+        num_epochs: Number of optimization epochs (default: 100)
         learning_rate: Initial learning rate for the optimizer (default: 1)
+        warmup_steps: Number of warmup steps for the learning rate schedule (default: 10)
         **kwargs: Additional arguments
 
     Returns:
@@ -367,19 +369,21 @@ def optimize_prior_prec_gradient(
 
     logger.info("Initial params: {}", params)
 
-    # Create learning rate schedule
-    schedule = optax.linear_schedule(
-        init_value=learning_rate,
-        end_value=learning_rate * 0.01,  # Decay to 100% of initial learning rate
-        transition_steps=num_epochs,
-    )
+    # Calculate total steps
+    # total_steps = num_epochs * len(data)
+    # Create learning rate schedule with warmup and cosine decay
+    # schedule = lambda *args, **kwargs: learning_rate
+    # schedule = optax.warmup_cosine_decay_schedule(
+    #     init_value=0.0,  # Start from 0 during warmup
+    #     peak_value=learning_rate,  # Peak at the specified learning rate
+    #     warmup_steps=warmup_steps,
+    #     decay_steps=total_steps - warmup_steps,
+    #     end_value=learning_rate * 0.1,  # End at 1% of peak learning rate
+    # )
 
     # Initialize optimizer with learning rate schedule
-    logger.info("Initializing optimizer with learning rate schedule")
-    optimizer = optax.chain(
-        optax.scale_by_schedule(schedule),
-        optax.adam(1.0),  # Base learning rate of 1.0 since we scale by schedule
-    )
+    logger.info("Initializing optimizer with cosine learning rate schedule")
+    optimizer = optax.adam(learning_rate)
     opt_state = optimizer.init(params)
 
     # Create a simple data loader if not provided
@@ -387,22 +391,20 @@ def optimize_prior_prec_gradient(
 
     # Single optimization step
     @jax.jit
-    def step(params, data, opt_state, step_count):
+    def step(params, data, opt_state):
         # Compute loss and gradients w.r.t. log-params
         loss, grads = jax.value_and_grad(
             lambda p: objective(jax.tree.map(jnp.exp, p), data)
         )(params)
 
-        updates, new_state = optimizer.update(grads, opt_state, step_count)
+        updates, new_state = optimizer.update(grads, opt_state)
         new_params = optax.apply_updates(params, updates)
         return new_params, new_state, loss
 
     # Optimization loop
-    step_count = 0
     for epoch in range(1, num_epochs + 1):
         for dp in data:
-            params, opt_state, loss = step(params, dp, opt_state, step_count)
-            step_count += 1
+            params, opt_state, loss = step(params, dp, opt_state)
         logger.debug(
             f"Epoch {epoch:02d}: loss={loss:.6f}, "
         )
