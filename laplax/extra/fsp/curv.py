@@ -21,14 +21,6 @@ def compute_curvature_fn(
     eigvecs = _eigvecs[:, _eigvals > tol]
     eigvals = jnp.flip(eigvals, axis=0)
     eigvecs = jnp.flip(eigvecs, axis=1)
-    x_context = select_context_points(
-        int(data["input"].shape[0]),
-        "grid",
-        data["input"].max(axis=0),
-        data["input"].min(axis=0),
-        data["input"].shape,
-        key=jax.random.key(0),
-    )
 
     def create_scan_fn(
         unflatten_fn, _u, eigvecs, eigvals, params, model_fn, data, prior_var
@@ -39,7 +31,7 @@ def compute_curvature_fn(
             new_cov = _u @ (eigvecs[:, i] * (1 / eigvals[i] ** 0.5))
             lr_fac_i = unflatten_fn(new_cov)  # Use captured unflatten
 
-            all_inputs = jnp.array(x_context)
+            all_inputs = jnp.array(data)
 
             def compute_jvp_squared(x):
                 jvp_result = jax.jvp(lambda p: model_fn(x, p), (params,), (lr_fac_i,))[

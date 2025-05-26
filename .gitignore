@@ -5,7 +5,7 @@ local_*
 .vscode
 
 # Extensions
-*.ipynb
+# *.ipynb
 *.txt
 *.egg-info
 *.pyc

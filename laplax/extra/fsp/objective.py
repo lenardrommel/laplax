@@ -23,7 +23,7 @@ def create_loss_nll(
         nll = -jax.scipy.stats.norm.logpdf(
             data["target"], loc=preds, scale=scale
         ).mean()
-        return dataset_size * nll
+        return nll * dataset_size
 
     return loss_nll
 
@@ -44,7 +44,7 @@ def create_loss_reg(
     def loss_reg(context_points: PredArray, params: Params) -> Float:
         f_c = jax.vmap(model_fn, in_axes=(0, None))(context_points, params) - prior_mean
         K_c_c = prior_cov_kernel(context_points)
-        left = jax.numpy.linalg.solve(K_c_c, f_c)
+        left = jax.scipy.linalg.solve(K_c_c, f_c, assume_a="sym")
         return 0.5 * jax.numpy.einsum("ij,ij->", f_c, left)
 
     return loss_reg

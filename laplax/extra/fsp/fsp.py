@@ -40,9 +40,7 @@ def compute_matrix_jacobian_product(
 
     M_tree = jax.vmap(
         jax.vjp(
-            lambda p: jnp.reshape(
-                model_fn(data["input"], params=p), (matrix.shape[0],)
-            ),
+            lambda p: jnp.reshape(model_fn(data, params=p), (matrix.shape[0],)),
             params,
         )[1],
         in_axes=1,  # 1
@@ -53,7 +51,7 @@ def compute_matrix_jacobian_product(
         M_tree,
     )
     M = flat_M.reshape((-1, matrix.shape[-1]))
-    # print(f"Matrix shape: {M.shape}")
+
     return M, unravel_fn
 
 
@@ -67,19 +65,21 @@ def fsp_laplace(
     prior_arguments: dict = {},
     **kwargs,
 ):
-    v = lanczos_jacobian_initialization(model_fn, params, data, **kwargs)
+    v = lanczos_jacobian_initialization(model_fn, params, context_points, **kwargs)
     cov_matrix = prior_cov_kernel(context_points)
     prior_var = jnp.diag(cov_matrix)
     L = lanczos_invert_sqrt(cov_matrix, v, tol=jnp.finfo(v.dtype).eps)
     M, unravel_fn = compute_matrix_jacobian_product(
-        model_fn, params, data, L, has_batch_dim=False
+        model_fn, params, context_points, L, has_batch_dim=False
     )
     _u, _s, _ = jnp.linalg.svd(M, full_matrices=False)
     tol = jnp.finfo(M.dtype).eps ** 2
     s = _s[_s > tol]
     u = _u[:, : s.size]
     ggn_matrix = create_fsp_ggn_mv(model_fn, params, M)(data)
-    cov_sqrt = compute_curvature_fn(model_fn, params, data, ggn_matrix, prior_var, u)
+    cov_sqrt = compute_curvature_fn(
+        model_fn, params, context_points, ggn_matrix, prior_var, u
+    )
     posterior_state: PosteriorState = {"scale_sqrt": cov_sqrt}
     flatten, unflatten = create_pytree_flattener(params)
     posterior = Posterior(

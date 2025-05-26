@@ -91,7 +91,7 @@ def lanczos_jacobian_initialization(
 ):
     # Define model Jacobian vector product
     initial_vec = jax.jvp(
-        lambda w: model_fn(data["input"], params=w),
+        lambda w: model_fn(data, params=w),
         (params,),
         (tree.ones_like(params),),
     )[1]
