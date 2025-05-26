@@ -46,7 +46,7 @@ from ex_helper import ( # isort: skip
 # ------------------------------------------------------------------------------
 
 
-DEFAULT_INTERVALS = [(0, 2), (4, 5), (6, 8)]
+DEFAULT_INTERVALS = [(-1.0, -0.5), (0.5, 1.0),]
 RESET_CSV_LOG = False
 
 
@@ -54,11 +54,12 @@ def build_sinusoid_data(
     num_train=150,
     num_valid=50,
     num_test=150,
-    sigma_noise=0.3,
+    sigma_noise=0.2,
+    sinus_factor=2.0,
     intervals=DEFAULT_INTERVALS,
     batch_size=20,
     rng_seed=0,
-    test_interval=(0.0, 8.0),
+    test_interval=(-2.0, 2.0),
 ):
     key = jax.random.key(rng_seed)
     X_train, y_train, X_valid, y_valid, X_test, y_test = get_sinusoid_example(
@@ -66,6 +67,7 @@ def build_sinusoid_data(
         num_valid_data=num_valid,
         num_test_data=num_test,
         sigma_noise=sigma_noise,
+        sinus_factor=sinus_factor,
         intervals=intervals,
         rng_key=key,
         test_interval=test_interval,
@@ -99,7 +101,8 @@ def train_sinusoid_model(
     num_train=150,
     num_valid=50,
     num_test=300,
-    sigma_noise=0.3,
+    sigma_noise=0.2,
+    sinus_factor=2.0,
     intervals=DEFAULT_INTERVALS,
     batch_size=20,
     model_seed=0,
@@ -124,7 +127,7 @@ def train_sinusoid_model(
     # Set data
     train_loader, _, _ = build_sinusoid_data(
         num_train, num_valid, num_test,
-        sigma_noise, intervals, batch_size, data_seed
+        sigma_noise, sinus_factor, intervals, batch_size, data_seed
     )
 
     # Generate experiment name for the checkpoint
@@ -161,6 +164,7 @@ def evaluate_regression_example(
     # Output settings
     csv_logger: CSVLogger | None = None,
     use_wandb: bool = False,
+    seed: int = 42,
 ):
     """Evaluate regression example.
 
@@ -173,6 +177,8 @@ def evaluate_regression_example(
         csv_logger: CSVLogger instance for logging results
         use_wandb: Whether to log results to Weights & Biases
     """
+    # Set seed
+    fix_random_seed(seed)
     # Load map model
     ckpt_path = Path(ckpt_dir) / model_name
     model, _, _ = load_model_checkpoint(
@@ -187,7 +193,7 @@ def evaluate_regression_example(
 
     # Load data
     train_loader, valid_loader, test_loader = build_sinusoid_data(
-        num_test=300, test_interval=(-2.0, 10.0)
+        num_test=300, test_interval=(-2.0, 2.0)
     )
 
     # Start evaluation
@@ -327,13 +333,14 @@ def evaluate_regression_example(
         plt.close(fig)
 
     csv_logger.log(
-        avg_results | {
-            "input": test_loader.X,
-            "target": test_loader.y,
-            "pred_mean": results["pred_mean"],
-            "pred_std": results["pred_std"],
-            "samples": results["samples"],
-        },
+        avg_results,
+        # | {
+        #     "input": test_loader.X,
+        #     "target": test_loader.y,
+        #     "pred_mean": results["pred_mean"],
+        #     "pred_std": results["pred_std"],
+        #     "samples": results["samples"],
+        # },
         experiment_name=experiment_name,
         log_args={
             "curv_type": curv_type,
@@ -344,7 +351,13 @@ def evaluate_regression_example(
         }
     )
     csv_logger.log_samples(
-        {k: results[k] for k in additional_entries},
+        {
+            "input": test_loader.X,
+            "target": test_loader.y,
+            "pred_mean": results["pred_mean"],
+            "pred_std": results["pred_std"],
+            "samples": results["samples"],
+        },
         experiment_name=experiment_name
     )
 
@@ -507,8 +520,11 @@ if __name__ == "__main__":
                 "init_sigma_noise": 1.0,
                 "grid_size": 1000,
                 "log_prior_prec_min": -4,
-                "log_prior_prec_max": 4
+                "log_prior_prec_max": 4,
+                "patience": None,
+                "num_epochs": 200,
             },
             csv_logger=csv_logger,
-            use_wandb=args.wandb
+            use_wandb=args.wandb,
+            seed=args.data_seed,
         )

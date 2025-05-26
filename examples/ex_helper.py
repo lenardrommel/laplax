@@ -345,8 +345,7 @@ def optimize_prior_prec_gradient(
         init_prior_prec: Initial prior precision value (default: None)
         init_sigma_noise: Initial noise standard deviation value (default: None)
         num_epochs: Number of optimization epochs (default: 20)
-        learning_rate: Learning rate for the optimizer (default: 1e-3)
-        optimizer_fn: Function to create the optimizer (default: optax.adam)
+        learning_rate: Initial learning rate for the optimizer (default: 1)
         **kwargs: Additional arguments
 
     Returns:
@@ -368,9 +367,19 @@ def optimize_prior_prec_gradient(
 
     logger.info("Initial params: {}", params)
 
-    # Initialize optimizer
-    logger.info("Initializing optimizer with learning rate: {}", learning_rate)
-    optimizer = optax.adam(learning_rate)
+    # Create learning rate schedule
+    schedule = optax.linear_schedule(
+        init_value=learning_rate,
+        end_value=learning_rate * 0.01,  # Decay to 100% of initial learning rate
+        transition_steps=num_epochs,
+    )
+
+    # Initialize optimizer with learning rate schedule
+    logger.info("Initializing optimizer with learning rate schedule")
+    optimizer = optax.chain(
+        optax.scale_by_schedule(schedule),
+        optax.adam(1.0),  # Base learning rate of 1.0 since we scale by schedule
+    )
     opt_state = optimizer.init(params)
 
     # Create a simple data loader if not provided
@@ -378,20 +387,22 @@ def optimize_prior_prec_gradient(
 
     # Single optimization step
     @jax.jit
-    def step(params, data, opt_state):
+    def step(params, data, opt_state, step_count):
         # Compute loss and gradients w.r.t. log-params
         loss, grads = jax.value_and_grad(
             lambda p: objective(jax.tree.map(jnp.exp, p), data)
         )(params)
 
-        updates, new_state = optimizer.update(grads, opt_state)
+        updates, new_state = optimizer.update(grads, opt_state, step_count)
         new_params = optax.apply_updates(params, updates)
         return new_params, new_state, loss
 
     # Optimization loop
+    step_count = 0
     for epoch in range(1, num_epochs + 1):
         for dp in data:
-            params, opt_state, loss = step(params, dp, opt_state)
+            params, opt_state, loss = step(params, dp, opt_state, step_count)
+            step_count += 1
         logger.debug(
             f"Epoch {epoch:02d}: loss={loss:.6f}, "
         )
