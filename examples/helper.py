@@ -49,19 +49,23 @@ def get_sinusoid_example(
     num_valid_data: int = 50,
     num_test_data: int = 100,
     sigma_noise: float = 0.3,
+    sinus_factor: float = 1.0,
     intervals: list[tuple[float, float]] = DEFAULT_INTERVALS,
+    test_interval: tuple[float, float] = (0.0, 8.0),
     rng_key=None,
 ) -> tuple[
-    jnp.ndarray, jnp.ndarray, Iterator[tuple[jnp.ndarray, jnp.ndarray]], jnp.ndarray
+    jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray
 ]:
-    if rng_key is None:
-        rng_key = random.PRNGKey(0)
     """Generate a sinusoid dataset.
 
     Args:
         num_train_data: Number of training data points.
         num_valid_data: Number of validation data points.
+        num_test_data: Number of test data points.
         sigma_noise: Standard deviation of the noise.
+        sinus_factor: Factor to multiply the sinus input with.
+        intervals: List of (min, max) tuples defining intervals for train/valid data.
+        test_interval: (min, max) tuple defining interval for test data.
         rng_key: Random number generator key.
 
     Returns:
@@ -69,7 +73,12 @@ def get_sinusoid_example(
         y_train: Training target data.
         X_valid: Validation input data.
         y_valid: Validation target data.
+        X_test: Test input data.
+        y_test: Test target data.
     """
+    if rng_key is None:
+        rng_key = random.key(0)
+
     # Split RNG key for reproducibility
     (
         rng_key,
@@ -93,18 +102,18 @@ def get_sinusoid_example(
         -1, 1
     )
     noise = random.normal(rng_noise_train, X_train.shape) * sigma_noise
-    y_train = jnp.sin(X_train) + noise
+    y_train = jnp.sin(X_train * sinus_factor) + noise
 
     # Generate calibration data
     X_valid = (jax.vmap(f)(jax.random.split(rng_x_valid, num_valid_data))).reshape(
         -1, 1
     )
     noise = random.normal(rng_noise_valid, X_valid.shape) * sigma_noise
-    y_valid = jnp.sin(X_valid) + noise
+    y_valid = jnp.sin(X_valid * sinus_factor) + noise
 
     # Generate testing data
-    X_test = jnp.linspace(0.0, 8.0, num_test_data).reshape(-1, 1)
+    X_test = jnp.linspace(test_interval[0], test_interval[1], num_test_data).reshape(-1, 1)
     noise = random.normal(rng_noise_test, X_test.shape) * sigma_noise
-    y_test = jnp.sin(X_test) + noise
+    y_test = jnp.sin(X_test * sinus_factor) + noise
 
     return X_train, y_train, X_valid, y_valid, X_test, y_test

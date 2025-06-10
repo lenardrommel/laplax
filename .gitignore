@@ -1,3 +1,9 @@
+# Experiments (ICML Workshop)
+logs/*
+checkpoints/*
+results/*
+wandb/*
+
 # Development
 local_*
 .ruff_cache

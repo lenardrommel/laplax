@@ -143,7 +143,8 @@ def compute_eigendecomposition(
 def lanczos_lowrank(
     A: Callable[[Array], Array] | Array,
     *,
-    key: KeyType,
+    key: KeyType | None = None,
+    b: Array | None = None,
     layout: Layout | None = None,
     rank: int = 20,
     tol: float = 1e-6,
@@ -158,7 +159,8 @@ def lanczos_lowrank(
 
     Args:
         A: Matrix or callable representing the matrix-vector product.
-        key: PRNG key for random initialization.
+        key: PRNG key for random initialization. Either key or b must be provided.
+        b: Starting vector. Either key or b must be provided.
         layout: Dimension of input vector (required if A is callable).
         rank: Number of leading eigenpairs to compute.
         tol: Convergence tolerance for the algorithm.
@@ -176,6 +178,9 @@ def lanczos_lowrank(
             - U: Eigenvectors as a matrix of shape (size, rank)
             - S: Eigenvalues as an array of length rank
             - scalar: Scalar factor, initialized to 0.0
+
+    Raises:
+        ValueError: If neither key nor b is provided.
     """
     del kwargs
 
@@ -201,8 +206,14 @@ def lanczos_lowrank(
             output_fn=lambda x: jnp.asarray(x, dtype=calc_dtype),
         )
 
-    # Initialize random starting vector.
-    b = jax.random.normal(key, (size,), dtype=calc_dtype)
+    # Initialize starting vector.
+    if b is not None:
+        b = jnp.asarray(b, dtype=calc_dtype)
+    elif key is not None:
+        b = jax.random.normal(key, (size,), dtype=calc_dtype)
+    else:
+        msg = "Either key or b must be provided"
+        raise ValueError(msg)
 
     # Run Lanczos iterations.
     alpha, beta, V = lanczos_iterations(
@@ -211,6 +222,7 @@ def lanczos_lowrank(
         maxiter=rank,
         tol=tol,
         full_reorthogonalize=full_reorthogonalize,
+        dtype=calc_dtype,
         mv_jittable=mv_jittable,
     )
     eigvals, eigvecs = compute_eigendecomposition(alpha, beta, V, compute_vectors=True)

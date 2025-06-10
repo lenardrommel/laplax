@@ -101,6 +101,7 @@ def _mse_hessian_mv(jv: PredArray, **kwargs) -> PredArray:
 
 def create_loss_hessian_mv(
     loss_fn: LossFn | str | Callable[[PredArray, TargetArray], Num[Array, "..."]],
+    **kwargs,
 ) -> Callable:
     r"""Create a function to compute the Hessian-vector product for a specified loss fn.
 
@@ -127,6 +128,12 @@ def create_loss_hessian_mv(
 
     if loss_fn == LossFn.MSE:
         return _mse_hessian_mv
+
+    if loss_fn == LossFn.NONE:
+        def _identity(jv, pred, target, **kwargs):
+            del pred, target, kwargs
+            return jv
+        return _identity
 
     if isinstance(loss_fn, Callable):
 
@@ -158,6 +165,7 @@ def create_ggn_mv_without_data(
     factor: Float,
     *,
     has_batch: bool = True,
+    loss_hessian_mv: Callable[[PredArray, PredArray], Num[Array, "..."]] | None = None,
 ) -> Callable[[Params, Data], Params]:
     r"""Create Generalized Gauss-Newton (GGN) matrix-vector productwithout fixed data.
 
@@ -185,9 +193,10 @@ def create_ggn_mv_without_data(
         The function assumes that the data has a batch dimension.
     """
     # Create loss Hessian-vector product
-    loss_fn_hessian_mv = create_loss_hessian_mv(loss_fn)
+    loss_hessian_mv = loss_hessian_mv or create_loss_hessian_mv(loss_fn)
+
     if has_batch:
-        loss_fn_hessian_mv = jax.vmap(loss_fn_hessian_mv)
+        loss_hessian_mv = jax.vmap(loss_hessian_mv)
 
     def ggn_mv(vec, data):
         # Step 1: Single jvp for entire batch, if has_batch is True
@@ -200,7 +209,7 @@ def create_ggn_mv_without_data(
         z, jvp = jax.linearize(fwd, params)
 
         # Step 3: Compute J^T H J v
-        HJv = loss_fn_hessian_mv(jvp(vec), pred=z, target=data["target"])
+        HJv = loss_hessian_mv(jvp(vec), pred=z, target=data["target"])
 
         # Step 4: Compute the GGN vector
         arr = jax.linear_transpose(jvp, vec)(HJv)[0]
@@ -215,6 +224,8 @@ def create_ggn_mv(
     params: Params,
     data: Data,
     loss_fn: LossFn | str | Callable,
+    # TODO: Make it optional to either pass loss_hessian_mv or loss_fn
+    # TODO: This needs to be consistent with the hessian curvature.
     num_curv_samples: Int | None = None,
     num_total_samples: Int | None = None,
 ) -> Callable[[Params], Params]:
@@ -264,6 +275,7 @@ def create_ggn_mv(
         params=params,
         loss_fn=loss_fn,
         factor=curv_scaling_factor,
+        # loss_hessian_mv=loss_hessian_mv, # TODO: Make it optional.
     )
 
     def wrapped_ggn_mv(vec: Params) -> Params:

@@ -79,7 +79,9 @@ def plot_regression_with_uncertainty(
                 )
 
     # Plot true function
-    x_true = np.linspace(0, 8, 1000).reshape(-1, 1)
+    min_point = min(X_train.min(), X_test.min())
+    max_point = max(X_train.max(), X_test.max())
+    x_true = np.linspace(min_point, max_point, 1000).reshape(-1, 1)
     y_true = np.sin(x_true)
     plt.plot(x_true, y_true, color="black", linestyle="--", label="True function")
 
@@ -276,6 +278,7 @@ def create_reliability_diagram(
     else:
         plt.show()
 
+    return plt.gcf()
 
 def create_proportion_diagram(
     bin_proportions: jax.Array,
@@ -314,6 +317,8 @@ def create_proportion_diagram(
 
     else:
         plt.show()
+
+    return plt.gcf()
 
 
 def plot_sinusoid_task(

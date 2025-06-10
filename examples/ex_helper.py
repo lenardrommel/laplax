@@ -1,6 +1,7 @@
 import datetime
 import itertools
 import pickle
+import random
 from pathlib import Path
 
 import jax
@@ -8,6 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import pandas as pd
+import torch
 from flax import nnx
 from loguru import logger
 from orbax import checkpoint as ocp
@@ -125,7 +127,7 @@ class CSVLogger:
             **results,
             **log_args,
             "experiment_name": experiment_name,
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S"),
         }
 
         df = pd.DataFrame([row])
@@ -155,6 +157,27 @@ def generate_experiment_name(**kwargs):
     return f"{timestamp}_{'_'.join(name_parts)}"
 
 # ---------------------------------------------------------------------
+# Fix randomness
+# ---------------------------------------------------------------------
+
+
+def fix_random_seed(seed: int):
+    """Fix random seed in numpy, scipy and torch backend."""
+    # Python built-in RNG
+    random.seed(seed + 1)
+    # NumPy RNG (also covers SciPy)
+    np.random.seed(seed + 2)  # noqa: NPY002
+    # PyTorch CPU RNG
+    torch.manual_seed(seed + 3)
+    # PyTorch GPU RNG (if available)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed + 4)
+    # Ensure deterministic behavior in cuDNN (may slow down training)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+# # ---------------------------------------------------------------------
 # DataLoader Helper
 # ---------------------------------------------------------------------
 
@@ -272,7 +295,7 @@ def train_map_model(
 
 
 class SimpleLoader:
-    def __init__(self, input, target, batch_size=16):
+    def __init__(self, input, target, batch_size=50):
         self._input, self._target = input, target
         self._batch_size = batch_size
         self._rng = np.random.default_rng()
@@ -311,6 +334,7 @@ def optimize_prior_prec_gradient(
     *,
     num_epochs: int = 100,
     learning_rate: float = 1,
+    warmup_steps: int = 10,
     **kwargs,
 ) -> Float:
     """Optimize prior precision using gradient descent.
@@ -321,9 +345,9 @@ def optimize_prior_prec_gradient(
         data: A batch of data.
         init_prior_prec: Initial prior precision value (default: None)
         init_sigma_noise: Initial noise standard deviation value (default: None)
-        num_epochs: Number of optimization epochs (default: 20)
-        learning_rate: Learning rate for the optimizer (default: 1e-3)
-        optimizer_fn: Function to create the optimizer (default: optax.adam)
+        num_epochs: Number of optimization epochs (default: 100)
+        learning_rate: Initial learning rate for the optimizer (default: 1)
+        warmup_steps: Number of warmup steps for the learning rate schedule (default: 10)
         **kwargs: Additional arguments
 
     Returns:
@@ -345,8 +369,20 @@ def optimize_prior_prec_gradient(
 
     logger.info("Initial params: {}", params)
 
-    # Initialize optimizer
-    logger.info("Initializing optimizer with learning rate: {}", learning_rate)
+    # Calculate total steps
+    # total_steps = num_epochs * len(data)
+    # Create learning rate schedule with warmup and cosine decay
+    # schedule = lambda *args, **kwargs: learning_rate
+    # schedule = optax.warmup_cosine_decay_schedule(
+    #     init_value=0.0,  # Start from 0 during warmup
+    #     peak_value=learning_rate,  # Peak at the specified learning rate
+    #     warmup_steps=warmup_steps,
+    #     decay_steps=total_steps - warmup_steps,
+    #     end_value=learning_rate * 0.1,  # End at 1% of peak learning rate
+    # )
+
+    # Initialize optimizer with learning rate schedule
+    logger.info("Initializing optimizer with cosine learning rate schedule")
     optimizer = optax.adam(learning_rate)
     opt_state = optimizer.init(params)
 

@@ -55,6 +55,7 @@ notebooks = [
     "pandas", 
     "skerch", 
     "ipywidgets",
+    "wandb", # For experiment tracking
 ]
 docs = [
     "mkdocs",

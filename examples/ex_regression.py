@@ -3,10 +3,14 @@ from pathlib import Path
 
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
+import numpy as np
 from flax import nnx
 from helper import DataLoader, get_sinusoid_example
 from loguru import logger
+from plotting import plot_regression_with_uncertainty
 
+import wandb  # Add wandb import
 from laplax.api import (
     DEFAULT_REGRESSION_METRICS,
     CalibrationObjective,
@@ -34,7 +38,8 @@ from ex_helper import ( # isort: skip
     train_map_model,
     split_model,
     CSVLogger,
-    optimize_prior_prec_gradient
+    optimize_prior_prec_gradient,
+    fix_random_seed
 )
 
 # ------------------------------------------------------------------------------
@@ -42,7 +47,7 @@ from ex_helper import ( # isort: skip
 # ------------------------------------------------------------------------------
 
 
-DEFAULT_INTERVALS = [(0, 2), (4, 5), (6, 8)]
+DEFAULT_INTERVALS = [(-1.0, -0.5), (0.5, 1.0),]
 RESET_CSV_LOG = False
 
 
@@ -50,10 +55,12 @@ def build_sinusoid_data(
     num_train=150,
     num_valid=50,
     num_test=150,
-    sigma_noise=0.3,
+    sigma_noise=0.2,
+    sinus_factor=2.0 * jnp.pi,
     intervals=DEFAULT_INTERVALS,
     batch_size=20,
     rng_seed=0,
+    test_interval=(-2.0, 2.0),
 ):
     key = jax.random.key(rng_seed)
     X_train, y_train, X_valid, y_valid, X_test, y_test = get_sinusoid_example(
@@ -61,8 +68,10 @@ def build_sinusoid_data(
         num_valid_data=num_valid,
         num_test_data=num_test,
         sigma_noise=sigma_noise,
+        sinus_factor=sinus_factor,
         intervals=intervals,
         rng_key=key,
+        test_interval=test_interval,
     )
 
     train_loader = DataLoader(X_train, y_train, batch_size)
@@ -92,8 +101,9 @@ def train_sinusoid_model(
     # Data settings
     num_train=150,
     num_valid=50,
-    num_test=150,
-    sigma_noise=0.3,
+    num_test=300,
+    sigma_noise=0.2,
+    sinus_factor=2.0 * jnp.pi,
     intervals=DEFAULT_INTERVALS,
     batch_size=20,
     model_seed=0,
@@ -118,7 +128,7 @@ def train_sinusoid_model(
     # Set data
     train_loader, _, _ = build_sinusoid_data(
         num_train, num_valid, num_test,
-        sigma_noise, intervals, batch_size, data_seed
+        sigma_noise, sinus_factor, intervals, batch_size, data_seed
     )
 
     # Generate experiment name for the checkpoint
@@ -153,7 +163,10 @@ def evaluate_regression_example(
     # Calibration
     clbr_kwargs: dict | None = None,
     # Output settings
-    csv_logger: CSVLogger | None = None
+    csv_logger: CSVLogger | None = None,
+    use_wandb: bool = False,
+    seed: int = 42,
+    valid_size: int = 100,  # Size of validation set for calibration
 ):
     """Evaluate regression example.
 
@@ -164,7 +177,12 @@ def evaluate_regression_example(
         pushforward_kwargs: Dictionary containing pushforward settings
         clbr_kwargs: Dictionary containing calibration settings
         csv_logger: CSVLogger instance for logging results
+        use_wandb: Whether to log results to Weights & Biases
+        seed: Random seed for reproducibility
+        valid_size: Number of points to subsample for validation
     """
+    # Set seed
+    fix_random_seed(seed)
     # Load map model
     ckpt_path = Path(ckpt_dir) / model_name
     model, _, _ = load_model_checkpoint(
@@ -178,7 +196,20 @@ def evaluate_regression_example(
     )
 
     # Load data
-    train_loader, valid_loader, test_loader = build_sinusoid_data()
+    train_loader, valid_loader, test_loader = build_sinusoid_data(
+        num_test=400, test_interval=(-2.0, 2.0)
+    )
+
+    # Create targeted validation set by subsampling from test distribution
+    # rng = np.random.default_rng(seed)
+    # valid_indices = rng.choice(
+    #     len(test_loader.X),
+    #     size=valid_size,
+    #     replace=False
+    # )
+    # valid_X = jnp.take(test_loader.X, jnp.array(valid_indices), axis=0)
+    # valid_y = jnp.take(test_loader.y, jnp.array(valid_indices), axis=0)
+    # valid_loader = DataLoader(valid_X, valid_y, batch_size=valid_size)
 
     # Start evaluation
     results = {}
@@ -203,6 +234,27 @@ def evaluate_regression_example(
         cm=clbr_mthd,
         pt=pushforward_type
     )
+
+    # Initialize wandb if enabled
+    if use_wandb:
+        wandb.init(
+            project="laplax-regression",
+            name=experiment_name,
+            config={
+                "curv_type": laplace_kwargs.get('curv_type'),
+                "last_layer_only": laplace_kwargs.get('last_layer_only'),
+                "pushforward_type": pushforward_kwargs.get('pushforward_type'),
+                "calibration_objective": (
+                    clbr_kwargs.get("calibration_objective") if clbr_kwargs else None
+                ),
+                "calibration_method": (
+                    clbr_kwargs.get("calibration_method") if clbr_kwargs else None
+                ),
+                "valid_size": valid_size,
+            }
+        )
+
+    # Split model
     model_fn, params = split_model(
         model,
         last_layer_only=last_layer_only
@@ -220,14 +272,14 @@ def evaluate_regression_example(
         has_batch=True
     )
 
-    # Calibration
+    # Calibration using targeted validation set
     prior_args = {"prior_prec": 1.0}
     if clbr_kwargs is not None:
         prior_args, _ = calibration(
             posterior_fn=posterior_fn,
             model_fn=model_fn,
             params=params,
-            data={"input": valid_loader.X, "target": valid_loader.y},
+            data={"input": valid_loader.X, "target": valid_loader.y},  # Use targeted validation set
             curv_estimate=curv_est,
             curv_type=curv_type,
             loss_fn=LossFn.MSE,
@@ -236,7 +288,7 @@ def evaluate_regression_example(
             **clbr_kwargs,
         )
 
-    # Evaluation
+    # Evaluation on full test set
     logger.info("Starting evaluation.")
     additional_entries = ["pred_mean", "pred_std", "samples"]
     eval_metrics = [
@@ -268,20 +320,34 @@ def evaluate_regression_example(
     )
 
     avg_results = {
-            "rmse": jnp.mean(results["rmse"]),
-            "nll": jnp.mean(results["nll"]),
-            "chi^2": jnp.mean(results["chi^2"]),
-            "crps": jnp.mean(results["crps"]),
+            "rmse": jnp.mean(results["rmse"][100:300]),
+            "nll": jnp.mean(results["nll"][100:300]),
+            "chi^2": jnp.mean(results["chi^2"][100:300]),
+            "crps": jnp.mean(results["crps"][100:300]),
     }
     logger.info(f"Eval: {avg_results}")
+
+    # Log to wandb if enabled
+    if use_wandb:
+        # Log metrics
+        wandb.log(avg_results)
+
+        # Create and log regression plot with uncertainty
+        fig = plot_regression_with_uncertainty(
+            X_train=train_loader.X,
+            y_train=train_loader.y,
+            X_test=test_loader.X,
+            y_test=test_loader.y,
+            X_pred=test_loader.X,
+            y_pred=results["pred_mean"],
+            y_std=results["pred_std"],
+            title=f"Regression with {curv_type} Curvature"
+        )
+        wandb.log({"regression_plot": wandb.Image(fig)})
+        plt.close(fig)
+
     csv_logger.log(
-        avg_results | {
-            "input": test_loader.X,
-            "target": test_loader.y,
-            "pred_mean": results["pred_mean"],
-            "pred_std": results["pred_std"],
-            "samples": results["samples"],
-        },
+        avg_results,
         experiment_name=experiment_name,
         log_args={
             "curv_type": curv_type,
@@ -289,10 +355,17 @@ def evaluate_regression_example(
             "pushforward_type": pushforward_type,
             "calibration_objective": clbr_obj,
             "calibration_method": clbr_mthd,
+            "valid_size": valid_size,
         }
     )
     csv_logger.log_samples(
-        {k: results[k] for k in additional_entries},
+        {
+            "input": test_loader.X,
+            "target": test_loader.y,
+            "pred_mean": results["pred_mean"],
+            "pred_std": results["pred_std"],
+            "samples": results["samples"],
+        },
         experiment_name=experiment_name
     )
 
@@ -395,7 +468,24 @@ if __name__ == "__main__":
         default="regression_model_h64_n150_seed0",
     )
 
+    parser.add_argument(
+        "--valid_size",
+        type=int,
+        default=150,
+    )
+
+    # --------------------------
+    # Wandb args
+    # --------------------------
+    parser.add_argument(
+        "--wandb",
+        type=lambda x: x.lower() == "true",
+        default=True,
+        help="Enable Weights & Biases logging",
+    )
+
     args = parser.parse_args()
+    fix_random_seed(args.data_seed + 2103)
 
     # -------------------------------------------
     # Train model
@@ -442,9 +532,14 @@ if __name__ == "__main__":
                 "calibration_method": args.calibration_method,
                 "init_prior_prec": 1.0,
                 "init_sigma_noise": 1.0,
-                "grid_size": 1000,
-                "log_prior_prec_min": -4,
-                "log_prior_prec_max": 4
+                "grid_size": 2000,
+                "log_prior_prec_min": -3,
+                "log_prior_prec_max": 3,
+                "patience": None,
+                "num_epochs": 300,
             },
-            csv_logger=csv_logger
+            csv_logger=csv_logger,
+            use_wandb=args.wandb,
+            seed=args.data_seed,
+            valid_size=args.valid_size,
         )
