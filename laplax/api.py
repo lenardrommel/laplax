@@ -155,6 +155,7 @@ def _maybe_wrap_loader_or_batch(
     mv_fn: Callable[..., Params],
     data: Data | Iterable,
     *,
+    transform: Callable | None = None,
     loader_kwargs: dict = EMPTY_DICT,
 ) -> Callable[..., Params]:
     """Wrap matrix-vector function with data loader if data is iterable.
@@ -176,7 +177,7 @@ def _maybe_wrap_loader_or_batch(
     transform = _validate_and_get_transform(
         next(iter(data)) if isinstance(data, Iterable)
         and not isinstance(data, (tuple, dict)) else data
-    )
+    ) if transform is None else transform
 
     if isinstance(data, (tuple, dict)):
         logger.debug("Using *single batch* curvature evaluation.")
@@ -404,6 +405,7 @@ def _make_mll_objective(
     params: Params,
     curv_type: CurvApprox,
     loss_fn: LossFn,
+    has_batch: bool,
 ) -> Callable[[PriorArguments, Data], Float]:
     """Create marginal log-likelihood objective for calibration.
 
@@ -434,6 +436,7 @@ def _make_mll_objective(
             params=params,
             loss_fn=loss_fn,
             curv_type=curv_type,
+            has_batch=has_batch,
         )
     )
 
@@ -447,6 +450,7 @@ def _build_calibration_objective(
     params: Params | None = None,
     curv_type: CurvApprox | None = None,
     loss_fn: LossFn,
+    has_batch: bool = False,
 ) -> Callable[[PriorArguments, Data], Float]:
     """Build calibration objective function based on type.
 
@@ -466,6 +470,8 @@ def _build_calibration_objective(
         Type of curvature approximation.
     loss_fn : LossFn
         Loss function used.
+    has_batch : bool, optional
+        Whether the model expects a leading batch axis.
 
     Returns:
     -------
@@ -481,11 +487,11 @@ def _build_calibration_objective(
 
     if (
         objective_type is CalibrationObjective.MARGINAL_LOG_LIKELIHOOD
-        and _check_if_none(curv_estimate, model_fn, params, curv_type)
+        and _check_if_none(curv_estimate, model_fn, params, curv_type, has_batch)
     ):
         msg = (
             "Marginal log-likelihood objective requires "
-            "`curv_estimate`, `model_fn`, `params`, `curv_type`."
+            "`curv_estimate`, `model_fn`, `params`, `curv_type`, and `has_batch`."
         )
         raise ValueError(msg)
 
@@ -505,6 +511,7 @@ def _build_calibration_objective(
                 params=params,
                 curv_type=curv_type,
                 loss_fn=loss_fn,
+                has_batch=has_batch,
             )
         case CalibrationObjective.ECE:
             return _make_ece_objective(set_prob_predictive)
@@ -584,6 +591,7 @@ def GGN(
     factor: float = 1.0,
     has_batch: bool = True,
     verbose_logging: bool = True,
+    transform: Callable | None = None,
 ) -> Callable[[Params], Params]:
     """Create a GGN matrix-vector product function.
 
@@ -603,6 +611,8 @@ def GGN(
         Whether model expects batch dimension.
     verbose_logging : bool, optional
         Whether to enable verbose logging.
+    transform : Callable | None, optional
+        Transform to apply to data.
 
     Returns:
     -------
@@ -625,6 +635,7 @@ def GGN(
     mv_bound = _maybe_wrap_loader_or_batch(
         ggn_mv,
         data,
+        transform=transform,
         loader_kwargs={
             "verbose_logging": verbose_logging,
         }
@@ -755,6 +766,7 @@ def calibration(
     num_samples: int = 30,
     calibration_objective: CalibrationObjective | str = CalibrationObjective.NLL,
     calibration_method: CalibrationMethod | str = CalibrationMethod.GRID_SEARCH,
+    has_batch: bool = False,
     **calibration_kwargs,
 ) -> tuple[PriorArguments, Callable[[InputArray], dict[str, Array]]]:
     """Calibrate hyperparameters of the Laplace approximation.
@@ -789,6 +801,8 @@ def calibration(
         Objective function to optimize during calibration, by default CalibrationObjective.NLL.
     calibration_method : CalibrationMethod | str, optional
         Method to use for calibration, by default CalibrationMethod.GRID_SEARCH.
+    has_batch : bool, optional
+        Whether the model should be vmapped over the batch dimension, by default False.
     **calibration_kwargs
         Additional arguments for the calibration method.
 
@@ -838,6 +852,7 @@ def calibration(
         params=params,
         loss_fn=loss_fn,
         curv_type=curv_type,
+        has_batch=has_batch,
     )
 
     calibration_method = _convert_to_enum(
