@@ -37,6 +37,7 @@ dev = [
     "jupyterlab",
     "pre-commit",
     "pytest",
+    "pytest-cov",
     "tox-uv",
     "pyright",
     "pytest-cases",
@@ -46,6 +47,7 @@ dev = [
     "torch",
     "curvlinops-for-pytorch",
     "laplace-torch",
+    "coveralls",
 ]
 notebooks = [
     "torch",
