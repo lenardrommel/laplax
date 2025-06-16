@@ -27,7 +27,7 @@ help:
 .PHONY: venv
 
 venv:
-	@uv venv --python=3.12
+	@uv venv --python=3.13
 
 .PHONY: install
 

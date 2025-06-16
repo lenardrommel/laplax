@@ -13,9 +13,9 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3 :: Only",
     "Operating System :: OS Independent",
 ]
@@ -29,7 +29,7 @@ keywords = [
 ]
 name = "laplax"
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.11,<3.14"
 
 [project.optional-dependencies]
 dev = [
@@ -96,7 +96,7 @@ addopts = ["--import-mode=importlib"]
 preview = true
 extend-include = ["*.ipynb"]
 exclude = [".git", "__pycache__"]
-target-version = "py312"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = [

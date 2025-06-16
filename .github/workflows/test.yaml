@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
     - uses: actions/checkout@v4
     - name: Set up uv
@@ -20,7 +20,7 @@ jobs:
     - name: Run test
       run: make test
     - name: Test coveralls - python ${{ matrix.python-version }}
-      if: matrix.python-version == '3.12'
+      if: matrix.python-version == '3.13'
       run: uv run coveralls --service=github
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
