@@ -6,11 +6,9 @@ jobs:
   tests:
     name: "Python ${{ matrix.python-version }}"
     runs-on: ubuntu-latest
-    env:
-      USING_COVERAGE: '3.12'
     strategy:
       matrix:
-        python-version: ["3.12"]
+        python-version: ["3.10", "3.11", "3.12"]
     steps:
     - uses: actions/checkout@v4
     - name: Set up uv
@@ -22,8 +20,8 @@ jobs:
     - name: Run test
       run: make test
     - name: Test coveralls - python ${{ matrix.python-version }}
+      if: matrix.python-version == '3.12'
       run: uv run coveralls --service=github
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         flag-name: run-${{ matrix.python-version }}
-        parallel: true
