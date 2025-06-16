@@ -1,6 +1,8 @@
 .DEFAULT: help
 
 help:
+	@echo "venv"
+	@echo "        Create virtual environment"
 	@echo "install"
 	@echo "        Install laplax and dependencies"
 	@echo "install-dev"
@@ -9,8 +11,6 @@ help:
 	@echo "        Install curvlinops and tools for the tutorial notebooks"
 	@echo "install-docs"
 	@echo "        Install curvlinops and documentation tools"
-	@echo "uninstall"
-	@echo "        Uninstall laplax"
 	@echo "lint"
 	@echo "        Run all linting actions"
 	@echo "test"
@@ -24,51 +24,51 @@ help:
 	@echo "ruff-check"
 	@echo "        Run ruff check on the project without fixing errors"
 
+.PHONY: venv
+
+venv:
+	@uv venv --python=3.12
+
 .PHONY: install
 
 install:
-	@uv pip install -e .
+	@uv sync
 
 .PHONY: install-dev
 
 install-dev:
-	@uv pip install -e '.[dev]'
+	@uv sync --inexact --extra dev
 
 .PHONY: install-notebooks
 
 install-notebooks:
-	@uv pip install -e '.[notebooks]'
+	@uv sync --inexact --extra notebooks
 
 .PHONY: install-docs
 
 install-docs:
-	@uv pip install -e '.[docs]'
-
-.PHONY: uninstall
-
-uninstall:
-	@uv pip uninstall laplax
+	@uv sync --inexact --extra docs
 
 .PHONY: test
 
 test:
-	@pytest -vx --cov=laplax
+	@uv run pytest -vx --cov=laplax
 
 .PHONY: ruff-format ruff-format-check
 
 ruff-format:
-	@ruff format .
+	@uv run ruff format .
 
 ruff-format-check:
-	@ruff format --check .
+	@uv run ruff format --check .
 
 .PHONY: ruff-check
 
 ruff:
-	@ruff check . --fix
+	@uv run ruff check . --fix
 
 ruff-check:
-	@ruff check .
+	@uv run ruff check .
 
 .PHONY: lint
 

@@ -13,20 +13,16 @@ jobs:
         python-version: ["3.12"]
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: "${{ matrix.python-version }}"
     - name: Set up uv
       uses: astral-sh/setup-uv@v6
-    - name: Install Dependencies
-      run: |
-        make install-dev
+      with:
+        python-version: "${{ matrix.python-version }}"
+    - name: Install dependencies
+      run: make install-dev
     - name: Run test
-      run: |
-        make test
-
+      run: make test
     - name: Test coveralls - python ${{ matrix.python-version }}
-      run: coveralls --service=github
+      run: uv run coveralls --service=github
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         flag-name: run-${{ matrix.python-version }}
