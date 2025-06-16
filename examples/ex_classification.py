@@ -1,16 +1,3 @@
-import os, sys
-
-# What GPU(s) does the OS expose?
-print("CUDA_VISIBLE_DEVICES=", os.environ.get("CUDA_VISIBLE_DEVICES", "<unset>"))
-print("nvidia-smi output:")
-os.system("nvidia-smi")
-
-# What does JAX see?
-import jax
-print("jax.__version__:", jax.__version__)
-print("jaxlib version:", jax.lib.xla_bridge.get_backend().platform)
-print("jax.devices():", jax.devices())
-
 import argparse
 from functools import partial
 from pathlib import Path
@@ -19,13 +6,13 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import torch
+import wandb
 from flax import nnx
 from loguru import logger
 from plotting import create_proportion_diagram, create_reliability_diagram
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 
-import wandb
 from laplax.api import (
     GGN,
     CalibrationObjective,
@@ -33,14 +20,18 @@ from laplax.api import (
     Pushforward,
     calibration,
     evaluation,
+    nll_gaussian_classification,
     register_calibration_method,
-    _nll_gaussian_classification,
 )
 from laplax.curv import estimate_curvature, set_posterior_fn
 from laplax.curv.cov import LowRankTerms
 from laplax.enums import CurvApprox, LossFn
 from laplax.eval import apply_fns
-from laplax.eval.metrics import calculate_bin_metrics, correctness, expected_calibration_error
+from laplax.eval.metrics import (
+    calculate_bin_metrics,
+    correctness,
+    expected_calibration_error,
+)
 
 from ex_helper import (  # isort: skip
     load_model_checkpoint,
@@ -53,7 +44,7 @@ from ex_helper import (  # isort: skip
     CSVLogger,
     LimitedLoader,
     optimize_prior_prec_gradient,
-    fix_random_seed
+    fix_random_seed,
 )
 
 
@@ -66,15 +57,17 @@ RESET_CSV_LOG = False
 
 def cifar10_collate_fn(batch):
     images, labels = zip(*batch, strict=False)
-    images = torch.stack(images, dim=0)\
-        .permute(0, 2, 3, 1).detach().cpu().numpy()
-    labels = torch.tensor(labels, dtype=torch.int32) \
-        .detach().cpu().numpy()
+    images = torch.stack(images, dim=0).permute(0, 2, 3, 1).detach().cpu().numpy()
+    labels = torch.tensor(labels, dtype=torch.int32).detach().cpu().numpy()
     return images, labels
 
 
 def setup_cifar10_data():
-    """Setup CIFAR-10 data."""
+    """Setup CIFAR-10 data.
+
+    Returns:
+        A triple of train, val, and test loaders.
+    """
     mean = (0.4914, 0.4822, 0.4465)
     std = (0.2470, 0.2435, 0.2616)
 
@@ -91,16 +84,19 @@ def setup_cifar10_data():
     ])
 
     # Download (or Load) datasets
-    train_set = datasets.CIFAR10(root='./data', train=True, download=True,
-                                  transform=train_transforms)
-    test_set = datasets.CIFAR10(root='./data', train=False, download=True,
-                                  transform=test_transforms)
+    train_set = datasets.CIFAR10(
+        root="./data", train=True, download=True, transform=train_transforms
+    )
+    test_set = datasets.CIFAR10(
+        root="./data", train=False, download=True, transform=test_transforms
+    )
 
     # Split train → train/valid
     train_size = int(0.9 * len(train_set))  # 45,000
     valid_size = len(train_set) - train_size  # 5,000
-    train_set, valid_set = random_split(train_set, [train_size, valid_size],
-                                        generator=torch.Generator().manual_seed(42))
+    train_set, valid_set = random_split(
+        train_set, [train_size, valid_size], generator=torch.Generator().manual_seed(42)
+    )
 
     # Create DataLoaders
     batch_size = 128
@@ -130,18 +126,18 @@ class CIFAR10CNN(nnx.Module):
 
     def __init__(self, *, rngs: nnx.Rngs):
         # Conv blocks
-        self.conv1 = nnx.Conv(3, 32, kernel_size=(3, 3), padding='SAME', rngs=rngs)
-        self.conv2 = nnx.Conv(32, 64, kernel_size=(3, 3), padding='SAME', rngs=rngs)
-        self.conv3 = nnx.Conv(64, 128, kernel_size=(3, 3), padding='SAME', rngs=rngs)
+        self.conv1 = nnx.Conv(3, 32, kernel_size=(3, 3), padding="SAME", rngs=rngs)
+        self.conv2 = nnx.Conv(32, 64, kernel_size=(3, 3), padding="SAME", rngs=rngs)
+        self.conv3 = nnx.Conv(64, 128, kernel_size=(3, 3), padding="SAME", rngs=rngs)
 
         # Pooling helper
         self.pool = partial(
-            nnx.max_pool, window_shape=(2, 2), strides=(2, 2), padding='VALID'
+            nnx.max_pool, window_shape=(2, 2), strides=(2, 2), padding="VALID"
         )
 
         # Fully-connected layers
-        # After 3xpool on 32x32 input → 4x4 feature maps of 128 channels:
-        #   32 → 16 → 8 → 4
+        # After 3xpool on 32x32 input -> 4x4 feature maps of 128 channels:
+        #   32 -> 16 -> 8 -> 4
         flat_dim = 4 * 4 * 128
         self.fc1 = nnx.Linear(flat_dim, 256, rngs=rngs)
         self.final_layer = nnx.Linear(256, 10, rngs=rngs)
@@ -149,17 +145,17 @@ class CIFAR10CNN(nnx.Module):
     def __call__(self, x: jax.Array) -> jax.Array:
         # x: [32, 32, 3] - No batch dimension assumed
         x = nnx.relu(self.conv1(x))
-        x = self.pool(x)               # → [16,16,32]
+        x = self.pool(x)  # [16, 16, 32]
 
         x = nnx.relu(self.conv2(x))
-        x = self.pool(x)               # → [8, 8,64]
+        x = self.pool(x)  # [8, 8, 64]
 
         x = nnx.relu(self.conv3(x))
-        x = self.pool(x)               # → [4, 4,128]
+        x = self.pool(x)  # [4, 4, 128]
 
-        x = x.reshape(-1)              # → [4*4*128]
+        x = x.reshape(-1)  # [4*4*128]
         x = nnx.relu(self.fc1(x))
-        x = self.final_layer(x)                # → [10]
+        x = self.final_layer(x)  # [10]
         return x
 
 
@@ -178,7 +174,11 @@ def compute_ggn(
     last_layer_only=False,
     checkpoint_dir="./checkpoints/",
 ):
-    """Compute the GGN of the model."""
+    """Compute the GGN of the model.
+
+    Returns:
+        A dict containing the curvature estimate.
+    """
     # Split model
     model_fn, params = split_model(model, last_layer_only=last_layer_only)
 
@@ -238,7 +238,7 @@ def train_cifar10_model(
         wandb.init(
             project="laplax_train",
             name=experiment_name,
-            config={"n_epochs": n_epochs, "lr": lr, "model_seed": model_seed}
+            config={"n_epochs": n_epochs, "lr": lr, "model_seed": model_seed},
         )
 
     # Prepare data
@@ -262,7 +262,7 @@ def train_cifar10_model(
     ckpt_path = Path(checkpoint_dir) / experiment_name
     save_model_checkpoint(model, ckpt_path)
 
-    if use_wandb: 
+    if use_wandb:
         wandb.finish()
 
     return {
@@ -283,7 +283,11 @@ def curvature_cifar10_model(
     last_layer_only=False,
     checkpoint_dir="./checkpoints/",
 ):
-    """Compute the GGN of the model."""
+    """Compute the GGN of the model.
+
+    Returns:
+        The GGN.
+    """
     ckpt_path = Path(checkpoint_dir) / model_name
     model, _, _ = load_model_checkpoint(CIFAR10CNN, {}, ckpt_path)
     train_loader, _, _ = setup_cifar10_data()
@@ -330,22 +334,23 @@ def evaluate_cifar10_model(
 
     # Start evaluation
     results = {}
-    csv_logger = CSVLogger(
-        file_name=f"{model_name}_results.csv",
-        force=RESET_CSV_LOG
-    ) if csv_logger is None else csv_logger 
+    csv_logger = (
+        CSVLogger(file_name=f"{model_name}_results.csv", force=RESET_CSV_LOG)
+        if csv_logger is None
+        else csv_logger
+    )
 
     # Extract parameters
-    last_layer_only = laplace_kwargs.get('last_layer_only', False) 
-    curv_type = laplace_kwargs.get('curv_type')
-    low_rank_rank = laplace_kwargs.get('low_rank_rank', 100)
-    sample_seed = pushforward_kwargs.get('sample_seed', 21904)
-    pushforward_type = pushforward_kwargs.get('pushforward_type', Pushforward.LINEAR)
-    predictive_type = pushforward_kwargs.get('predictive_type', Predictive.MC_BRIDGE)
+    last_layer_only = laplace_kwargs.get("last_layer_only", False)
+    curv_type = laplace_kwargs.get("curv_type")
+    low_rank_rank = laplace_kwargs.get("low_rank_rank", 100)
+    sample_seed = pushforward_kwargs.get("sample_seed", 21904)
+    pushforward_type = pushforward_kwargs.get("pushforward_type", Pushforward.LINEAR)
+    predictive_type = pushforward_kwargs.get("predictive_type", Predictive.MC_BRIDGE)
     clbr_obj = clbr_kwargs.get("calibration_objective")
     clbr_mthd = clbr_kwargs.get("calibration_method")
-    max_rank = laplace_kwargs.get('max_rank', 10)
-    num_batches = laplace_kwargs.get('num_batches', 2)
+    max_rank = laplace_kwargs.get("max_rank", 10)
+    num_batches = laplace_kwargs.get("num_batches", 2)
 
     experiment_name = generate_experiment_name(
         ct=curv_type,
@@ -371,7 +376,7 @@ def evaluate_cifar10_model(
                 "calibration_method": clbr_mthd,
                 "low_rank_rank": low_rank_rank,
                 "num_batches": num_batches,
-            }
+            },
         )
 
     model_fn, params = split_model(model, last_layer_only=last_layer_only)
@@ -438,12 +443,11 @@ def evaluate_cifar10_model(
     ece_map = expected_calibration_error(
         confidence=results["confidences_map"],
         correctness=results["correctness_map"],
-        num_bins=15
+        num_bins=15,
     )
     results_avg = jax.tree.map(jnp.mean, results)
     results_avg["ece_pred"] = ece_pred
     results_avg["ece_map"] = ece_map
-
 
     # Log to wandb if enabled
     if use_wandb:
@@ -452,9 +456,9 @@ def evaluate_cifar10_model(
 
         # Create and log reliability diagram
         bin_prop_pred, bin_conf_pred, bin_acc_pred = calculate_bin_metrics(
-            confidence=results["confidences_pred"], 
+            confidence=results["confidences_pred"],
             correctness=results["correctness_pred"],
-            num_bins=15
+            num_bins=15,
         )
         fig_rel = create_reliability_diagram(
             bin_confidences=bin_conf_pred,
@@ -474,14 +478,13 @@ def evaluate_cifar10_model(
 
         # Create and log reliability diagram
         bin_prop_map, bin_conf_map, bin_acc_map = calculate_bin_metrics(
-            confidence=results["confidences_map"], 
+            confidence=results["confidences_map"],
             correctness=results["correctness_map"],
-            num_bins=15
+            num_bins=15,
         )
         fig_rel_map = create_reliability_diagram(
             bin_confidences=bin_conf_map,
             bin_accuracies=bin_acc_map,
-
             num_bins=15,
         )
         wandb.log({"reliability_map": wandb.Image(fig_rel_map)})
@@ -495,12 +498,12 @@ def evaluate_cifar10_model(
         wandb.log({"proportion_map": wandb.Image(fig_prop_map)})
         plt.close(fig_prop_map)
 
-
     csv_logger.log(results, experiment_name)
 
     logger.info(f"Eval: {results}")
     logger.info(f"ECE (Pred): {ece_pred}")
     logger.info(f"ECE (MAP): {ece_map}")
+
 
 if __name__ == "__main__":
     """Different scripts."""
@@ -511,7 +514,7 @@ if __name__ == "__main__":
         default="train",
         choices=["train", "ggn", "evaluate"],
     )
-    
+
     parser.add_argument(
         "--data_seed",
         type=int,
@@ -568,32 +571,24 @@ if __name__ == "__main__":
         "--calibration_method",
         type=str,
         choices=["gradient_descent", "grid_search"],
-        default="gradient_descent"
+        default="gradient_descent",
     )
 
     parser.add_argument(
         "--calibration_objective",
         type=CalibrationObjective,
-        default=CalibrationObjective.ECE
+        default=CalibrationObjective.ECE,
     )
 
     parser.add_argument(
-        "--pushforward_type",
-        type=Pushforward,
-        default=Pushforward.LINEAR
+        "--pushforward_type", type=Pushforward, default=Pushforward.LINEAR
     )
 
     parser.add_argument(
-        "--predictive_type",
-        type=Predictive,
-        default=Predictive.MC_BRIDGE
+        "--predictive_type", type=Predictive, default=Predictive.MC_BRIDGE
     )
 
-    parser.add_argument(
-        "--low_rank_rank",
-        type=int,
-        default=100
-    )
+    parser.add_argument("--low_rank_rank", type=int, default=100)
 
     # --------------------------
     # Wandb args
@@ -625,7 +620,7 @@ if __name__ == "__main__":
             curv_type=args.curv_type,
             num_batches=args.num_batches,
             last_layer_only=args.last_layer_only,
-            max_rank=args.max_rank
+            max_rank=args.max_rank,
         )
 
     # -------------------------------------------
@@ -633,15 +628,9 @@ if __name__ == "__main__":
     # -------------------------------------------
 
     if args.task == "evaluate":
-        register_calibration_method(
-            "gradient_descent",
-            optimize_prior_prec_gradient
-        )
+        register_calibration_method("gradient_descent", optimize_prior_prec_gradient)
 
-        csv_logger = CSVLogger(
-            file_name="cifar10_results.csv",
-            force=RESET_CSV_LOG
-        )
+        csv_logger = CSVLogger(file_name="cifar10_results.csv", force=RESET_CSV_LOG)
 
         logger.info(f"Running Laplace with curvature type: {args.curv_type}")
 
@@ -660,24 +649,25 @@ if __name__ == "__main__":
             clbr_kwargs={
                 "calibration_objective": args.calibration_objective,
                 "calibration_method": args.calibration_method,
-                "log_prior_prec_min": -4.0, 
+                "log_prior_prec_min": -4.0,
                 "log_prior_prec_max": 4.0,
                 "grid_size": 200,
                 "init_prior_prec": 1.0,
                 "init_sigma_noise": 1.0,
-
-            } if args.calibrate else {},
+            }
+            if args.calibrate
+            else {},
             eval_kwargs={
                 "eval_metrics": [
                     apply_fns(
                         lambda map, **kwargs:  # noqa: ARG005
-                            jnp.max(jax.nn.softmax(map, axis=-1), axis=-1),
+                        jnp.max(jax.nn.softmax(map, axis=-1), axis=-1),
                         lambda pred_act, **kwargs:  # noqa: ARG005
-                            jnp.max(pred_act, axis=-1),
+                        jnp.max(pred_act, axis=-1),
                         lambda map, target, **kwargs:  # noqa: ARG005
-                            correctness(map, target) * 1,
+                        correctness(map, target) * 1,
                         lambda pred_mean, target, **kwargs:  # noqa: ARG005
-                            correctness(pred_mean, target) * 1,
+                        correctness(pred_mean, target) * 1,
                         names=[
                             "confidences_map",
                             "confidences_pred",
@@ -685,12 +675,9 @@ if __name__ == "__main__":
                             "correctness_pred",
                         ],
                     ),
-                    apply_fns(
-                        _nll_gaussian_classification,
-                        names=["nll_gaussian_pred"]
-                    ),                    
+                    apply_fns(nll_gaussian_classification, names=["nll_gaussian_pred"]),
                 ]
             },
             csv_logger=csv_logger,
-            use_wandb=args.wandb
+            use_wandb=args.wandb,
         )

@@ -29,6 +29,9 @@ def plot_regression_with_uncertainty(
         y_pred: Prediction mean (shape: n_samples, 1), optional
         y_std: Prediction standard deviation (shape: n_samples, 1), optional
         title: Plot title, optional
+
+    Returns:
+        The figure.
     """
     plt.figure(figsize=(10, 6))
 
@@ -111,6 +114,9 @@ def plot_posterior_samples(
         X_train: Training input data (shape: n_train_samples, 1)
         y_train: Training target data (shape: n_train_samples, 1)
         title: Plot title
+
+    Returns:
+        The figure.
     """
     plt.figure(figsize=(10, 6))
 
@@ -160,6 +166,9 @@ def plot_predictive_distribution(
         y_pred_mean: Predictive mean (shape: n_pred_samples, 1)
         y_pred_std: Predictive standard deviation (shape: n_pred_samples, 1)
         title: Plot title
+
+    Returns:
+        The figure.
     """
     # Convert to numpy arrays if they are JAX arrays
     if hasattr(X_train, "device_buffer"):
@@ -279,6 +288,7 @@ def create_reliability_diagram(
         plt.show()
 
     return plt.gcf()
+
 
 def create_proportion_diagram(
     bin_proportions: jax.Array,

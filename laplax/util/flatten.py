@@ -37,6 +37,9 @@ def full_flatten(tree: PyTree) -> Array:
 
     This function takes a PyTree and concatenates all its leaves into a single
     array.
+
+    Returns:
+        The flattened PyTree.
     """
     return jnp.concatenate([jnp.ravel(leaf) for leaf in jax.tree.flatten(tree)[0]])
 
@@ -156,12 +159,7 @@ def unravel_array_into_pytree(pytree: PyTree, axis: int, arr: Array) -> PyTree:
         PyTree: A PyTree with the specified structure, populated with parts of the
         input array.
 
-    Raises:
-        ValueError: If the input array cannot be split and reshaped to match the PyTree
-        structure.
-
-    Source: This function follows the implementation in
-        jax._src.api._unravel_array_into_pytree
+    This function follows the implementation in jax._src.api._unravel_array_into_pytree.
     """
     leaves, treedef = jax.tree.flatten(pytree)
     axis %= arr.ndim

@@ -110,9 +110,6 @@ def full_prec_to_scale(prec: Num[Array, "P P"]) -> Num[Array, "P P"]:
 
     Returns:
         Scale matrix L where L @ L.T is the covariance matrix.
-
-    Raises:
-        ValueError: If the precision matrix is not positive definite.
     """
     Lf = jnp.linalg.cholesky(jnp.flip(prec, axis=(-2, -1)))
 
@@ -584,6 +581,9 @@ def set_posterior_fn(
 
     Returns:
         A function that computes the posterior state.
+
+    Raises:
+        ValueError: When layout is neither an integer, a PyTree, nor None.
     """
     del kwargs
     if layout is not None and not isinstance(layout, int | PyTree):

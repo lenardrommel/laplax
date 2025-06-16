@@ -31,6 +31,7 @@ class CalibrationErrorNorm(StrEnum):
 # Additional laplax.api specific enumerations
 # ------------------------------------------------------------------------------
 
+
 class CalibrationObjective(StrEnum):
     """Supported calibration objectives (minimisation!)."""
 

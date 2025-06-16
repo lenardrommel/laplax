@@ -114,8 +114,6 @@ def apply_fns(
 
     Raises:
         TypeError: If any of the provided functions is not callable.
-        ValueError: If the number of names doesn't match the number of functions,
-            if field is invalid, or if required keys are not found.
     """
     # Validate all funcs are callable
     for i, func in enumerate(funcs):
@@ -246,6 +244,9 @@ def evaluate_metrics_on_dataset(
     Returns:
         dict: A dictionary containing the evaluated metrics for the entire
         dataset.
+
+    Raises:
+        ValueError: When metrics and metrics_dict are both None.
     """
     # Initialize metrics list from metric_dict if provided
     metrics_from_dict = []
@@ -305,6 +306,7 @@ def evaluate_metrics_on_generator(
             entries between results and auxiliary dictionaries.
         metrics_dict: A dictionary of metrics to compute, where keys are metric
             names and values are callables.
+        transform: The transform over individual data points.
         reduce: A callable to transform the evaluated metrics (default: identity).
         has_batch: Data batches from generator have unaccounted batch dimension
             (default: True).

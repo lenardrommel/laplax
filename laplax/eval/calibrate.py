@@ -89,9 +89,6 @@ def grid_search(
 
     Returns:
         The prior precision value that minimizes the objective function.
-
-    Raises:
-        ValueError: If the objective function returns invalid results.
     """
     results, prior_precs = [], []
     increasing_count = 0

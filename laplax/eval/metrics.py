@@ -365,6 +365,9 @@ def crps_gaussian(
 
     Returns:
         The crps for the heldout set.
+
+    Raises:
+        ValueError: pred_mean, pred_std, and target have incompatible shapes.
     """
     del kwargs
 
@@ -417,6 +420,9 @@ def nll_gaussian(
 
     Returns:
         The computed NLL value.
+
+    Raises:
+        ValueError: pred_mean, pred_std, and target have incompatible shapes.
     """
     del kwargs
 

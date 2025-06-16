@@ -502,6 +502,9 @@ def lin_setup(
 
     Returns:
         tuple: Updated `results` and `aux`.
+
+    Raises:
+        TypeError: When the posterior_state, vjp, or jvp has an incorrect type.
     """
     del kwargs
 
@@ -629,9 +632,6 @@ def lin_pred_cov(
 
     Returns:
         tuple: Updated `results` and `aux`.
-
-    Raises:
-        TypeError: If the covariance matrix-vector product function is invalid.
     """
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
@@ -663,9 +663,6 @@ def lin_samples(
 
     Returns:
         tuple: Updated `results` and `aux`.
-
-    Raises:
-        TypeError: If the scale matrix or sampling functions are invalid.
     """
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
