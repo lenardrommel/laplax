@@ -25,7 +25,9 @@ from laplax.util.tree import mul
 
 
 def _binary_cross_entropy_hessian_mv(
-    jv: PredArray, pred: PredArray, **kwargs
+    jv: PredArray,
+    pred: PredArray,
+    **kwargs,
 ) -> Num[Array, "..."]:
     r"""Compute the Hessian-vector product for the binary cross-entropy loss.
 
@@ -51,7 +53,9 @@ def _binary_cross_entropy_hessian_mv(
 
 
 def _cross_entropy_hessian_mv(
-    jv: PredArray, pred: PredArray, **kwargs
+    jv: PredArray,
+    pred: PredArray,
+    **kwargs,
 ) -> Num[Array, "..."]:
     r"""Compute the Hessian-vector product for the cross-entropy loss.
 
@@ -78,7 +82,10 @@ def _cross_entropy_hessian_mv(
     return diag_jv - off_diag_jv
 
 
-def _mse_hessian_mv(jv: PredArray, **kwargs) -> PredArray:
+def _mse_hessian_mv(
+    jv: PredArray,
+    **kwargs,
+) -> PredArray:
     r"""Compute the Hessian-vector product for mean squared error loss.
 
     The Hessian of the mean squared error loss is a constant diagonal matrix with
@@ -173,7 +180,7 @@ def create_ggn_mv_without_data(
     factor: Float,
     *,
     has_batch: bool = True,
-    loss_hessian_mv: Callable[[PredArray, PredArray], Num[Array, "..."]] | None = None,
+    loss_hessian_mv: Callable | None = None,
 ) -> Callable[[Params, Data], Params]:
     r"""Create Generalized Gauss-Newton (GGN) matrix-vector productwithout fixed data.
 
