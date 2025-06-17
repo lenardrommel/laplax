@@ -575,7 +575,7 @@ def lin_pred_var(
         **kwargs: Additional arguments (ignored).
 
     Returns:
-        tuple: Updated `results` and `aux`.
+        Updated `results` and `aux`.
     """
     cov = results.get("pred_cov", aux["cov_mv"])
 
@@ -605,7 +605,7 @@ def lin_pred_std(
         **kwargs: Additional arguments.
 
     Returns:
-        tuple: Updated `results` and `aux`.
+        Updated `results` and `aux`.
     """
     if "pred_var" not in results:  # Fall back to `lin_pred_var`
         results, aux = lin_pred_var(results, aux, **kwargs)
@@ -631,7 +631,7 @@ def lin_pred_cov(
         **kwargs: Additional arguments (ignored).
 
     Returns:
-        tuple: Updated `results` and `aux`.
+        Updated `results` and `aux`.
     """
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
@@ -662,7 +662,7 @@ def lin_samples(
             - `lin_samples_batch_size`: Batch size for computing samples.
 
     Returns:
-        tuple: Updated `results` and `aux`.
+        Updated `results` and `aux`.
     """
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
@@ -809,7 +809,7 @@ def set_nonlin_pushforward(
     pushforward_fns: list = DEFAULT_NONLIN_FINALIZE_FNS,
     num_samples: int = 100,
     **kwargs: Kwargs,
-):
+) -> Callable:
     """Construct a Monte Carlo pushforward predictive function.
 
     This function creates a probabilistic predictive callable that computes
