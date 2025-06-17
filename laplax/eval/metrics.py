@@ -1,17 +1,31 @@
-"""Regression and classification metrics for evaluating uncertainty quantification.
+r"""Regression and Classification Metrics for Uncertainty Quantification.
 
-This module provides a comprehensive suite of classification and regression metrics for
-evaluating probabilistic models.
+This module provides a comprehensive suite of classification and regression metrics for evaluating probabilistic models.
 
-Key features include:
-- **Classification Metrics**: Accuracy, top-k accuracy, cross-entropy, and
-    multiclass Brier score.
-- **Regression Metrics**: Root mean squared error (RMSE), q-value, and negative
-    log-likelihood (NLL) for Gaussian distributions.
-- **Bin Metrics**: Confidence and correctness metrics binned by confidence intervals.
+## Key Features
 
-The module leverages JAX for efficient numerical computation and supports flexible
-evaluation for diverse model outputs.
+### Classification Metrics
+
+- **Accuracy**
+- **Top-k Accuracy**
+- **Cross-Entropy**
+- **Multiclass Brier Score**
+- **Expected Calibration Error (ECE)**
+- **Maximum Calibration Error (MCE)**
+
+### Regression Metrics
+
+- **Root Mean Squared Error (RMSE)**
+- **Chi-squared**
+- **Negative Log-Likelihood (NLL)** for Gaussian distributions
+
+### Bin Metrics
+
+- **Confidence and Correctness Metrics** binned by confidence intervals
+
+---
+
+The module leverages **JAX** for efficient numerical computation and supports flexible evaluation for diverse model outputs.
 """
 
 import math
@@ -205,7 +219,6 @@ def calibration_error(
 
     Returns:
         The ECE/MCE.
-
     """
     del kwargs
     bin_proportions, bin_confidences, bin_accuracies = calculate_bin_metrics(

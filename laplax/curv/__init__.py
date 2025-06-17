@@ -1,4 +1,4 @@
-"""This module contains curvature-matrix-vector products and estimators."""
+r"""This module contains the curvature-vector products and covariance approximations."""
 
 from .cov import (
     create_posterior_fn,
