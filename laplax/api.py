@@ -643,13 +643,14 @@ def laplace(
 
     Returns:
         A tuple containing:
-        - posterior_fn : Callable
-            Function that generates samples from the posterior given prior arguments.
-        - curv_estimate : PyTree
-            The estimated curvature in the chosen representation.
+
+            - posterior_fn: Function that generates samples from the posterior given
+                prior arguments.
+            - curv_estimate: The estimated curvature in the chosen representation.
 
     Notes:
         The function supports different curvature approximations:
+
         - Full GGN: Computes the full Generalized Gauss-Newton matrix
         - Diagonal GGN: Approximates the GGN with its diagonal
         - Low-rank GGN: Uses Lanczos or LOBPCG for efficient approximation
@@ -756,12 +757,14 @@ def calibration(
 
     Notes:
         Supported calibration objectives:
+
         - NLL: Negative log-likelihood
         - CHI_SQUARED: Chi-squared statistic
         - MARGINAL_LOG_LIKELIHOOD: Marginal log-likelihood
         - ECE: Expected Calibration Error
 
         Supported calibration methods:
+
         - GRID_SEARCH: Grid search over prior precision
     """
     # If task is classification, then no NLL objective
@@ -894,6 +897,7 @@ def evaluation(
 
     Notes:
         Supported metrics:
+
         - REGRESSION: Default metrics for regression tasks
         - CLASSIFICATION: Default metrics for classification tasks
         - Custom metrics can be provided as a list of callables
