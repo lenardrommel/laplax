@@ -1,6 +1,7 @@
 r"""Regression and Classification Metrics for Uncertainty Quantification.
 
-This module provides a comprehensive suite of classification and regression metrics for evaluating probabilistic models.
+This module provides a comprehensive suite of classification and regression metrics for
+evaluating probabilistic models.
 
 ## Key Features
 
@@ -25,7 +26,8 @@ This module provides a comprehensive suite of classification and regression metr
 
 ---
 
-The module leverages **JAX** for efficient numerical computation and supports flexible evaluation for diverse model outputs.
+The module leverages **JAX** for efficient numerical computation and supports flexible
+evaluation for diverse model outputs.
 """
 
 import math

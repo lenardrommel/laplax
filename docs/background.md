@@ -2,7 +2,7 @@
 
 ## Probabilistic perspective on supervised learning
 
-Given labelled training data $\mathcal{D} = \{(x_n, y_n)\}_{n=1}^N$, loss function $\ell$ and regularizer $\Omega$, the parameters $\theta$ of a neural network $f_\theta$ are typically obtained by minimising the regularised empirical risk $\mathcal{L}(\mathcal{D}, f_\theta)$. 
+Given labelled training data $\mathcal{D} = \{(x_n, y_n)\}_{n=1}^N$, loss function $\ell$ and regularizer $\Omega$, the parameters $\theta$ of a neural network $f_\theta$ are typically obtained by minimising the regularised empirical risk $\mathcal{L}(\mathcal{D}, f_\theta)$.
 From a probabilistic perspective, this procedure corresponds to finding a maximum a posteriori (MAP) estimate of the weights under a likelihood and prior.
 Formally, both views lead to the following optimisation problem:
 
@@ -20,7 +20,7 @@ $$
 p(\theta \vert \mathcal{D}) = \frac{ p(\mathcal{D} \vert \theta)\, p(\theta)}{\int p(\mathcal{D} \vert \theta)\,p(\theta)\,d\theta}\; .
 $$
 
-However, for deep neural networks, the integral in the denominator is usually intractable. The Laplace approximation circumvents this by utilising a Gaussian distribution to approximate the posterior. 
+However, for deep neural networks, the integral in the denominator is usually intractable. The Laplace approximation circumvents this by utilising a Gaussian distribution to approximate the posterior.
 To this end, we apply a second-order Taylor approximation to the negative log-posterior loss $\mathcal{L}$ around the MAP estimate $\theta^*$, which yields
 
 $$
@@ -58,5 +58,5 @@ $$
 \log p(\mathcal{D} \vert \mathcal{M}) \approx \log p(\mathcal{D}, \theta^* \vert \mathcal{M}) - \frac{1}{2} \log \left\vert \frac{1}{2\pi} \mathbf{H}(\mathcal{D}, f_{\theta^*}) \right\vert.
 $$
 
-This term is often used for the selection of the model hyperparameters $\mathcal{M}$ via maximization 
+This term is often used for the selection of the model hyperparameters $\mathcal{M}$ via maximization
 [@immer_scalable_2021], since it represents an analytic trade-off between **complexity** and **expressivity** -- the so-called Occam's razor [@rasmussen2000occam]. Tractability and scalability depend on the structure of the estimated $\mathbf{H}(\mathcal{D}, f_{\theta^*})$, but compared to the predictive uncertainty above (cf. [Weight posterior](reference/curv.md)), no inversion is needed.

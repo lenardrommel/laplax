@@ -4,12 +4,12 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-import wandb  # Add wandb import
 from flax import nnx
 from helper import DataLoader, get_sinusoid_example
 from loguru import logger
 from plotting import plot_regression_with_uncertainty
 
+import wandb  # Add wandb import
 from laplax.api import (
     DEFAULT_REGRESSION_METRICS,
     CalibrationObjective,

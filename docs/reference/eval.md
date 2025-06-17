@@ -6,19 +6,19 @@ The evaluation module provides functionality for propagating weight-space uncert
 
 Currently supported pushforward methods are:
 
-- **Pushforward.LINEAR:**  
+- **Pushforward.LINEAR:**
   Propagates the weight-space covariance $\mathbf{H}^{-1}$ through the network using Jacobian-vector products $\mathcal{J}_{\theta}(f(x_n; \theta))$ to obtain a Gaussian predictive distribution in output space:
-  
+
     $$
     \mathcal{N}\bigg(
-        f(x_n; \theta^*),\ 
+        f(x_n; \theta^*),\
         \mathcal{J}_\theta(f(x_n; \theta^*))\ \mathbf{H}^{-1}\ \mathcal{J}_\theta(f(x_n; \theta^*))^\top
     \bigg)
     $$
 
-- **Pushforward.NONLINEAR:**  
+- **Pushforward.NONLINEAR:**
   Draws samples from the weight-space posterior and passes them through the neural network to form an ensemble of predictions in output space. Empirical statistics (mean, variance, etc.) are then computed from this ensemble:
-  
+
   $$
   f(x_n, \theta_s), \quad \theta_s \sim \mathcal{N}(\theta^*,\ \mathbf{H}^{-1})
   $$
@@ -40,15 +40,15 @@ For the classification case, the following predictives for pushing the uncertain
     \end{equation}
 
 - `MEAN_FIELD_0_PREDICTIVE`:  A zeroth‐order mean‐field (probit‐style) approximation.
-    
+
     $$
     \mathbb{E}[\operatorname{softmax}_i(\mathbf{z})]\approx\operatorname{softmax}_i\left(\frac{\mathbf{\mu}}{\sqrt{1+\lambda_0\,\operatorname{diag}(\mathbf{\Sigma}})}\right)
     $$
-    
+
     which rescales each mean logit by its variance.
 
 - `MEAN_FIELD_1_PREDICTIVE`: A first‐order pairwise approximation: for each $i$ we approximate $\Pr(z_i>z_j)$ under the bivariate Gaussian of $(z_i,z_j)$ and then normalize:
-    
+
     $$
     \mathbb{E}[\operatorname{softmax}_i(\mathbf{z})]\approx \frac{1}{1 + \sum_{i \neq k} \exp \left( -\frac{(\mu_k - \mu_i)}{\sqrt{1 + \lambda_0 (\Sigma_{kk} + \Sigma_{ii})}} \right)}.
     $$

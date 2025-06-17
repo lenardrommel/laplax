@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+from tueplots import bundles
 
 
 def plot_regression_with_uncertainty(
@@ -444,26 +445,23 @@ def print_results(results_dict, title=None):
                 print(f"{key!s:<{max_key_length}} : {value}")  # noqa: T201
 
 
-def plot_figure_1(model_fn, params, curv, save_fig=True):
-    """
-    Plot the loss landscape and Laplace approximation ellipses.
+def plot_figure_1(params, curv, *, save_fig=True):
+    """Plot the loss landscape and Laplace approximation ellipses.
 
     Args:
-        model_fn: The model function
         params: Dictionary of model parameters
         curv: Scale matrix from the posterior (R_laplax)
         save_fig: Whether to save the figure (default: True)
-    """
-    import matplotlib.pyplot as plt
-    import jax.numpy as jnp
-    from tueplots import bundles
 
+    Returns:
+        fig: The matplotlib figure object
+        ax: The matplotlib axes object
+    """
     # Select a style bundle
     style = bundles.icml2024(usetex=True)
 
     # Apply the style to matplotlib
     plt.rcParams.update(style)
-
 
     # Get the optimal parameters
     w1_opt_laplax = params["theta1"]
@@ -471,7 +469,7 @@ def plot_figure_1(model_fn, params, curv, save_fig=True):
 
     # Create parameter grid for visualization
     W1, W2 = jnp.meshgrid(jnp.linspace(-3, 3, 1000), jnp.linspace(-3, 3, 1000))
-    
+
     # Compute loss landscape
     b = -1
     eps = 0.2
@@ -481,26 +479,30 @@ def plot_figure_1(model_fn, params, curv, save_fig=True):
     f1 = jax.nn.relu(W1.ravel() * x1 + b) * W2.ravel()
     f2 = jax.nn.relu(W1.ravel() * x2 + b) * W2.ravel()
 
-    loss = 0.5 * ((f1 - y1) ** 2 + (f2 - y2) ** 2).reshape(W1.shape) + 0.5 * eps * (W1**2 + W2**2)
+    loss = 0.5 * ((f1 - y1) ** 2 + (f2 - y2) ** 2).reshape(W1.shape) + 0.5 * eps * (
+        W1**2 + W2**2
+    )
 
     # Create figure
     fig, ax = plt.subplots()
 
     # Plot contours of the loss landscape
     levels = [0.95, 1.0, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 20]
-    CS = plt.contour(W1, W2, loss, levels=levels, colors="k", alpha=0.5) #, fontsize=3)  # Added smaller fontsize
+    CS = plt.contour(
+        W1, W2, loss, levels=levels, colors="k", alpha=0.5
+    )  # , fontsize=3)  # Added smaller fontsize
 
     # Add contour labels
     def fmt(x):
         s = f"{x:.1f}"
         if s.endswith("0"):
             s = f"{x:.0f}"
-        return rf"{s}" if plt.rcParams["text.usetex"] else f"{s}"
+        return f"{s}"
 
     ax.clabel(CS, CS.levels, fmt=fmt, fontsize=6)
 
     # Plot the optimal point
-    ax.plot(w1_opt_laplax, w2_opt_laplax, "ko") #, label="Optimal Parameters")
+    ax.plot(w1_opt_laplax, w2_opt_laplax, "ko")  # , label="Optimal Parameters")
 
     # Plot the ellipse representing the curvature
     ellipse = jnp.linspace(-jnp.pi, jnp.pi, 100)
@@ -510,17 +512,29 @@ def plot_figure_1(model_fn, params, curv, save_fig=True):
     xy = curv @ xy
 
     # Plot 1-sigma and 2-sigma ellipses
-    ax.plot(w1_opt_laplax + xy[0, :], w2_opt_laplax + xy[1, :], linestyle="solid", color="#00695b", lw=2) #, label="1-sigma (LapLaX)")
-    ax.plot(w1_opt_laplax + 2 * xy[0, :], w2_opt_laplax + 2 * xy[1, :], linestyle="--", color="#00695b", lw=2) #, label="2-sigma (LapLaX)")
+    ax.plot(
+        w1_opt_laplax + xy[0, :],
+        w2_opt_laplax + xy[1, :],
+        linestyle="solid",
+        color="#00695b",
+        lw=2,
+    )  # , label="1-sigma (LapLaX)")
+    ax.plot(
+        w1_opt_laplax + 2 * xy[0, :],
+        w2_opt_laplax + 2 * xy[1, :],
+        linestyle="--",
+        color="#00695b",
+        lw=2,
+    )  # , label="2-sigma (LapLaX)")
 
     # Set labels and limits
-    ax.set_xlabel(r"$\theta_1$")
-    ax.set_ylabel(r"$\theta_2$")
+    ax.set_xlabel(r"$\\theta_1$")
+    ax.set_ylabel(r"$\\theta_2$")
     ax.set_xlim(-3, 3)
     ax.set_ylim(-3, 3)
     ax.legend()
-    
+
     if save_fig:
         plt.savefig("laplax_figure_1.png", bbox_inches="tight")
-    
+
     return fig, ax

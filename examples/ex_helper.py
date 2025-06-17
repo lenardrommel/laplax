@@ -280,8 +280,15 @@ def train_map_model(
         loss_type: Type of loss function ("mse" or "cross_entropy")
         test_loader: Optional DataLoader for test data
         warmup_steps: Number of warmup steps for learning rate schedule
-        decay_steps: Number of decay steps for learning rate schedule (defaults to total steps)
+        decay_steps: Number of decay steps for learning rate schedule
+            (defaults to total steps)
         end_lr: Final learning rate after decay (defaults to 0.1 * initial lr)
+
+    Returns:
+        The trained model.
+
+    Raises:
+        ValueError: If an unknown loss type is provided.
     """
     # Calculate total steps for learning rate schedule
     total_steps = n_epochs * len(train_loader)

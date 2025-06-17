@@ -14,32 +14,30 @@ The `laplax` package contains a [high-level API](./reference/main_api.md), that 
 
 ### Model function signature
 
-`laplax` operates by taking an arbitrary `model_fn` with (key-word) signature `model_fn(input, params)`. This allows for a wide range of JAX-based neural network libraries to be used. For `flax.nnx` and `equinox`, this would look like:
+`laplax` operates by taking an arbitrary `model_fn` with (key-word) signature `model_fn(input, params)`. This allows for a wide range of JAX-based neural network libraries to be used. For [`flax.nnx`](https://flax.readthedocs.io/en/latest/nnx_basics.html) and [`equinox`](https://equinox.readthedocs.io/en/latest/index.html), this would look like:
 
-**[flax.nnx](https://flax.readthedocs.io/en/latest/nnx_basics.html)**
 
-```python
-from flax import nnx
+=== "flax.nnx"
+    ```python
+    from flax import nnx
 
-model = ...
+    model = ...
 
-graph_def, params = nnx.split(model)
+    graph_def, params = nnx.split(model)
 
-def model_fn(input, params):
-    return nnx.call((graph_def, params))(input)[0]
-```
+    def model_fn(input, params):
+        return nnx.call((graph_def, params))(input)[0]
+    ```
 
-**[equinox](https://equinox.readthedocs.io/en/latest/index.html)**
+=== "equinox"
+    ```python
+    from equinox import filter_jit
 
-```python
-from equinox import filter_jit
+    model = ...
 
-model = ...
+    params, static = eqx.partition(model, eqx.is_array)
 
-params, static = eqx.partition(model, eqx.is_array)
-
-def model_fn(input, params):
-    model = eqx.combine(params, static)
-    return model(input)
-```
-
+    def model_fn(input, params):
+        model = eqx.combine(params, static)
+        return model(input)
+    ```

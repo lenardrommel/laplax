@@ -20,19 +20,19 @@ Currently supported curvatures-vector products are:
 For both curvature-vector products, the following methods are supported for approximating the curvature and transforming it into a weight space covariance matrix-vector product:
 
 - `CurvApprox.FULL` densifies the curvature-vector product into a full matrix. The posterior function is then given by
-   
+
     $$
     (\tau, \mathcal{C}) \mapsto \left[ v \mapsto \left(\textbf{Curv}(\mathcal{C}) + \tau I \right)^{-1} v \right].
     $$
 
 - `CurvApprox.DIAGONAL` approximates the curvature using only its diagonal, obtained by evaluating the curvature-vector product with standard basis vectors from both sides. This leads to:
-    
+
     $$
     (\tau, \mathcal{C}) \mapsto \left[ v \mapsto \left(\text{diag}(\textbf{Curv}(\mathcal{C}) + \tau I \right)^{-1}v  \right].
     $$
 
 - **Low-Rank** employs either a custom Lanczos routine (`CurvApprox.LANCZOS`) or a variant of the LOBPCG algorithm (`CurvApprox.LOBPCG`). These methods approximate the top eigenvectors $U$ and eigenvalues $S$ of the curvature via matrix-vector products. The posterior is then given by a low-rank plus scaled diagonal:
-    
+
     $$
     (\tau, \mathcal{C}) \mapsto \left[ v \mapsto \left(\big[U S U^\top\big](\mathcal{C}) + \tau I \right)^{-1} v \right].
     $$

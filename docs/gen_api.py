@@ -13,7 +13,7 @@ def get_submodules(pkg, ref_dir):
         return []
     pkg_path = spec.submodule_search_locations[0]
     result = []
-    for _, modname, ispkg in pkgutil.iter_modules([pkg_path]):
+    for _, modname, _ in pkgutil.iter_modules([pkg_path]):
         if modname.startswith("__init__"):
             continue
         mod_full = f"{pkg}.{modname}"
@@ -39,4 +39,4 @@ for mod, md_path in SUBMODULES:
     with gen_open(md_path, "w") as f:
         f.write(f"# {mod}\n")
         f.write(f"::: {mod}\n")
-        f.write(f"\n")
+        f.write("\n")

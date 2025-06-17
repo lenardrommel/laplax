@@ -56,8 +56,8 @@ We provide a high-level interface for performing Laplace approximation on a mode
 
 Both APIs and all available options are documented in the [Manual](api.md). For each submodule, we provide a short overview as well as a comprehensive list of all available functions.
 
-For a general starting point for details on Laplace approximation and our notations, we refer to the [Background](background.md) section. 
-Most of the documentation follows our recent workshop paper. 
+For a general starting point for details on Laplace approximation and our notations, we refer to the [Background](background.md) section.
+Most of the documentation follows our recent workshop paper.
 
 
 ## Citation
@@ -74,5 +74,3 @@ If you use `laplax` in your research, please cite for now:
     howpublished = {\url{https://github.com/laplax-org/laplax}},
 }
 ```
-
-

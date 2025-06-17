@@ -84,7 +84,7 @@ plugins:
             extra:
               heading_level: 3
               filters: ["!^_"]
-              docstring_section_style: "list"  
+              docstring_section_style: "list"
   - mknotebooks:
       execute: false
       write_markdown: true
@@ -104,12 +104,17 @@ markdown_extensions:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
+  - pymdownx.tabbed:
+      alternate_style: true
+      # slugify: !!python/object/apply:pymdownx.slugs.slugify
+      #   kwds:
+      #     case: lower
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
   - pymdownx.keys
   - pymdownx.details
-  
+
 extra_javascript:
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
 
