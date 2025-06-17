@@ -488,7 +488,7 @@ def _build_calibration_objective(
 
 
 def _resolve_metrics(
-    metrics: DefaultMetrics | list[Callable] | str,
+    metrics: DefaultMetrics | list[Callable] | Callable | str,
 ) -> list[Callable]:
     """Resolve metrics to list of callable functions.
 
@@ -503,6 +503,9 @@ def _resolve_metrics(
     """
     if isinstance(metrics, str):
         metrics = _convert_to_enum(DefaultMetrics, metrics)
+
+    if isinstance(metrics, Callable):
+        return [metrics]
 
     if metrics == DefaultMetrics.REGRESSION:
         return DEFAULT_REGRESSION_METRICS
@@ -618,6 +621,7 @@ def laplace(
     num_curv_samples: Int = 1,
     num_total_samples: Int = 1,
     vmap_over_data: bool = True,
+    curv_mv_jit: bool = False,
     **curv_kwargs: Kwargs,
 ) -> tuple[Callable[[PriorArguments, Float], Posterior], PyTree]:
     """Estimate curvature & obtain a Gaussian weight-space posterior.
@@ -638,6 +642,7 @@ def laplace(
             default 1.
         num_total_samples: Total number of samples in the dataset, by default 1.
         vmap_over_data: Whether the model expects a leading batch axis, by default True.
+        curv_mv_jit: Whether to jit the curvature matrix-vector product, by default False.
         **curv_kwargs: Additional arguments forwarded to the curvature estimation
             function.
 
@@ -676,6 +681,8 @@ def laplace(
         factor=factor,
         vmap_over_data=vmap_over_data,
     )
+    if curv_mv_jit:
+        ggn_mv = jax.jit(ggn_mv)
 
     # Curvature estimation
     curv_estimate = estimate_curvature(
@@ -715,6 +722,7 @@ def calibration(
     calibration_objective: CalibrationObjective | str = CalibrationObjective.NLL,
     calibration_method: CalibrationMethod | str = CalibrationMethod.GRID_SEARCH,
     vmap_over_data: bool = True,
+    objective_jit: bool = True,
     **calibration_kwargs: Kwargs,
 ) -> tuple[PriorArguments, Callable[[InputArray], dict[str, Array]]]:
     """Calibrate hyperparameters of the Laplace approximation.
@@ -743,6 +751,7 @@ def calibration(
         calibration_method: Method to use for calibration, by default
             CalibrationMethod.GRID_SEARCH.
         vmap_over_data: Whether the model expects a leading batch axis, by default True.
+        objective_jit: Whether to jit the calibration objective, by default True.
         **calibration_kwargs: Additional arguments for the calibration method.
 
     Returns:
@@ -826,6 +835,9 @@ def calibration(
         def objective(x):
             return objective_fn(x, data)
 
+        if objective_jit:
+            objective = jax.jit(objective)
+
         prior_prec = calibration_options[calibration_method](
             objective=objective,
             log_prior_prec_min=log_prior_prec_min,
@@ -837,6 +849,10 @@ def calibration(
 
     elif calibration_method in calibration_options:
         data = _validate_and_get_transform(data)(data)
+
+        if objective_jit:
+            objective_fn = jax.jit(objective_fn)
+
         prior_args = calibration_options[calibration_method](
             objective=objective_fn,
             data=data,
@@ -857,13 +873,14 @@ def evaluation(
     arguments: PriorArguments,
     data: Data | Iterator[Data],
     *,
-    metrics: DefaultMetrics | list[Callable] | str = DefaultMetrics.REGRESSION,
+    metrics: DefaultMetrics | list[Callable] | Callable | str = DefaultMetrics.REGRESSION,
     predictive_type: Predictive | str = Predictive.NONE,
     pushforward_type: Pushforward | str = Pushforward.LINEAR,
     pushforward_fns: list[Callable] | None = None,
     reduce: Callable = identity,
     sample_key: KeyType = DEFAULT_KEY,
     num_samples: int = 10,
+    predictive_jit: bool = True,
 ) -> tuple[dict[str, Array], Callable[[InputArray], dict[str, Array]]]:
     """Evaluate the calibrated Laplace approximation.
 
@@ -887,6 +904,7 @@ def evaluation(
         reduce: Function to reduce metrics across batches, by default identity.
         sample_key: Random key for sampling, by default jax.random.key(0).
         num_samples: Number of samples for Monte Carlo predictions, by default 10.
+        predictive_jit: Whether to jit the predictive distribution, by default True.
 
     Returns:
         A tuple containing:
@@ -923,6 +941,9 @@ def evaluation(
         key=sample_key,
         num_samples=num_samples,
     )
+
+    if predictive_jit:
+        prob_predictive = jax.jit(prob_predictive)
 
     # Evaluate
     is_data_loader = _is_data_loader(data)
