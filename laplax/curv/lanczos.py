@@ -26,10 +26,10 @@ def lanczos_iterations(
         full_reorthogonalize: If True, reorthogonalize at every step.
         dtype: Data type for the Lanczos scalars/vectors.
         mv_jittable: If True, uses jax.lax.scan for iterations; if False, uses a plain
-          Python for loop. Note that jax.lax.scan can cause problems if, under the hood,
-          the matvec generates a large computational graph (which could be the case if,
-          for example, it's defined as a sum over per-datum curvatures using a
-          dataloader.) In such cases `mv_jittable` should be set to False.
+            Python for loop. Note that jax.lax.scan can cause problems if, under the
+            hood, the matvec generates a large computational graph (which could be the
+            case if, for example, it's defined as a sum over per-datum curvatures using
+            a dataloader.) In such cases `mv_jittable` should be set to False.
 
     Returns:
         alpha: 1D array of Lanczos scalars (diagonal of T).
@@ -127,7 +127,7 @@ def compute_eigendecomposition(
 
     Returns:
         If compute_vectors is True: (eigvals, ritz_vectors),
-        else: eigvals.
+          else: eigvals.
     """
     T = construct_tridiagonal(alpha, beta)
     if compute_vectors:
@@ -175,6 +175,7 @@ def lanczos_lowrank(
 
     Returns:
         LowRankTerms: A dataclass containing:
+
             - U: Eigenvectors as a matrix of shape (size, rank)
             - S: Eigenvalues as an array of length rank
             - scalar: Scalar factor, initialized to 0.0

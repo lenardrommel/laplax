@@ -375,8 +375,10 @@ def low_rank_square(state: LowRankTerms) -> LowRankTerms:
     This returns the LowRankTerms which correspond to the squared low rank
     approximation.
 
-    $$ (U S U^{\top} + scalar I) ** 2
-    = scalar**2 + U ((S + scalar) ** 2 - scalar**2) U^{\top} $$
+    $$
+    (U S U^{\top} + scalar I) ** 2
+    = scalar**2 + U ((S + scalar) ** 2 - scalar**2) U^{\top}
+    $$
 
     Args:
         state: Low-rank curvature approximation.
@@ -619,6 +621,7 @@ def set_posterior_fn(
 
         Returns:
             PosteriorState: Dictionary containing:
+
                 - 'state': Updated state of the posterior.
                 - 'cov_mv': Function to compute covariance matrix-vector product.
                 - 'scale_mv': Function to compute scale matrix-vector product.
@@ -657,10 +660,11 @@ def create_posterior_fn(
     This sets up the posterior function which can then be initiated using
     prior_arguments by computing a specified curvature approximation and encoding the
     sequential computational order of:
-        1) CURVATURE_PRIOR_METHODS,
-        2) CURVATURE_TO_POSTERIOR_STATE,
-        3) CURVATURE_STATE_TO_SCALE, and
-        4) CURVATURE_STATE_TO_COV. All methods are selected from the corresponding
+
+        1. CURVATURE_PRIOR_METHODS,
+        2. CURVATURE_TO_POSTERIOR_STATE,
+        3. CURVATURE_STATE_TO_SCALE, and
+        4. CURVATURE_STATE_TO_COV. All methods are selected from the corresponding
     dictionary by the curv_type argument. New methods can be registered using the
     register_curvature_method.
 

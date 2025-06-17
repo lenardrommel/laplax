@@ -96,6 +96,7 @@ def lobpcg_standard(
 
     Returns:
         Tuple containing:
+
             - Eigenvalues: Array of shape (k,)
             - Eigenvectors: Array of shape (n, k)
             - Iterations: Number of iterations performed
@@ -312,15 +313,16 @@ def lobpcg_lowrank(
 
     Returns:
         LowRankTerms: A dataclass containing:
+
             - `U`: Eigenvectors as a matrix of shape `(size, rank)`.
             - `S`: Eigenvalues as an array of length `rank`.
             - `scalar`: Scalar factor, initialized to 0.0.
 
     Notes:
         - If the size of the matrix is small relative to `maxiter`, the number of
-          iterations is reduced to avoid over-computation.
+            iterations is reduced to avoid over-computation.
         - Mixed precision can significantly reduce memory usage, especially for large
-          matrices.
+            matrices.
 
     Example:
         ```python

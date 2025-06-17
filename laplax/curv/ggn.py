@@ -120,7 +120,8 @@ def create_loss_hessian_mv(
 
     Args:
         loss_fn: Loss function to compute the Hessian-vector product for. Supported
-        options are:
+            options are:
+
             - "cross_entropy" for cross-entropy loss.
             - "mse" for mean squared error loss.
             - A custom callable loss function that takes predictions and targets.
@@ -263,8 +264,6 @@ def create_ggn_mv(
         params: Model parameters.
         data: A batch of input and target data.
         loss_fn: Loss function to use for the GGN computation.
-        # loss_scaling_factor: Factor by which the user-provided loss function is
-        #     scaled. Defaults to 1.0.
         num_curv_samples: Number of samples used to calculate the GGN. Defaults to None,
             in which case it is inferred from `data` as its batch size. Note that for
             losses that contain sums even for a single input (e.g., pixel-wise semantic

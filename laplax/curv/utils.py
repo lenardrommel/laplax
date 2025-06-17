@@ -134,6 +134,7 @@ def concatenate_model_and_loss_fn(
     Args:
         model_fn: The model function to evaluate.
         loss_fn: The loss function to apply. Supported options are:
+
             - `LossFn.MSE` for mean squared error.
             - `LossFn.CROSSENTROPY` for cross-entropy loss.
             - A custom callable loss function.

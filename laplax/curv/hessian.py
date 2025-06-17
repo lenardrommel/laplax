@@ -61,6 +61,7 @@ def create_hessian_mv_without_data(
         model_fn: The model function to evaluate.
         params: The parameters of the model.
         loss_fn: The loss function to apply. Supported options are:
+
             - `LossFn.MSE` for mean squared error.
             - `LossFn.CROSSENTROPY` for cross-entropy loss.
             - A custom callable loss function.
@@ -113,6 +114,7 @@ def create_hessian_mv(
         params: The parameters of the model.
         data: A batch of input and target data.
         loss_fn: The loss function to apply. Supported options are:
+
             - `LossFn.MSE` for mean squared error.
             - `LossFn.CROSSENTROPY` for cross-entropy loss.
             - A custom callable loss function.
