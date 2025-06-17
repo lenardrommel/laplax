@@ -11,8 +11,8 @@ from laplax.curv.cov import (
     CURVATURE_STATE_TO_COV,
     CURVATURE_STATE_TO_SCALE,
     CURVATURE_TO_POSTERIOR_STATE,
-    full_prec_to_scale,
 )
+from laplax.curv.full import full_prec_to_scale
 
 from .cases.covariance import case_posterior_covariance
 
