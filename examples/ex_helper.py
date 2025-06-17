@@ -29,7 +29,11 @@ def save_with_pickle(obj, path):
 
 
 def load_with_pickle(path):
-    """Load object from pickle file."""
+    """Load object from pickle file.
+
+    Returns:
+        The stored object.
+    """
     path = Path(path)
     with path.open("rb") as f:
         return pickle.load(f)  # noqa: S301
@@ -39,7 +43,11 @@ def save_model_checkpoint(
     model,
     checkpoint_path: str | Path = "./tests/test-checkpoints",
 ):
-    """Save model checkpoint using Orbax."""
+    """Save model checkpoint using Orbax.
+
+    Returns:
+        The checkpoint directory.
+    """
     ckpt_dir = Path(checkpoint_path)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
@@ -59,7 +67,11 @@ def load_model_checkpoint(
     model_kwargs,
     checkpoint_path,
 ):
-    """Load model checkpoint using Orbax."""
+    """Load model checkpoint using Orbax.
+
+    Returns:
+        A triple of the model, the graph def, and the restored state.
+    """
     model = model_class(**model_kwargs, rngs=nnx.Rngs(0))
     graph_def, abstract_state = nnx.split(model)
 
@@ -88,14 +100,14 @@ class CSVLogger:
         output_dir="results",
         file_name="regression_experiments.csv",
         *,
-        force: bool = True
+        force: bool = True,
     ):
         """A CSV logger for experiments.
 
         Args:
             output_dir (str or Path): Directory in which to store the CSV.
             file_name (str): Name of the CSV file.
-            force (bool): If True, delete any existing CSV at initialization. 
+            force (bool): If True, delete any existing CSV at initialization.
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -109,11 +121,14 @@ class CSVLogger:
         # Track whether to write headers on next write
         self._write_header = not self.csv_path.exists()
 
-    def log(self, results: dict, experiment_name: str, *, log_args: dict = None) -> Path:
+    def log(
+        self, results: dict, experiment_name: str, *, log_args: dict | None = None
+    ) -> Path:
         """Append a single experiment's results to the CSV.
 
         Args:
-            results (dict): A dict that may contain an "evaluation" sub-dict and optional "nll" field.
+            results (dict): A dict that may contain an "evaluation" sub-dict and
+                optional "nll" field.
             experiment_name (str): A unique name or identifier for this run.
             log_args (dict, optional): Any additional metadata to record.
 
@@ -127,11 +142,13 @@ class CSVLogger:
             **results,
             **log_args,
             "experiment_name": experiment_name,
-            "timestamp": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": datetime.datetime.now(datetime.UTC).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
         }
 
-        df = pd.DataFrame([row])
-        df.to_csv(
+        log_df = pd.DataFrame([row])
+        log_df.to_csv(
             self.csv_path,
             mode="a",
             header=self._write_header,
@@ -151,10 +168,15 @@ class CSVLogger:
 
 
 def generate_experiment_name(**kwargs):
-    """Generate a descriptive name for the experiment."""
+    """Generate a descriptive name for the experiment.
+
+    Returns:
+        The experiment name.
+    """
     timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S")
     name_parts = [f"{k}={v}" for k, v in kwargs.items()]
     return f"{timestamp}_{'_'.join(name_parts)}"
+
 
 # ---------------------------------------------------------------------
 # Fix randomness
@@ -204,7 +226,11 @@ class LimitedLoader:
 
 
 def split_model(model, *, last_layer_only=False):
-    """Split model into graph and params."""
+    """Split model into graph and params.
+
+    Returns:
+        A tuple of the model function and the parameters PyTree.
+    """
     if last_layer_only:
         graph_def, relevant_params, remaining_params = nnx.split(
             model, lambda n, _: "final_layer" in n, ...
@@ -365,7 +391,6 @@ def optimize_prior_prec_gradient(
     *,
     num_epochs: int = 100,
     learning_rate: float = 1,
-    warmup_steps: int = 10,
     **kwargs,
 ) -> Float:
     """Optimize prior precision using gradient descent.
@@ -378,11 +403,13 @@ def optimize_prior_prec_gradient(
         init_sigma_noise: Initial noise standard deviation value (default: None)
         num_epochs: Number of optimization epochs (default: 100)
         learning_rate: Initial learning rate for the optimizer (default: 1)
-        warmup_steps: Number of warmup steps for the learning rate schedule (default: 10)
         **kwargs: Additional arguments
 
     Returns:
         The optimized prior precision value.
+
+    Raises:
+        ValueError: When neither init_prior_prec nor init_sigma_noise is provided.
     """
     del kwargs
 
@@ -399,18 +426,6 @@ def optimize_prior_prec_gradient(
         params["sigma"] = jnp.array(jnp.log(init_sigma_noise))
 
     logger.info("Initial params: {}", params)
-
-    # Calculate total steps
-    # total_steps = num_epochs * len(data)
-    # Create learning rate schedule with warmup and cosine decay
-    # schedule = lambda *args, **kwargs: learning_rate
-    # schedule = optax.warmup_cosine_decay_schedule(
-    #     init_value=0.0,  # Start from 0 during warmup
-    #     peak_value=learning_rate,  # Peak at the specified learning rate
-    #     warmup_steps=warmup_steps,
-    #     decay_steps=total_steps - warmup_steps,
-    #     end_value=learning_rate * 0.1,  # End at 1% of peak learning rate
-    # )
 
     # Initialize optimizer with learning rate schedule
     logger.info("Initializing optimizer with cosine learning rate schedule")
@@ -436,9 +451,7 @@ def optimize_prior_prec_gradient(
     for epoch in range(1, num_epochs + 1):
         for dp in data:
             params, opt_state, loss = step(params, dp, opt_state)
-        logger.debug(
-            f"Epoch {epoch:02d}: loss={loss:.6f}, "
-        )
+        logger.debug(f"Epoch {epoch:02d}: loss={loss:.6f}, ")
 
     # Convert back from log-domain
     params = jax.tree.map(jnp.exp, params)

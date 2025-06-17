@@ -54,11 +54,14 @@ def get_matvec(A, *, layout=None, jit=True):
 
     Args:
         A: Either a jnp.ndarray or a callable performing the operation.
-        layout: Required if A is callable; ignored if A is an array.
+        layout: Required if `A` is callable; ignored if `A` is an array.
         jit: Whether to jit-compile the operator.
 
     Returns:
         A tuple (matvec, input_dim) where matvec is the callable operator.
+
+    Raises:
+        TypeError: When `A` is a callable but `layout` is not provided.
     """
     if isinstance(A, jnp.ndarray):
         size = A.shape[0]
@@ -139,6 +142,9 @@ def concatenate_model_and_loss_fn(
     Returns:
         A combined function that computes the loss for given inputs, targets, and
         parameters.
+
+    Raises:
+        ValueError: When the loss function is unknown.
     """
     if has_batch:
         model_fn = jax.vmap(model_fn, in_axes=(0, None))

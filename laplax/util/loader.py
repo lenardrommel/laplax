@@ -340,13 +340,21 @@ class DataLoaderMV:
 
 @to_dense.register
 def _(mv: DataLoaderMV, layout: Layout, **kwargs) -> Array:
-    """Apply to_dense to DataLoaderMV."""
+    """Apply to_dense to DataLoaderMV.
+
+    Returns:
+        The result of applying the function to the data loader.
+    """
     return mv.lower_func(to_dense, layout=layout, **kwargs)
 
 
 @diagonal.register
 def _(mv: DataLoaderMV, layout: Layout | None = None) -> Array:
-    """Apply diagonal to DataLoaderMV."""
+    """Apply diagonal to DataLoaderMV.
+
+    Returns:
+        The result of applying the function to the data loader.
+    """
     return mv.lower_func(diagonal, layout=layout)
 
 
@@ -357,7 +365,11 @@ def _(
     output_fn: Callable | None = None,
     argnums: int = 0,
 ) -> Callable:
-    """Apply wrap_function to DataLoaderMV."""
+    """Apply wrap_function to DataLoaderMV.
+
+    Returns:
+        A DataLoaderMV object representing the wrapped MV.
+    """
     # Create new transforms without overwriting existing ones
     new_input_transform = wrap_function(
         mv.input_transform, input_fn=input_fn, argnums=argnums

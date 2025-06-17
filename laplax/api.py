@@ -1,6 +1,6 @@
 """Functional API around Laplax's Laplace approximation stack.
 
-This module provides a high-level interface for Laplace approximation in neural networks,
+This module provides a high-level interface for Laplace approximation in neural nets,
 including curvature estimation, hyperparameter calibration, and predictive evaluation.
 
 Public entry points
@@ -10,10 +10,10 @@ Public entry points
 * :func:`evaluation`  - evaluate performance of calibrated model
 """
 
+from collections.abc import Iterator
 from enum import StrEnum
 from functools import partial
 from typing import cast
-from typing_extensions import Iterator
 
 import jax
 import jax.numpy as jnp
@@ -59,7 +59,11 @@ from laplax.eval.pushforward import (
     set_lin_pushforward,
     set_nonlin_pushforward,
 )
-from laplax.eval.utils import apply_fns, evaluate_metrics_on_dataset, evaluate_metrics_on_generator
+from laplax.eval.utils import (
+    apply_fns,
+    evaluate_metrics_on_dataset,
+    evaluate_metrics_on_generator,
+)
 from laplax.types import (
     Any,
     Array,
@@ -133,12 +137,11 @@ def _validate_and_get_transform(batch: Data | Any) -> Callable[[Any], Data]:
 
     Raises:
     ------
-    ValueError
-        If batch is not a tuple/dict or misses required keys.
+    ValueError: If batch is not a tuple/dict or misses required keys.
     """
     if isinstance(batch, (tuple, list)):
         if len(batch) != 2:
-            msg = "Tuple batches must be `(input, target)` – received len != 2."
+            msg = "Tuple batches must be `(input, target)` - received len != 2."
             raise ValueError(msg)
         return input_target_split
 
@@ -154,6 +157,7 @@ def _validate_and_get_transform(batch: Data | Any) -> Callable[[Any], Data]:
 
 def _is_data_loader(data: Data | tuple | Iterable):
     return isinstance(data, Iterable) and not isinstance(data, (tuple, dict, list))
+
 
 def _maybe_wrap_loader_or_batch(
     mv_fn: Callable[..., Params],
@@ -178,9 +182,11 @@ def _maybe_wrap_loader_or_batch(
     Callable[..., Params]
         Wrapped matrix-vector function.
     """
-    transform = _validate_and_get_transform(
-        next(iter(data)) if _is_data_loader(data) else data
-    ) if transform is None else transform
+    transform = (
+        _validate_and_get_transform(next(iter(data)) if _is_data_loader(data) else data)
+        if transform is None
+        else transform
+    )
 
     if isinstance(data, (tuple, dict)):
         logger.debug("Using *single batch* curvature evaluation.")
@@ -220,8 +226,7 @@ def _convert_to_enum(
 
     Raises:
     ------
-    ValueError
-        If conversion fails and str_default is False.
+    ValueError: If conversion fails and str_default is False.
     """
     if isinstance(value, enum_cls):
         return value
@@ -229,17 +234,19 @@ def _convert_to_enum(
         return enum_cls(value.lower())
     except ValueError:
         if str_default:
-            return cast('StrEnum', value)
+            return cast("StrEnum", value)
         raise
 
 
 def get_pred_act(
     results: dict[str, Array], aux: dict[str, Any], **kwargs
 ) -> tuple[dict[str, Array], dict[str, Any]]:
+    del kwargs
+
     if "mc_pred_act" in results:
         results["pred_act"] = results["mc_pred_act"]
     if "special_pred_act" in results:
-        results["pred_act"] = results["special_pred_act"]    
+        results["pred_act"] = results["special_pred_act"]
 
     return results, aux
 
@@ -268,8 +275,7 @@ def _setup_pushforward(
 
     Raises:
     ------
-    ValueError
-        If pushforward or predictive type is invalid.
+    ValueError: If pushforward or predictive type is invalid.
     """
     pushforward_type = _convert_to_enum(Pushforward, pushforward_type)
     predictive_type = _convert_to_enum(Predictive, predictive_type)
@@ -331,12 +337,9 @@ def register_calibration_method(method_name: str, method_fn: Callable) -> None:
     logger.info(f"Registered new calibration method: {method_name}")
 
 
-def _nll_gaussian_classification(
-        pred_mean: Array, 
-        pred_std: Array, 
-        target: Array, 
-        **kwargs
-    ) -> Float:
+def nll_gaussian_classification(
+    pred_mean: Array, pred_std: Array, target: Array, **kwargs
+) -> Float:
     del kwargs
     target = jax.nn.one_hot(target, num_classes=pred_mean.shape[-1])
     return nll_gaussian(pred_mean, pred_std, target)
@@ -362,7 +365,7 @@ def _make_nll_objective(
             prior_arguments=prior_args,
             data=batch,
             set_prob_predictive=set_prob_predictive,
-            metric=_nll_gaussian_classification if is_classification else nll_gaussian,
+            metric=nll_gaussian_classification if is_classification else nll_gaussian,
         )
     )
 
@@ -407,10 +410,11 @@ def _make_ece_objective(
     Callable[[PriorArguments, Data], Float]
         Objective function computing ECE.
     """
+
     def ece(*, map: Array, pred_act: Array, target: Array, **kwargs) -> Float:
         del kwargs
         conf = jnp.max(pred_act, axis=-1)
-        correct = correctness(map, target) * 1 # USE MAP
+        correct = correctness(map, target) * 1  # USE MAP
         val = expected_calibration_error(
             confidence=conf,
             correctness=correct,
@@ -419,11 +423,11 @@ def _make_ece_objective(
         return val
 
     return lambda prior_args, batch: evaluate_for_given_prior_arguments(
-            prior_arguments=prior_args,
-            data=batch,
-            set_prob_predictive=set_prob_predictive,
-            metric=ece,
-        )
+        prior_arguments=prior_args,
+        data=batch,
+        set_prob_predictive=set_prob_predictive,
+        metric=ece,
+    )
 
 
 def _make_mll_objective(
@@ -432,6 +436,7 @@ def _make_mll_objective(
     params: Params,
     curv_type: CurvApprox,
     loss_fn: LossFn,
+    *,
     has_batch: bool = True,
 ) -> Callable[[PriorArguments, Data], Float]:
     """Create marginal log-likelihood objective for calibration.
@@ -512,8 +517,7 @@ def _build_calibration_objective(
 
     Raises:
     ------
-    ValueError
-        If required arguments are missing or objective type is invalid.
+    ValueError: If required arguments are missing or objective type is invalid.
     """
     objective_type = _convert_to_enum(CalibrationObjective, objective_type)
 
@@ -532,16 +536,18 @@ def _build_calibration_objective(
         raise ValueError(msg)
 
     if is_classification and objective_type == CalibrationObjective.CHI_SQUARED:
-        msg = ("chi^2 objective not supported for classification")
+        msg = "chi^2 objective not supported for classification"
         raise ValueError(msg)
 
     if not is_classification and objective_type == CalibrationObjective.ECE:
-        msg = ("ece objective not supported for regression")
+        msg = "ece objective not supported for regression"
         raise ValueError(msg)
 
     match objective_type:
         case CalibrationObjective.NLL:
-            return _make_nll_objective(set_prob_predictive, is_classification=is_classification)
+            return _make_nll_objective(
+                set_prob_predictive, is_classification=is_classification
+            )
         case CalibrationObjective.CHI_SQUARED:
             return _make_chi2_objective(set_prob_predictive)
         case CalibrationObjective.MARGINAL_LOG_LIKELIHOOD:
@@ -577,8 +583,7 @@ def _resolve_metrics(
 
     Raises:
     ------
-    ValueError
-        If metrics specification is invalid.
+    ValueError: If metrics specification is invalid.
     """
     if isinstance(metrics, str):
         metrics = _convert_to_enum(DefaultMetrics, metrics)
@@ -589,13 +594,13 @@ def _resolve_metrics(
         return [
             apply_fns(
                 lambda map, **kwargs:  # noqa: ARG005
-                    jnp.max(jax.nn.softmax(map, axis=-1), axis=-1),
+                jnp.max(jax.nn.softmax(map, axis=-1), axis=-1),
                 lambda pred_act, **kwargs:  # noqa: ARG005
-                    jnp.max(pred_act, axis=-1),
+                jnp.max(pred_act, axis=-1),
                 lambda map, target, **kwargs:  # noqa: ARG005
-                    correctness(map, target) * 1,
+                correctness(map, target) * 1,
                 lambda pred_mean, target, **kwargs:  # noqa: ARG005
-                    correctness(pred_mean, target) * 1,
+                correctness(pred_mean, target) * 1,
                 names=[
                     "confidences_map",
                     "confidences_pred",
@@ -604,15 +609,13 @@ def _resolve_metrics(
                 ],
             ),
             apply_fns(
-                lambda pred_mean, pred_std, target: 
-                    nll_gaussian(
-                            pred_mean, 
-                            pred_std, 
-                            jax.nn.one_hot(target, num_classes=pred_mean.shape[-1])
-                    ),
-                names=["nll_gaussian"]
-            )
-            
+                lambda pred_mean, pred_std, target: nll_gaussian(
+                    pred_mean,
+                    pred_std,
+                    jax.nn.one_hot(target, num_classes=pred_mean.shape[-1]),
+                ),
+                names=["nll_gaussian"],
+            ),
         ]
     if isinstance(metrics, (list, tuple)):
         if not metrics:
@@ -631,6 +634,7 @@ def _resolve_metrics(
 # ------------------------------------------------------------------------------
 # Main functions
 # ------------------------------------------------------------------------------
+
 
 def GGN(
     model_fn: ModelFn,
@@ -671,8 +675,7 @@ def GGN(
 
     Raises:
     ------
-    ValueError
-        If input/output shapes don't match.
+    ValueError: If input/output shapes don't match.
     """
     ggn_mv = create_ggn_mv_without_data(  # type: ignore[call-arg]
         model_fn=model_fn,
@@ -688,7 +691,7 @@ def GGN(
         transform=transform,
         loader_kwargs={
             "verbose_logging": verbose_logging,
-        }
+        },
     )
 
     test = mv_bound(params)
@@ -848,7 +851,8 @@ def calibration(
     pushforward_fns : list[Callable] | None, optional
         Custom pushforward functions to use, by default None.
     calibration_objective : CalibrationObjective | str, optional
-        Objective function to optimize during calibration, by default CalibrationObjective.NLL.
+        Objective function to optimize during calibration, by default
+        CalibrationObjective.NLL.
     calibration_method : CalibrationMethod | str, optional
         Method to use for calibration, by default CalibrationMethod.GRID_SEARCH.
     has_batch : bool, optional
@@ -864,6 +868,10 @@ def calibration(
             Dictionary of calibrated hyperparameters.
         - set_prob_predictive : Callable
             Function that creates a predictive distribution given prior arguments.
+
+    Raises:
+    ------
+    ValueError: When an unknown calibration method is provided.
 
     Notes:
     -----
@@ -918,7 +926,7 @@ def calibration(
         log_prior_prec_min = calibration_kwargs.get("log_prior_prec_min", -3.0)
         log_prior_prec_max = calibration_kwargs.get("log_prior_prec_max", 3.0)
         grid_size = calibration_kwargs.get("grid_size", 50)
-        patience = calibration_kwargs.get("patience", None)
+        patience = calibration_kwargs.get("patience")
 
         # Transform calibration batch to {"input": ..., "target": ...}
         data = _validate_and_get_transform(data)(data)
@@ -1047,9 +1055,7 @@ def evaluation(
 
     # Evaluate
     isDataLoader = _is_data_loader(data)
-    transform = _validate_and_get_transform(
-        next(iter(data)) if isDataLoader else data 
-    )
+    transform = _validate_and_get_transform(next(iter(data)) if isDataLoader else data)
 
     if isDataLoader:
         results = evaluate_metrics_on_generator(
@@ -1062,10 +1068,10 @@ def evaluation(
         )
     else:
         results = evaluate_metrics_on_dataset(
-        pred_fn=prob_predictive,
-        data=transform(data),
-        metrics=metrics_list,
-        reduce=reduce,
-    )
+            pred_fn=prob_predictive,
+            data=transform(data),
+            metrics=metrics_list,
+            reduce=reduce,
+        )
 
     return results, prob_predictive

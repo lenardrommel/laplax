@@ -116,10 +116,16 @@ def create_loss_hessian_mv(
             - "cross_entropy" for cross-entropy loss.
             - "mse" for mean squared error loss.
             - A custom callable loss function that takes predictions and targets.
+        kwargs: Unused keyword arguments.
 
     Returns:
         A function that computes the Hessian-vector product for the given loss function.
+
+    Raises:
+        ValueError: When an unsupported loss function is provided.
     """
+    del kwargs
+
     if loss_fn == LossFn.BINARY_CROSS_ENTROPY:
         return _binary_cross_entropy_hessian_mv
 
@@ -130,9 +136,11 @@ def create_loss_hessian_mv(
         return _mse_hessian_mv
 
     if loss_fn == LossFn.NONE:
+
         def _identity(jv, pred, target, **kwargs):
             del pred, target, kwargs
             return jv
+
         return _identity
 
     if isinstance(loss_fn, Callable):
@@ -184,6 +192,7 @@ def create_ggn_mv_without_data(
         loss_fn: Loss function to use for the GGN computation.
         factor: Scaling factor for the GGN computation.
         has_batch: Whether the data has a batch dimension.
+        loss_hessian_mv: The loss Hessian matrix-vector product.
 
     Returns:
         A function that takes a vector and a batch of data, and computes the GGN
@@ -224,8 +233,8 @@ def create_ggn_mv(
     params: Params,
     data: Data,
     loss_fn: LossFn | str | Callable,
-    # TODO: Make it optional to either pass loss_hessian_mv or loss_fn
-    # TODO: This needs to be consistent with the hessian curvature.
+    # TODO(2bys): Make it optional to either pass loss_hessian_mv or loss_fn
+    # TODO(2bys): This needs to be consistent with the hessian curvature.
     num_curv_samples: Int | None = None,
     num_total_samples: Int | None = None,
 ) -> Callable[[Params], Params]:
@@ -275,7 +284,7 @@ def create_ggn_mv(
         params=params,
         loss_fn=loss_fn,
         factor=curv_scaling_factor,
-        # loss_hessian_mv=loss_hessian_mv, # TODO: Make it optional.
+        # loss_hessian_mv=loss_hessian_mv, # TODO(2bys): Make it optional.
     )
 
     def wrapped_ggn_mv(vec: Params) -> Params:

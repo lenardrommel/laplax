@@ -1,5 +1,3 @@
-from collections.abc import Iterator
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -112,7 +110,9 @@ def get_sinusoid_example(
     y_valid = jnp.sin(X_valid * sinus_factor) + noise
 
     # Generate testing data
-    X_test = jnp.linspace(test_interval[0], test_interval[1], num_test_data).reshape(-1, 1)
+    X_test = jnp.linspace(test_interval[0], test_interval[1], num_test_data).reshape(
+        -1, 1
+    )
     noise = random.normal(rng_noise_test, X_test.shape) * sigma_noise
     y_test = jnp.sin(X_test * sinus_factor) + noise
 

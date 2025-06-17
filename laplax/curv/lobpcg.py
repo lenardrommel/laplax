@@ -233,7 +233,11 @@ def _extend_basis(X: Array, m: int, calc_dtype: DType) -> Array:
 
 
 def _project_out(basis: Array, U: Array) -> Array:
-    """Derives component of U in the orthogonal complement of basis."""
+    """Derives component of U in the orthogonal complement of basis.
+
+    Returns:
+        The needed component of U.
+    """
     for _ in range(2):
         U -= _mm(basis, _mm(basis.T, U))
         U = _orthonormalize(U, U.dtype)
@@ -255,6 +259,9 @@ def _rayleigh_ritz_orth(AS: Array, S: Array) -> tuple[Array, Array]:
 
     (1) `S.T A S V ~= diag(w) V`
     (2) `V` is standard orthonormal.
+
+    Returns:
+        The solution to the projected subsystem.
     """
     SAS = _mm(S.T, AS)
 
@@ -308,10 +315,6 @@ def lobpcg_lowrank(
             - `U`: Eigenvectors as a matrix of shape `(size, rank)`.
             - `S`: Eigenvalues as an array of length `rank`.
             - `scalar`: Scalar factor, initialized to 0.0.
-
-    Raises:
-        ValueError: If `size` is insufficient to perform the requested number of
-            iterations.
 
     Notes:
         - If the size of the matrix is small relative to `maxiter`, the number of
