@@ -97,11 +97,15 @@ def get_matvec(A, *, layout=None, jit=True):
 def log_sigmoid_cross_entropy(
     logits: Num[Array, "..."], targets: Num[Array, "..."]
 ) -> Num[Array, "..."]:
-    """Computes log sigmoid cross entropy given logits and targets.
+    r"""Computes log sigmoid cross entropy given logits and targets.
 
     This function computes the cross entropy loss between the sigmoid of the logits
     and the target values. The formula implemented is:
-    -targets * log_sigmoid(logits) - (1 - targets) * log_sigmoid(-logits)
+
+    $$
+    \mathcal{L}(f(x, \theta), y) = -y \cdot \log \sigma(f(x, \theta)) -
+    (1 - y) \cdot \log \sigma(-f(x, \theta))
+    $$
 
     Args:
         logits: The predicted logits before sigmoid activation
@@ -119,34 +123,43 @@ def concatenate_model_and_loss_fn(
     model_fn: ModelFn,  # type: ignore[reportRedeclaration]
     loss_fn: LossFn | str | Callable,
     *,
-    has_batch: bool = False,
+    vmap_over_data: bool = False,
 ) -> Callable[[InputArray, TargetArray, Params], Num[Array, "..."]]:
     r"""Combine a model function and a loss function into a single callable.
 
     This creates a new function that evaluates the model and applies the specified
-    loss function. If `has_batch` is `True`, the model function is vectorized over
+    loss function. If `vmap_over_data` is `True`, the model function is vectorized over
     the batch dimension using `jax.vmap`.
 
     Mathematically, the combined function computes:
-    $L(x, y, \theta) = \text{loss}(f(x, \theta), y)$, where $f$ is the model function,
-    $\theta$ are the model parameters, $x$ is the input, and $y$ is the target.
+
+    $$
+    \mathcal{L}(x, y, \theta) = \text{loss}(f(x, \theta), y),
+    $$
+
+    where $f$ is the model function, $\theta$ are the model parameters, $x$ is the input,
+    and $y$ is the target.
 
     Args:
         model_fn: The model function to evaluate.
         loss_fn: The loss function to apply. Supported options are:
+
             - `LossFn.MSE` for mean squared error.
+            - `LossFn.BINARY_CROSS_ENTROPY` for binary cross-entropy loss.
             - `LossFn.CROSSENTROPY` for cross-entropy loss.
+            - `LossFn.NONE` for no loss.
             - A custom callable loss function.
-        has_batch: Whether the model function should be vectorized over the batch.
+
+        vmap_over_data: Whether the model function should be vectorized over the data.
 
     Returns:
         A combined function that computes the loss for given inputs, targets, and
-        parameters.
+            parameters.
 
     Raises:
         ValueError: When the loss function is unknown.
     """
-    if has_batch:
+    if vmap_over_data:
         model_fn = jax.vmap(model_fn, in_axes=(0, None))
 
     if loss_fn == LossFn.MSE:

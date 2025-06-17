@@ -43,3 +43,6 @@ DistState = dict[str, ...]  # type: ignore  # noqa: PGH003
 
 # Curvature types
 CurvatureKeyType = CurvApprox | str | None
+
+# Utility types
+Kwargs = Any

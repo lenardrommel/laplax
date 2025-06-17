@@ -39,9 +39,12 @@ nav:
         - Overview: reference/curv.md
         - laplax.curv.ggn: reference/curv/ggn.md
         - laplax.curv.hessian: reference/curv/hessian.md
-        - laplax.curv.cov: reference/curv/cov.md
+        - laplax.curv.full: reference/curv/full.md
+        - laplax.curv.diagonal: reference/curv/diagonal.md
+        - laplax.curv.low_rank: reference/curv/low_rank.md
         - laplax.curv.lanczos: reference/curv/lanczos.md
         - laplax.curv.lobpcg: reference/curv/lobpcg.md
+        - laplax.curv.cov: reference/curv/cov.md
         - laplax.curv.utils: reference/curv/utils.md
       - laplax.eval:
         - Overview: reference/eval.md

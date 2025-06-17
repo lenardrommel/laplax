@@ -2,7 +2,7 @@
 
 ## Curvatures
 
-Currently supported curvatures-vector products are:
+Currently supported curvature-vector products are:
 
 - **GGN-mv (Generalized Gauss-Newton):**
 
@@ -17,9 +17,9 @@ Currently supported curvatures-vector products are:
 
 ## Curvature estimators/approximations
 
-For both curvature-vector products, the following methods are supported for approximating the curvature and transforming it into a weight space covariance matrix-vector product:
+For both curvature-vector products, the following methods are supported for approximating and transforming them into a weight space covariance matrix-vector product:
 
-- `CurvApprox.FULL` densifies the curvature-vector product into a full matrix. The posterior function is then given by
+- `CurvApprox.FULL` denses the curvature-vector product into a full matrix. The posterior function is then given by
 
     $$
     (\tau, \mathcal{C}) \mapsto \left[ v \mapsto \left(\textbf{Curv}(\mathcal{C}) + \tau I \right)^{-1} v \right].
@@ -46,7 +46,6 @@ This pipeline is controlled via the following three functions:
 - `laplax.curv.set_posterior_fn`: Takes an estimated curvature and returns a function that maps `prior_arguments` to the posterior.
 
 - `laplax.curv.create_posterior_fn`: Combines the `estimate_curvature` and `set_posterior_fn`.
-
 
 ::: laplax.curv.estimate_curvature
 
