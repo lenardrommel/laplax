@@ -4,6 +4,7 @@ This module provides utilities for evaluating probabilistic models on datasets a
 managing metric computations.
 
 Key features include:
+
 - Wrapping functions to store outputs in a structured format.
 - Finalizing multiple functions and collecting results in a dictionary.
 - Applying prediction functions across datasets to generate predictions and evaluating
@@ -67,6 +68,7 @@ def evaluate_on_dataset(
         data: A dataset, where each data point is a dictionary containing
             "input" and "target".
         **kwargs: Additional arguments, including:
+
             - `evaluate_on_dataset_batch_size`: Batch size for processing data
               (default: `data_batch_size`).
 
@@ -239,6 +241,7 @@ def evaluate_metrics_on_dataset(
             names and values are callables.
         reduce: A callable to transform the evaluated metrics (default: identity).
         **kwargs: Additional arguments, including:
+
             - `evaluate_metrics_on_dataset_batch_size`: Batch size for processing data
               (default: `data_batch_size`).
 

@@ -177,7 +177,8 @@ def calculate_bin_metrics(
         **kwargs: Additional arguments (ignored).
 
     Returns:
-        Tuple of arrays:
+        Tuple of arrays containing:
+
             - Bin proportions: Proportion of samples in each bin.
             - Bin confidences: Average confidence for each bin.
             - Bin accuracies: Average accuracy for each bin.
@@ -309,8 +310,11 @@ def chi_squared(
     variance.
 
     Mathematically:
-    $$\chi^2_{\text{Avg}}
-    = \frac{1}{n} \sum_{i=1}^n \frac{(y_i - \hat{y}_i)^2}{\sigma_i^2}.$$
+
+    $$
+    \chi^2_{\text{Avg}}
+    = \frac{1}{n} \sum_{i=1}^n \frac{(y_i - \hat{y}_i)^2}{\sigma_i^2}.
+    $$
 
     Args:
         pred_mean: Array of predicted means.
@@ -335,7 +339,7 @@ def chi_squared_zero(**predictions) -> Float:
 
     Args:
         **predictions: Keyword arguments representing the model predictions,
-        typically including mean, variance, and target.
+            typically including mean, variance, and target.
 
     Returns:
         The calibration metric value.
@@ -347,7 +351,10 @@ def estimate_rmse(pred_mean: Array, target: Array, **kwargs: Kwargs) -> Float:
     r"""Estimate the root mean squared error (RMSE) for predictions.
 
     Mathematically:
-    $\text{RMSE} = \sqrt{\frac{1}{n} \sum_{i=1}^n (y_i - \hat{y}_i)^2}$.
+
+    $$
+    \text{RMSE} = \sqrt{\frac{1}{n} \sum_{i=1}^n (y_i - \hat{y}_i)^2}.
+    $$
 
     Args:
         pred_mean: Array of predicted means.
@@ -425,8 +432,11 @@ def nll_gaussian(
     (standard deviation).
 
     Mathematically:
-    $\text{NLL} = - \sum_{i=1}^n \log \left( \frac{1}{\sqrt{2\pi \sigma_i^2}}
-    \exp \left( -\frac{(y_i - \hat{y}_i)^2}{2\sigma_i^2} \right) \right)$.
+
+    $$
+    \text{NLL} = - \sum_{i=1}^n \log \left( \frac{1}{\sqrt{2\pi \sigma_i^2}}
+    \exp \left( -\frac{(y_i - \hat{y}_i)^2}{2\sigma_i^2} \right) \right).
+    $$
 
     Args:
         pred_mean: Array of predicted means for the dataset.

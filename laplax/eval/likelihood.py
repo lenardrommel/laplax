@@ -7,6 +7,7 @@ Proceedings of the International Conference on Machine Learning, 25(3), 234-245.
 
 It includes functions to calculate the marginal log-likelihood based on various
 curvature approximations, including:
+
 - full
 - diagonal
 - low-rank

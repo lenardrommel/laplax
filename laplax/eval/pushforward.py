@@ -58,6 +58,7 @@ def set_get_weight_sample(key, mean_params, scale_mv, num_samples, **kwargs: Kwa
         scale_mv: Function for the scale matrix-vector product.
         num_samples: Number of weight samples to generate.
         **kwargs: Additional arguments, including:
+
             - `set_get_weight_sample_precompute`: Controls whether samples are
               precomputed.
 
@@ -156,6 +157,7 @@ def get_dist_state(
         num_samples: Number of weight samples for Monte Carlo methods.
         key: PRNG key for generating random samples.
         **kwargs: Additional arguments, including:
+
             - `set_get_weight_sample_precompute`.
 
     Returns:
@@ -225,6 +227,7 @@ def nonlin_setup(
         input: Input data for prediction.
         dist_state: Distribution state containing weight sampling functions.
         **kwargs: Additional arguments, including:
+
             - `nonlin_setup_batch_size`: Controls batch size for computing predictions.
 
     Returns:
@@ -391,6 +394,7 @@ def nonlin_special_pred_act(
         results: Dictionary to store computed results.
         aux: Auxiliary data containing prediction information.
         **kwargs: Additional arguments, including:
+
             - `special_pred_type`: Type of special prediction ("laplace_bridge",
               "mean_field_0", "mean_field_1", or "mean_field_2")
             - `use_correction`: Whether to apply correction term for applicable methods.
@@ -447,7 +451,7 @@ def set_output_mv(
     input: InputArray,
     jvp: Callable[[InputArray, Params], PredArray],
     vjp: Callable[[InputArray, PredArray], Params],
-):
+) -> dict:
     """Create matrix-vector product functions for output covariance and scale.
 
     This function propagates uncertainty from weight space to output space by
@@ -463,7 +467,8 @@ def set_output_mv(
         vjp: Function for computing vector-Jacobian products.
 
     Returns:
-        dict: A dictionary with:
+        A dictionary with:
+
             - `cov_mv`: Function for the output covariance matrix-vector product.
             - `jac_mv`: Function for the JVP with a fixed input.
     """
@@ -659,6 +664,7 @@ def lin_samples(
         aux: Auxiliary data containing the scale matrix function.
         dist_state: Distribution state containing sampling functions and sample count.
         **kwargs: Additional arguments, including:
+
             - `lin_samples_batch_size`: Batch size for computing samples.
 
     Returns:
@@ -699,8 +705,9 @@ def lin_special_pred_act(
         results: Dictionary to store computed results.
         aux: Auxiliary data containing prediction information.
         **kwargs: Additional arguments, including:
+
             - `special_pred_type`: Type of special prediction ("laplace_bridge",
-              "mean_field_0", "mean_field_1", or "mean_field_2")
+                "mean_field_0", "mean_field_1", or "mean_field_2")
             - `use_correction`: Whether to apply correction term for applicable methods.
 
     Returns:
@@ -886,6 +893,7 @@ def set_lin_pushforward(
         pushforward_fns: A list of linearized pushforward functions
             (default: `DEFAULT_LIN_FINALIZE`).
         **kwargs: Additional arguments passed to the pushforward functions, including:
+
             - `n_samples`: Number of samples for approximating uncertainty metrics.
             - `key`: PRNG key for generating random samples.
 
@@ -941,6 +949,7 @@ def set_posterior_gp_kernel(
         loss_scaling_factor: Factor by which the user-provided loss function is scaled.
             Defaults to 1.0.
         **kwargs: Additional arguments, including:
+
             - `dense`: Whether to return a dense kernel matrix instead of the MVP.
             - `output_layout`: The layout of the dense kernel matrix (required if
                 `dense` is True).
