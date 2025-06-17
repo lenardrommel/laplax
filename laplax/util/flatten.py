@@ -26,7 +26,7 @@ def cumsum(seq: Generator) -> list[int]:
 
     Returns:
         A list where each element is the cumulative sum up to that point
-        in the input sequence.
+            in the input sequence.
     """
     total = 0
     return [total := total + ele for ele in seq]
@@ -156,8 +156,7 @@ def unravel_array_into_pytree(pytree: PyTree, axis: int, arr: Array) -> PyTree:
         arr: The array to be unraveled into the PyTree structure.
 
     Returns:
-        PyTree: A PyTree with the specified structure, populated with parts of the
-        input array.
+        A PyTree with the specified structure, populated with parts of the input array.
 
     This function follows the implementation in jax._src.api._unravel_array_into_pytree.
     """
@@ -191,7 +190,7 @@ def wrap_function(
         argnums: The index of the argument to be transformed by `input_fn`.
 
     Returns:
-        Callable: The wrapped function with input and output transformations applied.
+        The wrapped function with input and output transformations applied.
     """
 
     def wrapper(*args, **kwargs) -> Any:
@@ -230,7 +229,7 @@ def wrap_factory(
             (default: identity).
 
     Returns:
-        Callable: The wrapped factory that produces transformed callables.
+        The wrapped factory that produces transformed callables.
     """
 
     def wrapped_factory(*args, **kwargs) -> Callable:
