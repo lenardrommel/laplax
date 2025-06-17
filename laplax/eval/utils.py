@@ -45,7 +45,7 @@ def finalize_fns(
 
     Returns:
         The updated `results` dictionary containing the outputs of all
-        executed functions.
+            executed functions.
     """
     for func in fns:
         results, aux = func(results=results, aux=aux, **kwargs)
@@ -109,8 +109,9 @@ def apply_fns(
             that will be passed to the functions.
 
     Returns:
-        Callable: A function that takes 'results' and 'aux' dictionaries along with
-        additional kwargs, applies the functions, and returns the updated dictionaries.
+        A function that takes 'results' and 'aux' dictionaries along with
+            additional kwargs, applies the functions, and returns the updated
+            dictionaries.
 
     Raises:
         TypeError: If any of the provided functions is not callable.
@@ -184,8 +185,8 @@ def transfer_entry(
             'results' or 'aux' (default: 'aux').
 
     Returns:
-        Callable: A function that takes 'results' and 'aux' dictionaries,
-        transfers the specified entries, and returns the updated dictionaries.
+        A function that takes 'results' and 'aux' dictionaries,
+            transfers the specified entries, and returns the updated dictionaries.
 
     Raises:
         ValueError: If field is not 'results' or 'aux'.
@@ -242,8 +243,7 @@ def evaluate_metrics_on_dataset(
               (default: `data_batch_size`).
 
     Returns:
-        dict: A dictionary containing the evaluated metrics for the entire
-        dataset.
+        A dictionary containing the evaluated metrics for the entire dataset.
 
     Raises:
         ValueError: When metrics and metrics_dict are both None.
@@ -313,7 +313,7 @@ def evaluate_metrics_on_generator(
         **kwargs: Additional keyword arguments passed to the metrics functions.
 
     Returns:
-        dict: A dictionary containing the evaluated metrics for all data points.
+        A dictionary containing the evaluated metrics for all data points.
 
     Raises:
         ValueError: If neither metrics nor metric_dict is provided.

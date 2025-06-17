@@ -60,7 +60,7 @@ def correctness(pred: Array, target: Array, **kwargs: Kwargs) -> Array:
 
     Returns:
         Boolean array of shape `(batch_size,)` indicating correctness
-        for each prediction.
+            for each prediction.
     """
     del kwargs
 
@@ -90,7 +90,7 @@ def accuracy(
 
     Returns:
         A list of accuracies corresponding to each k in `top_k`,
-        expressed as percentages.
+            expressed as percentages.
     """
     del kwargs
     max_k = min(max(top_k), pred.shape[1])
