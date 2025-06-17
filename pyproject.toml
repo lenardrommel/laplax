@@ -246,6 +246,7 @@ ignore = [
     "INP001",  # The tests folder is not an implicit namespace package
 ]
 "examples/*.py" = ["INP001"]  # The examples folder is not an implicit namespace package
+"docs/*.py" = ["INP001"]  # The docs folder is not an implicit namespace package
 "*.ipynb" = ["T201"]    # Print statements are fine in notebooks
 
 [tool.ruff.lint.mccabe]
