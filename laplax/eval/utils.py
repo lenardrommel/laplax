@@ -91,7 +91,7 @@ def apply_fns(
     names: list[str] | None = None,
     field: str = "results",
     **kwargs: Kwargs,
-):
+) -> Callable:
     """Apply multiple functions and store their results in a dictionary.
 
     This function takes a sequence of functions, applies them to the provided inputs,
@@ -170,7 +170,7 @@ def apply_fns(
 
 def transfer_entry(
     mapping: dict[str, str] | list[str], field="results", access_from="aux"
-):
+) -> Callable:
     """Transfer entries between results and auxiliary dictionaries.
 
     This function creates a callable that copies values between the results and
