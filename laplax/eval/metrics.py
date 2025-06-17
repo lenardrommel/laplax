@@ -38,14 +38,14 @@ from jax import lax
 
 from laplax.enums import CalibrationErrorNorm
 from laplax.eval.utils import apply_fns
-from laplax.types import Array, Float
+from laplax.types import Array, Float, Kwargs
 
 # --------------------------------------------------------------------------------
 # Classification metrics
 # --------------------------------------------------------------------------------
 
 
-def correctness(pred: Array, target: Array, **kwargs) -> Array:
+def correctness(pred: Array, target: Array, **kwargs: Kwargs) -> Array:
     """Determine if each target label matches the top-1 prediction.
 
     Computes a binary indicator for whether the predicted class matches the
@@ -73,7 +73,7 @@ def correctness(pred: Array, target: Array, **kwargs) -> Array:
 
 
 def accuracy(
-    pred: Array, target: Array, top_k: tuple[int] = (1,), **kwargs
+    pred: Array, target: Array, top_k: tuple[int] = (1,), **kwargs: Kwargs
 ) -> list[Array]:
     """Compute top-k accuracy for specified values of k.
 
@@ -112,7 +112,9 @@ def accuracy(
     ]
 
 
-def cross_entropy(prob_p: Array, prob_q: Array, axis: int = -1, **kwargs) -> Array:
+def cross_entropy(
+    prob_p: Array, prob_q: Array, axis: int = -1, **kwargs: Kwargs
+) -> Array:
     """Compute cross-entropy between two probability distributions.
 
     This function calculates the cross-entropy of `prob_p` relative to `prob_q`,
@@ -133,7 +135,7 @@ def cross_entropy(prob_p: Array, prob_q: Array, axis: int = -1, **kwargs) -> Arr
     return -p_log_q.sum(axis=axis)
 
 
-def multiclass_brier(prob: Array, target: Array, **kwargs) -> Array:
+def multiclass_brier(prob: Array, target: Array, **kwargs: Kwargs) -> Array:
     """Compute the multiclass Brier score.
 
     The Brier score is a measure of the accuracy of probabilistic predictions.
@@ -160,7 +162,7 @@ def multiclass_brier(prob: Array, target: Array, **kwargs) -> Array:
 
 
 def calculate_bin_metrics(
-    confidence: Array, correctness: Array, num_bins: int = 15, **kwargs
+    confidence: Array, correctness: Array, num_bins: int = 15, **kwargs: Kwargs
 ) -> tuple[Array, Array, Array]:
     """Calculate bin-wise metrics for confidence and correctness.
 
@@ -207,7 +209,7 @@ def calibration_error(
     correctness: jax.Array,
     num_bins: int,
     norm: CalibrationErrorNorm,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> jax.Array:
     """Compute the expected/maximum calibration error.
 
@@ -238,7 +240,7 @@ def calibration_error(
 
 
 def expected_calibration_error(
-    confidence: jax.Array, correctness: jax.Array, num_bins: int, **kwargs
+    confidence: jax.Array, correctness: jax.Array, num_bins: int, **kwargs: Kwargs
 ) -> jax.Array:
     """Compute the expected calibration error.
 
@@ -263,7 +265,7 @@ def expected_calibration_error(
 
 
 def maximum_calibration_error(
-    confidence: jax.Array, correctness: jax.Array, num_bins: int, **kwargs
+    confidence: jax.Array, correctness: jax.Array, num_bins: int, **kwargs: Kwargs
 ) -> jax.Array:
     """Compute the maximum calibration error.
 
@@ -299,7 +301,7 @@ def chi_squared(
     target: Array,
     *,
     averaged: bool = True,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Float:
     r"""Estimate the q-value for predictions.
 
@@ -341,7 +343,7 @@ def chi_squared_zero(**predictions) -> Float:
     return jnp.abs(chi_squared(**predictions) - 1)
 
 
-def estimate_rmse(pred_mean: Array, target: Array, **kwargs) -> Float:
+def estimate_rmse(pred_mean: Array, target: Array, **kwargs: Kwargs) -> Float:
     r"""Estimate the root mean squared error (RMSE) for predictions.
 
     Mathematically:
@@ -365,7 +367,7 @@ def crps_gaussian(
     target: Array,
     *,
     scaled: bool = True,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Float:
     """The negatively oriented continuous ranked probability score for Gaussians.
 
@@ -414,7 +416,7 @@ def nll_gaussian(
     target: Array,
     *,
     scaled: bool = True,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Float:
     r"""Compute the negative log-likelihood (NLL) for a Gaussian distribution.
 

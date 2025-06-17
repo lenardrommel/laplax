@@ -18,6 +18,7 @@ from laplax.types import (
     CurvatureMV,
     FlatParams,
     Float,
+    Kwargs,
     Layout,
     Num,
     PosteriorState,
@@ -38,7 +39,9 @@ from laplax.util.tree import get_size
 
 
 def create_full_curvature(
-    mv: CurvatureMV, layout: Layout, **kwargs
+    mv: CurvatureMV,
+    layout: Layout,
+    **kwargs: Kwargs,
 ) -> Num[Array, "P P"]:
     """Generate a full curvature approximation.
 
@@ -195,7 +198,9 @@ def full_posterior_state_to_cov(
 # ---------------------------------------------------------------------------------
 
 
-def create_diagonal_curvature(mv: CurvatureMV, layout: Layout, **kwargs) -> FlatParams:
+def create_diagonal_curvature(
+    mv: CurvatureMV, layout: Layout, **kwargs: Kwargs
+) -> FlatParams:
     """Generate a diagonal curvature.
 
     The diagonal of the curvature matrix-vector product is computed as an approximation
@@ -309,7 +314,7 @@ def create_low_rank_curvature(
     mv: CurvatureMV,
     layout: Layout,
     low_rank_method: LowRankMethod = LowRankMethod.LANCZOS,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> LowRankTerms:
     """Generate a low-rank curvature approximation.
 
@@ -540,7 +545,7 @@ def estimate_curvature(
     curv_type: CurvApprox | str,
     mv: CurvatureMV,
     layout: Layout | None = None,
-    **kwargs,
+    **kwargs: Kwargs,
 ):
     """Estimate the curvature based on the provided type.
 
@@ -568,7 +573,11 @@ def estimate_curvature(
 
 
 def set_posterior_fn(
-    curv_type: CurvatureKeyType, curv_estimate: PyTree, *, layout: Layout, **kwargs
+    curv_type: CurvatureKeyType,
+    curv_estimate: PyTree,
+    *,
+    layout: Layout,
+    **kwargs: Kwargs,
 ) -> Callable:
     """Set the posterior function based on the curvature estimate.
 
@@ -641,7 +650,7 @@ def create_posterior_fn(
     curv_type: CurvApprox | str,
     mv: CurvatureMV,
     layout: Layout | None = None,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Callable:
     """Factory function to create the posterior function given a curvature type.
 

@@ -68,7 +68,7 @@ from jax.experimental.sparse.linalg import (
 )
 
 from laplax.curv.utils import LowRankTerms, get_matvec
-from laplax.types import Array, Callable, DType, Float, KeyType, Layout
+from laplax.types import Array, Callable, DType, Float, KeyType, Kwargs, Layout
 from laplax.util.flatten import wrap_function
 
 
@@ -281,7 +281,7 @@ def lobpcg_lowrank(
     calc_dtype: DType = jnp.float64,
     return_dtype: DType | None = None,
     mv_jittable: bool = True,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> LowRankTerms:
     r"""Compute a low-rank approximation using the LOBPCG algorithm.
 

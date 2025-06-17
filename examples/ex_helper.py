@@ -14,7 +14,7 @@ from flax import nnx
 from loguru import logger
 from orbax import checkpoint as ocp
 
-from laplax.types import Callable, Float, PriorArguments
+from laplax.types import Callable, Float, Kwargs, PriorArguments
 
 # ---------------------------------------------------------------------
 # Checkpoint Helper
@@ -167,7 +167,7 @@ class CSVLogger:
         save_with_pickle(results, path=sample_path)
 
 
-def generate_experiment_name(**kwargs):
+def generate_experiment_name(**kwargs: Kwargs):
     """Generate a descriptive name for the experiment.
 
     Returns:
@@ -398,7 +398,7 @@ def optimize_prior_prec_gradient(
     *,
     num_epochs: int = 100,
     learning_rate: float = 1,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Float:
     """Optimize prior precision using gradient descent.
 

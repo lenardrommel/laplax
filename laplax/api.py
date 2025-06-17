@@ -74,6 +74,7 @@ from laplax.types import (
     Int,
     Iterable,
     KeyType,
+    Kwargs,
     ModelFn,
     Params,
     PriorArguments,
@@ -218,7 +219,7 @@ def _convert_to_enum(
 
 
 def get_pred_act(
-    results: dict[str, Array], aux: dict[str, Any], **kwargs
+    results: dict[str, Array], aux: dict[str, Any], **kwargs: Kwargs
 ) -> tuple[dict[str, Array], dict[str, Any]]:
     del kwargs
 
@@ -291,7 +292,7 @@ def _setup_pushforward(
 
 
 def nll_gaussian_classification(
-    pred_mean: Array, pred_std: Array, target: Array, **kwargs
+    pred_mean: Array, pred_std: Array, target: Array, **kwargs: Kwargs
 ) -> Float:
     del kwargs
     target = jax.nn.one_hot(target, num_classes=pred_mean.shape[-1])
@@ -353,7 +354,7 @@ def _make_ece_objective(
         Objective function computing ECE.
     """
 
-    def ece(*, map: Array, pred_act: Array, target: Array, **kwargs) -> Float:
+    def ece(*, map: Array, pred_act: Array, target: Array, **kwargs: Kwargs) -> Float:
         del kwargs
         conf = jnp.max(pred_act, axis=-1)
         correct = correctness(map, target) * 1  # USE MAP

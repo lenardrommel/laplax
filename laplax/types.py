@@ -1,7 +1,7 @@
 """All types defined in one place."""
 
 from collections.abc import Callable, Iterable, Mapping  # noqa: F401
-from typing import Any  # noqa: F401
+from typing import Any
 
 import jax
 from jaxtyping import Array, Float, Int, Num, PRNGKeyArray, PyTree  # noqa: F401
@@ -43,3 +43,6 @@ DistState = dict[str, ...]  # type: ignore  # noqa: PGH003
 
 # Curvature types
 CurvatureKeyType = CurvApprox | str | None
+
+# Utility types
+Kwargs = Any

@@ -11,6 +11,7 @@ from laplax.types import (
     Float,
     InputArray,
     Int,
+    Kwargs,
     ModelFn,
     Num,
     Params,
@@ -45,7 +46,7 @@ def create_hessian_mv_without_data(
     factor: Float,
     *,
     has_batch: bool = False,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Callable[[Params, Data], Params]:
     r"""Computes the Hessian-vector product (HVP) for a model and loss function.
 
@@ -96,7 +97,7 @@ def create_hessian_mv(
     loss_fn: LossFn | str | Callable,
     num_curv_samples: Int | None = None,
     num_total_samples: Int | None = None,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Callable[[Params], Params]:
     r"""Computes the Hessian-vector product (HVP) for a model and loss fn. with data.
 

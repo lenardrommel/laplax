@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 
 from laplax import util
-from laplax.types import Array, Layout, PyTree
+from laplax.types import Array, Kwargs, Layout, PyTree
 from laplax.util.tree import (
     basis_vector_from_index,
     eye_like,
@@ -21,7 +21,7 @@ def diagonal(
     layout: Layout | None = None,
     *,
     mv_jittable: bool = True,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Array:
     """Compute the diagonal of a matrix represented by a matrix-vector product function.
 
@@ -83,7 +83,7 @@ def diagonal(
 
 
 @singledispatch
-def to_dense(mv: Callable, layout: Layout, **kwargs) -> Array:
+def to_dense(mv: Callable, layout: Layout, **kwargs: Kwargs) -> Array:
     """Generate a dense matrix representation from a matrix-vector product function.
 
     Converts a matrix-vector product function into its equivalent dense matrix form

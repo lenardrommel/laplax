@@ -11,6 +11,7 @@ from laplax.types import (
     Data,
     Float,
     Int,
+    Kwargs,
     ModelFn,
     Num,
     Params,
@@ -27,7 +28,7 @@ from laplax.util.tree import mul
 def _binary_cross_entropy_hessian_mv(
     jv: PredArray,
     pred: PredArray,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Num[Array, "..."]:
     r"""Compute the Hessian-vector product for the binary cross-entropy loss.
 
@@ -55,7 +56,7 @@ def _binary_cross_entropy_hessian_mv(
 def _cross_entropy_hessian_mv(
     jv: PredArray,
     pred: PredArray,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Num[Array, "..."]:
     r"""Compute the Hessian-vector product for the cross-entropy loss.
 
@@ -84,7 +85,7 @@ def _cross_entropy_hessian_mv(
 
 def _mse_hessian_mv(
     jv: PredArray,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> PredArray:
     r"""Compute the Hessian-vector product for mean squared error loss.
 
@@ -108,7 +109,7 @@ def _mse_hessian_mv(
 
 def create_loss_hessian_mv(
     loss_fn: LossFn | str | Callable[[PredArray, TargetArray], Num[Array, "..."]],
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Callable:
     r"""Create a function to compute the Hessian-vector product for a specified loss fn.
 
@@ -153,7 +154,7 @@ def create_loss_hessian_mv(
     if isinstance(loss_fn, Callable):
 
         def custom_hessian_mv(
-            jv: PredArray, pred: PredArray, target: TargetArray, **kwargs
+            jv: PredArray, pred: PredArray, target: TargetArray, **kwargs: Kwargs
         ) -> Num[Array, "..."]:
             del kwargs
 

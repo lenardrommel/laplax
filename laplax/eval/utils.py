@@ -20,7 +20,7 @@ from collections.abc import Iterator
 import jax
 from loguru import logger
 
-from laplax.types import Any, Array, Callable, Data, InputArray
+from laplax.types import Any, Array, Callable, Data, InputArray, Kwargs
 from laplax.util.utils import identity
 
 
@@ -28,7 +28,7 @@ def finalize_fns(
     fns: list[Callable],
     results: dict,  # Typing must allow empty dict for initializations
     aux: dict[str, Any] | None = None,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> dict:
     """Execute a set of functions and store their results in a dictionary.
 
@@ -53,7 +53,7 @@ def finalize_fns(
 
 
 def evaluate_on_dataset(
-    pred_fn: Callable[[InputArray], dict[str, Array]], data: Data, **kwargs
+    pred_fn: Callable[[InputArray], dict[str, Array]], data: Data, **kwargs: Kwargs
 ) -> dict:
     """Evaluate a prediction function on a dataset.
 
@@ -90,7 +90,7 @@ def apply_fns(
     *funcs: Callable,
     names: list[str] | None = None,
     field: str = "results",
-    **kwargs,
+    **kwargs: Kwargs,
 ):
     """Apply multiple functions and store their results in a dictionary.
 
@@ -218,7 +218,7 @@ def evaluate_metrics_on_dataset(
     metrics: list | None = None,
     metrics_dict: dict[str, Callable] | None = None,
     reduce: Callable = identity,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> dict:
     """Evaluate a set of metrics on a dataset.
 
@@ -288,7 +288,7 @@ def evaluate_metrics_on_generator(
     transform: Callable = identity,
     reduce: Callable = identity,
     has_batch: bool = True,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> dict:
     """Evaluate a set of metrics on a data generator.
 

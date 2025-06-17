@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 from tqdm import tqdm
 
-from laplax.types import Any, Array, Callable, Data, Iterable, Layout, PyTree
+from laplax.types import Any, Array, Callable, Data, Iterable, Kwargs, Layout, PyTree
 from laplax.util.flatten import wrap_function
 from laplax.util.mv import diagonal, to_dense
 from laplax.util.tree import add
@@ -153,7 +153,7 @@ def process_batches(
     reduce: Callable,
     *args,
     verbose_logging: bool = False,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Any:
     """Process batches of data using a function, transformation, and reduction.
 
@@ -197,7 +197,7 @@ def execute_with_data_loader(
     reduce: Callable = reduce_online_mean,
     *,
     jit: bool = False,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Any:
     """Execute batch processing with a data loader.
 
@@ -265,7 +265,7 @@ class DataLoaderMV:
         reduce: Callable = reduce_online_mean,
         *,
         verbose_logging: bool = False,
-        **kwargs,
+        **kwargs: Kwargs,
     ) -> None:
         """Initialize the DataLoaderMV object.
 
@@ -308,7 +308,7 @@ class DataLoaderMV:
             )
         )
 
-    def lower_func(self, func: Callable, **kwargs) -> Array:
+    def lower_func(self, func: Callable, **kwargs: Kwargs) -> Array:
         """Apply a function to the data loader and return the result.
 
         Args:
@@ -339,7 +339,7 @@ class DataLoaderMV:
 
 
 @to_dense.register
-def _(mv: DataLoaderMV, layout: Layout, **kwargs) -> Array:
+def _(mv: DataLoaderMV, layout: Layout, **kwargs: Kwargs) -> Array:
     """Apply to_dense to DataLoaderMV.
 
     Returns:
