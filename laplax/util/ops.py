@@ -4,7 +4,7 @@ import operator
 
 import jax
 
-from laplax.types import Callable, Iterable
+from laplax.types import Callable, Iterable, Kwargs
 
 # -------------------------------------------------------------------------
 # Default values
@@ -44,7 +44,7 @@ def str_to_bool(value: str) -> bool:
 
 
 def precompute_list(
-    func: Callable, items: Iterable, precompute: bool | None = None, **kwargs
+    func: Callable, items: Iterable, precompute: bool | None = None, **kwargs: Kwargs
 ) -> Callable:
     """Precompute results for a list of items or return the original function.
 

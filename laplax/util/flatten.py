@@ -15,7 +15,9 @@ from laplax.util.utils import identity
 # ---------------------------------------------------------------
 
 
-def cumsum(seq: Generator) -> list[int]:
+def cumsum(
+    seq: Generator,
+) -> list[int]:
     """Compute the cumulative sum of a sequence.
 
     This function takes a sequence of integers and returns a list of cumulative
@@ -32,7 +34,9 @@ def cumsum(seq: Generator) -> list[int]:
     return [total := total + ele for ele in seq]
 
 
-def full_flatten(tree: PyTree) -> Array:
+def full_flatten(
+    tree: PyTree,
+) -> Array:
     """Flatten a PyTree into a single 1D array.
 
     This function takes a PyTree and concatenates all its leaves into a single
@@ -115,7 +119,8 @@ def create_partial_pytree_flattener(
         tree: A PyTree to derive the structure for flattening and unflattening.
 
     Returns:
-        tuple:
+        Tuple containing:
+
             - `flatten`: A function that flattens a PyTree into a 2D array.
             - `unflatten`: A function that reconstructs the PyTree from a 2D array.
     """
@@ -145,7 +150,11 @@ def create_partial_pytree_flattener(
     return flatten, unflatten
 
 
-def unravel_array_into_pytree(pytree: PyTree, axis: int, arr: Array) -> PyTree:
+def unravel_array_into_pytree(
+    pytree: PyTree,
+    axis: int,
+    arr: Array,
+) -> PyTree:
     """Unravel an array into a PyTree with a specified structure.
 
     This function splits and reshapes an array to match the structure of a given

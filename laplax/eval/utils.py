@@ -54,7 +54,9 @@ def finalize_fns(
 
 
 def evaluate_on_dataset(
-    pred_fn: Callable[[InputArray], dict[str, Array]], data: Data, **kwargs: Kwargs
+    pred_fn: Callable[[InputArray], dict[str, Array]],
+    data: Data,
+    **kwargs: Kwargs,
 ) -> dict:
     """Evaluate a prediction function on a dataset.
 
@@ -171,7 +173,9 @@ def apply_fns(
 
 
 def transfer_entry(
-    mapping: dict[str, str] | list[str], field="results", access_from="aux"
+    mapping: dict[str, str] | list[str],
+    field: str = "results",
+    access_from: str = "aux",
 ) -> Callable:
     """Transfer entries between results and auxiliary dictionaries.
 
@@ -290,7 +294,7 @@ def evaluate_metrics_on_generator(
     metrics_dict: dict[str, Callable] | None = None,
     transform: Callable = identity,
     reduce: Callable = identity,
-    has_batch: bool = True,
+    vmap_over_data: bool = True,
     **kwargs: Kwargs,
 ) -> dict:
     """Evaluate a set of metrics on a data generator.
@@ -311,7 +315,7 @@ def evaluate_metrics_on_generator(
             names and values are callables.
         transform: The transform over individual data points.
         reduce: A callable to transform the evaluated metrics (default: identity).
-        has_batch: Data batches from generator have unaccounted batch dimension
+        vmap_over_data: Data batches from generator have unaccounted batch dimension
             (default: True).
         **kwargs: Additional keyword arguments passed to the metrics functions.
 
@@ -342,7 +346,7 @@ def evaluate_metrics_on_generator(
         return finalize_fns(fns=metrics, results={}, aux=pred, **kwargs)
 
     # Vmap over batch dimension, if necessary.
-    if has_batch:
+    if vmap_over_data:
         evaluate_data = jax.vmap(evaluate_data)
     evaluate_data = jax.jit(evaluate_data)
 

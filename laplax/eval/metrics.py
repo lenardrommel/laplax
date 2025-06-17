@@ -331,7 +331,7 @@ def chi_squared(
     return jnp.mean(val) if averaged else jnp.sum(val)
 
 
-def chi_squared_zero(**predictions) -> Float:
+def chi_squared_zero(**predictions: Kwargs) -> Float:
     r"""Computes a calibration metric for a given set of predictions.
 
     The calculated metric is the ratio between the error of the prediction and

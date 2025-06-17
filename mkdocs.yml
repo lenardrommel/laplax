@@ -12,8 +12,9 @@ theme:
   font:
     text: Fira Sans
   features:
-    - navigation.sections # Section are shown in the sidebar
-    - toc.integrate # Show table of contents on the left
+    - navigation.sections
+    - navigation.top
+    # - toc.integrate # Show table of contents on the left
     - header.autohide # Hide the header when scrolling down
   palette:
     scheme: default
@@ -22,6 +23,8 @@ theme:
     toggle:
       icon: material/eye
       name: Switch to dark mode
+
+
 
 nav:
   - Home: index.md
@@ -48,7 +51,7 @@ nav:
         - laplax.curv.utils: reference/curv/utils.md
       - laplax.eval:
         - Overview: reference/eval.md
-        - laplax.eval.pushforward: reference/eval/pushforward.md
+        - "laplax.eval.pushforward": reference/eval/pushforward.md
         - laplax.eval.predictives: reference/eval/predictives.md
         - laplax.eval.likelihood: reference/eval/likelihood.md
         - laplax.eval.calibrate: reference/eval/calibrate.md

@@ -26,10 +26,10 @@ def lanczos_iterations(
         full_reorthogonalize: If True, reorthogonalize at every step.
         dtype: Data type for the Lanczos scalars/vectors.
         mv_jit: If True, uses `jax.lax.scan` for iterations; if False, uses a plain
-          Python for loop. Note that `jax.lax.scan` can cause problems if, under the
-          hood, the matvec generates a large computational graph (which could be the
-          case if, for example, it's defined as a sum over per-datum curvatures using a
-          dataloader.) In such cases `mv_jit` should be set to False.
+            Python for loop. Note that `jax.lax.scan` can cause problems if, under the
+            hood, the matvec generates a large computational graph (which could be the
+            case if, for example, it's defined as a sum over per-datum curvatures using
+            a dataloader.) In such cases `mv_jit` should be set to False.
 
     Returns:
         alpha: 1D array of Lanczos scalars (diagonal of T).
@@ -168,12 +168,12 @@ def lanczos_lowrank(
         rank: Number of leading eigenpairs to compute. Defaults to $R=20$.
         tol: Convergence tolerance for the algorithm.
         mv_dtype: Data type for matrix-vector products. Defaults to `float64` if
-          `jax_enable_x64` is enabled, otherwise `float32`.
+            `jax_enable_x64` is enabled, otherwise `float32`.
         calc_dtype: Data type for internal calculations.
         return_dtype: Data type for returned results.
         mv_jit: If True, enables JIT compilation of matrix-vector products. Note
-          that this can cause problems if the matrix-vector product generates a large
-          computational graph.
+            that this can cause problems if the matrix-vector product generates a large
+            computational graph.
         full_reorthogonalize: Whether to perform full reorthogonalization.
         **kwargs: Additional arguments (ignored).
 

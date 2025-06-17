@@ -11,6 +11,7 @@ from laplax.types import (
     Array,
     Float,
     InputArray,
+    Layout,
     ModelFn,
     Num,
     Params,
@@ -49,7 +50,12 @@ jax.tree_util.register_pytree_node(
 )
 
 
-def get_matvec(A, *, layout=None, jit=True):
+def get_matvec(
+    A: Callable | Array,
+    *,
+    layout: Layout | None = None,
+    jit: bool = True,
+) -> tuple[Callable[[Array], Array], int]:
     """Returns a function that computes the matrix-vector product.
 
     Args:

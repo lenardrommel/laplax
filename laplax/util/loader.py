@@ -60,7 +60,10 @@ def reduce_sum(
     return new_state, new_state
 
 
-def reduce_add(res_new: Any, state: Any | None = None) -> tuple[Any, Any]:
+def reduce_add(
+    res_new: Any,
+    state: Any | None = None,
+) -> tuple[Any, Any]:
     """Perform a reduction by adding results.
 
     Args:
@@ -76,7 +79,11 @@ def reduce_add(res_new: Any, state: Any | None = None) -> tuple[Any, Any]:
     return new_state, new_state
 
 
-def concat(tree1: PyTree, tree2: PyTree, axis: int = 0) -> PyTree:
+def concat(
+    tree1: PyTree,
+    tree2: PyTree,
+    axis: int = 0,
+) -> PyTree:
     """Concatenate two PyTrees along a specified axis.
 
     Args:
@@ -93,7 +100,10 @@ def concat(tree1: PyTree, tree2: PyTree, axis: int = 0) -> PyTree:
 
 
 def reduce_concat(
-    res_new: Any, state: Any | None = None, *, axis: int = 0
+    res_new: Any,
+    state: Any | None = None,
+    *,
+    axis: int = 0,
 ) -> tuple[Any, Any]:
     """Perform a reduction by concatenating results.
 
@@ -111,7 +121,10 @@ def reduce_concat(
     return new_state, new_state
 
 
-def reduce_online_mean(res_new: Any, state: tuple | None = None) -> tuple[Any, tuple]:
+def reduce_online_mean(
+    res_new: Any,
+    state: tuple | None = None,
+) -> tuple[Any, tuple]:
     """Compute the online mean of results, maintaining a running count and sum.
 
     Args:
@@ -152,7 +165,7 @@ def process_batches(
     data_loader: Iterable,
     transform: Callable,
     reduce: Callable,
-    *args,
+    *args: Any,
     verbose_logging: bool = False,
     **kwargs: Kwargs,
 ) -> Any:

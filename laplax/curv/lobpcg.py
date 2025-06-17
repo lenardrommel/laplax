@@ -379,6 +379,8 @@ def lobpcg_lowrank(
         )
 
     # Initialize random search directions
+    if key is None:
+        key = jax.random.key(0)
     X = jax.random.normal(key, (size, rank), dtype=calc_dtype)
 
     # Perform LOBPCG for eigenvalues and eigenvectors using the new wrapper

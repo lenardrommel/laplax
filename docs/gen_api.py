@@ -37,6 +37,5 @@ for pkg, ref_dir in [
 
 for mod, md_path in SUBMODULES:
     with gen_open(md_path, "w") as f:
-        f.write(f"# {mod}\n")
         f.write(f"::: {mod}\n")
         f.write("\n")

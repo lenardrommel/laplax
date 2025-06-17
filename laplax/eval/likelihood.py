@@ -265,7 +265,7 @@ def marginal_log_likelihood(
     loss_fn: LossFn | str | Callable,
     curv_type: CurvatureKeyType,
     *,
-    has_batch: bool = False,
+    vmap_over_data: bool = False,
     loss_scaling_factor: Float = 1.0,
 ) -> Float:
     r"""Compute the marginal log-likelihood for a given curvature approximation.
@@ -288,13 +288,17 @@ def marginal_log_likelihood(
         params: model parameters
         loss_fn: loss function
         curv_type: curvature type
-        has_batch: whether the model has a batch dimension
+        vmap_over_data: whether the model has a batch dimension
         loss_scaling_factor: loss scaling factor
 
     Returns:
         The marginal log-likelihood.
     """
-    full_fn = concatenate_model_and_loss_fn(model_fn, loss_fn, has_batch=has_batch)
+    full_fn = concatenate_model_and_loss_fn(
+        model_fn,
+        loss_fn,
+        vmap_over_data=vmap_over_data,
+    )
 
     posterior_precision = CURVATURE_PRECISION_METHODS[curv_type](
         curv_estimate,

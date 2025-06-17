@@ -380,7 +380,7 @@ def _make_mll_objective(
     curv_type: CurvApprox,
     loss_fn: LossFn,
     *,
-    has_batch: bool = True,
+    vmap_over_data: bool = True,
 ) -> Callable[[PriorArguments, Data], Float]:
     """Create marginal log-likelihood objective for calibration.
 
@@ -390,7 +390,7 @@ def _make_mll_objective(
         params: Network parameters.
         curv_type: Type of curvature approximation.
         loss_fn: Loss function used.
-        has_batch: If data has batch dimension, which the model doesn't support.
+        vmap_over_data: If data has batch dimension, which the model doesn't support.
 
     Returns:
         JIT-compiled objective function.
@@ -404,7 +404,7 @@ def _make_mll_objective(
             params=params,
             loss_fn=loss_fn,
             curv_type=curv_type,
-            has_batch=has_batch,
+            vmap_over_data=vmap_over_data,
         )
     )
 
@@ -418,7 +418,7 @@ def _build_calibration_objective(
     params: Params | None = None,
     curv_type: CurvApprox | None = None,
     loss_fn: LossFn,
-    has_batch: bool = True,
+    vmap_over_data: bool = True,
     is_classification: bool = False,
 ) -> Callable[[PriorArguments, Data], Float]:
     """Build calibration objective function based on type.
@@ -431,7 +431,7 @@ def _build_calibration_objective(
         params: Network parameters.
         curv_type: Type of curvature approximation.
         loss_fn: Loss function used.
-        has_batch: If data has batch dimension, which the model doesn't support.
+        vmap_over_data: If data has batch dimension, which the model doesn't support.
         is_classification: Whether the model is a classification model.
 
     Returns:
@@ -444,11 +444,11 @@ def _build_calibration_objective(
 
     if (
         objective_type is CalibrationObjective.MARGINAL_LOG_LIKELIHOOD
-        and _check_if_none(curv_estimate, model_fn, params, curv_type, has_batch)
+        and _check_if_none(curv_estimate, model_fn, params, curv_type, vmap_over_data)
     ):
         msg = (
             "Marginal log-likelihood objective requires "
-            "`curv_estimate`, `model_fn`, `params`, `curv_type`, and `has_batch`."
+            "`curv_estimate`, `model_fn`, `params`, `curv_type`, and `vmap_over_data`."
         )
         raise ValueError(msg)
 
@@ -478,7 +478,7 @@ def _build_calibration_objective(
                 params=params,
                 curv_type=curv_type,
                 loss_fn=loss_fn,
-                has_batch=has_batch,
+                vmap_over_data=vmap_over_data,
             )
         case CalibrationObjective.ECE:
             return _make_ece_objective(set_prob_predictive)
@@ -559,7 +559,7 @@ def GGN(
     loss_fn: LossFn,
     *,
     factor: float = 1.0,
-    has_batch: bool = True,
+    vmap_over_data: bool = True,
     verbose_logging: bool = True,
     transform: Callable | None = None,
 ) -> Callable[[Params], Params]:
@@ -571,7 +571,7 @@ def GGN(
         data: Training data.
         loss_fn: Loss function to use.
         factor: Scaling factor for GGN.
-        has_batch: Whether model expects batch dimension.
+        vmap_over_data: Whether model expects batch dimension.
         verbose_logging: Whether to enable verbose logging.
         transform: Transform to apply to data.
 
@@ -586,7 +586,7 @@ def GGN(
         params=params,
         loss_fn=loss_fn,
         factor=factor,
-        has_batch=has_batch,
+        vmap_over_data=vmap_over_data,
     )
 
     mv_bound = _maybe_wrap_loader_or_batch(
@@ -617,8 +617,8 @@ def laplace(
     curv_type: CurvApprox,
     num_curv_samples: Int = 1,
     num_total_samples: Int = 1,
-    has_batch: bool = True,
-    **curv_kwargs,
+    vmap_over_data: bool = True,
+    **curv_kwargs: Kwargs,
 ) -> tuple[Callable[[PriorArguments, Float], Posterior], PyTree]:
     """Estimate curvature & obtain a Gaussian weight-space posterior.
 
@@ -637,7 +637,7 @@ def laplace(
         num_curv_samples: Number of Monte Carlo samples used to estimate the GGN, by
             default 1.
         num_total_samples: Total number of samples in the dataset, by default 1.
-        has_batch: Whether the model expects a leading batch axis, by default True.
+        vmap_over_data: Whether the model expects a leading batch axis, by default True.
         **curv_kwargs: Additional arguments forwarded to the curvature estimation
             function.
 
@@ -674,7 +674,7 @@ def laplace(
         data,
         loss_fn=loss_fn,
         factor=factor,
-        has_batch=has_batch,
+        vmap_over_data=vmap_over_data,
     )
 
     # Curvature estimation
@@ -714,8 +714,8 @@ def calibration(
     num_samples: int = 30,
     calibration_objective: CalibrationObjective | str = CalibrationObjective.NLL,
     calibration_method: CalibrationMethod | str = CalibrationMethod.GRID_SEARCH,
-    has_batch: bool = True,
-    **calibration_kwargs,
+    vmap_over_data: bool = True,
+    **calibration_kwargs: Kwargs,
 ) -> tuple[PriorArguments, Callable[[InputArray], dict[str, Array]]]:
     """Calibrate hyperparameters of the Laplace approximation.
 
@@ -742,7 +742,7 @@ def calibration(
             default CalibrationObjective.NLL.
         calibration_method: Method to use for calibration, by default
             CalibrationMethod.GRID_SEARCH.
-        has_batch: Whether the model expects a leading batch axis, by default True.
+        vmap_over_data: Whether the model expects a leading batch axis, by default True.
         **calibration_kwargs: Additional arguments for the calibration method.
 
     Returns:
@@ -796,7 +796,7 @@ def calibration(
         params=params,
         loss_fn=loss_fn,
         curv_type=curv_type,
-        has_batch=has_batch,
+        vmap_over_data=vmap_over_data,
         is_classification=is_classification,
     )
 

@@ -44,7 +44,13 @@ from laplax.util.tree import add
 # -------------------------------------------------------------------------
 
 
-def set_get_weight_sample(key, mean_params, scale_mv, num_samples, **kwargs: Kwargs):
+def set_get_weight_sample(
+    key: KeyType | None,
+    mean_params: Params,
+    scale_mv: Callable[[Array], Array],
+    num_samples: int,
+    **kwargs: Kwargs,
+) -> Callable[[int], Params]:
     """Creates a function to sample weights from a Gaussian distribution.
 
     This function generates weight samples from a Gaussian distribution
@@ -65,6 +71,9 @@ def set_get_weight_sample(key, mean_params, scale_mv, num_samples, **kwargs: Kwa
     Returns:
         A function that generates a specific weight sample by index.
     """
+    if key is None:
+        key = jax.random.key(0)
+
     keys = jax.random.split(key, num_samples)
 
     def get_weight_sample(idx):
@@ -653,7 +662,7 @@ def lin_samples(
     aux: dict[str, Any],
     dist_state: DistState,
     **kwargs: Kwargs,
-):
+) -> tuple[dict[str, Array], dict[str, Any]]:
     """Generate and store samples from the linearized distribution.
 
     This function computes samples in the output space by applying the scale

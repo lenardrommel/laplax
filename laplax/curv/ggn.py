@@ -115,7 +115,10 @@ def _mse_hessian_mv(
 
 
 def create_loss_hessian_mv(
-    loss_fn: LossFn | str | Callable[[PredArray, TargetArray], Num[Array, "..."]],
+    loss_fn: LossFn
+    | str
+    | Callable[[PredArray, TargetArray], Num[Array, "..."]]
+    | None,
     **kwargs: Kwargs,
 ) -> Callable:
     r"""Create a function to compute the Hessian-vector product for a specified loss fn.
@@ -141,10 +144,15 @@ def create_loss_hessian_mv(
         A function that computes the Hessian-vector product for the given loss function.
 
     Raises:
+        ValueError: When `loss_fn` is `None`.
         ValueError: When an unsupported loss function (not of type: `Callable`)is
             provided.
     """
     del kwargs
+
+    if loss_fn is None:
+        msg = "loss_fn cannot be None"
+        raise ValueError(msg)
 
     if loss_fn == LossFn.BINARY_CROSS_ENTROPY:
         return _binary_cross_entropy_hessian_mv
@@ -197,7 +205,7 @@ def create_loss_hessian_mv(
 def create_ggn_mv_without_data(
     model_fn: ModelFn,
     params: Params,
-    loss_fn: LossFn | str | Callable,
+    loss_fn: LossFn | str | Callable | None,
     factor: Float,
     *,
     vmap_over_data: bool = True,
