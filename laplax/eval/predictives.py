@@ -7,7 +7,10 @@ LAMBDA_0 = math.pi / 8
 
 
 def laplace_bridge(
-    mean: jax.Array, var: jax.Array, *, use_correction: bool
+    mean: jax.Array,
+    var: jax.Array,
+    *,
+    use_correction: bool,
 ) -> jax.Array:
     """Laplace bridge approximation.
 
