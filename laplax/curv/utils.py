@@ -137,8 +137,8 @@ def concatenate_model_and_loss_fn(
     \mathcal{L}(x, y, \theta) = \text{loss}(f(x, \theta), y),
     $$
 
-    where $f$ is the model function, $\theta$ are the model parameters, $x$ is the input,
-    and $y$ is the target.
+    where $f$ is the model function, $\theta$ are the model parameters, $x$ is the
+    input, $y$ is the target, and $\mathcal{L}$ is the loss function.
 
     Args:
         model_fn: The model function to evaluate.

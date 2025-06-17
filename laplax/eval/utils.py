@@ -4,6 +4,7 @@ This module provides utilities for evaluating probabilistic models on datasets a
 managing metric computations.
 
 Key features include:
+
 - Wrapping functions to store outputs in a structured format.
 - Finalizing multiple functions and collecting results in a dictionary.
 - Applying prediction functions across datasets to generate predictions and evaluating
@@ -20,7 +21,7 @@ from collections.abc import Iterator
 import jax
 from loguru import logger
 
-from laplax.types import Any, Array, Callable, Data, InputArray
+from laplax.types import Any, Array, Callable, Data, InputArray, Kwargs
 from laplax.util.utils import identity
 
 
@@ -28,7 +29,7 @@ def finalize_fns(
     fns: list[Callable],
     results: dict,  # Typing must allow empty dict for initializations
     aux: dict[str, Any] | None = None,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> dict:
     """Execute a set of functions and store their results in a dictionary.
 
@@ -45,7 +46,7 @@ def finalize_fns(
 
     Returns:
         The updated `results` dictionary containing the outputs of all
-        executed functions.
+            executed functions.
     """
     for func in fns:
         results, aux = func(results=results, aux=aux, **kwargs)
@@ -53,7 +54,7 @@ def finalize_fns(
 
 
 def evaluate_on_dataset(
-    pred_fn: Callable[[InputArray], dict[str, Array]], data: Data, **kwargs
+    pred_fn: Callable[[InputArray], dict[str, Array]], data: Data, **kwargs: Kwargs
 ) -> dict:
     """Evaluate a prediction function on a dataset.
 
@@ -67,6 +68,7 @@ def evaluate_on_dataset(
         data: A dataset, where each data point is a dictionary containing
             "input" and "target".
         **kwargs: Additional arguments, including:
+
             - `evaluate_on_dataset_batch_size`: Batch size for processing data
               (default: `data_batch_size`).
 
@@ -90,8 +92,8 @@ def apply_fns(
     *funcs: Callable,
     names: list[str] | None = None,
     field: str = "results",
-    **kwargs,
-):
+    **kwargs: Kwargs,
+) -> Callable:
     """Apply multiple functions and store their results in a dictionary.
 
     This function takes a sequence of functions, applies them to the provided inputs,
@@ -109,8 +111,9 @@ def apply_fns(
             that will be passed to the functions.
 
     Returns:
-        Callable: A function that takes 'results' and 'aux' dictionaries along with
-        additional kwargs, applies the functions, and returns the updated dictionaries.
+        A function that takes 'results' and 'aux' dictionaries along with
+            additional kwargs, applies the functions, and returns the updated
+            dictionaries.
 
     Raises:
         TypeError: If any of the provided functions is not callable.
@@ -169,7 +172,7 @@ def apply_fns(
 
 def transfer_entry(
     mapping: dict[str, str] | list[str], field="results", access_from="aux"
-):
+) -> Callable:
     """Transfer entries between results and auxiliary dictionaries.
 
     This function creates a callable that copies values between the results and
@@ -184,8 +187,8 @@ def transfer_entry(
             'results' or 'aux' (default: 'aux').
 
     Returns:
-        Callable: A function that takes 'results' and 'aux' dictionaries,
-        transfers the specified entries, and returns the updated dictionaries.
+        A function that takes 'results' and 'aux' dictionaries,
+            transfers the specified entries, and returns the updated dictionaries.
 
     Raises:
         ValueError: If field is not 'results' or 'aux'.
@@ -218,7 +221,7 @@ def evaluate_metrics_on_dataset(
     metrics: list | None = None,
     metrics_dict: dict[str, Callable] | None = None,
     reduce: Callable = identity,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> dict:
     """Evaluate a set of metrics on a dataset.
 
@@ -238,12 +241,12 @@ def evaluate_metrics_on_dataset(
             names and values are callables.
         reduce: A callable to transform the evaluated metrics (default: identity).
         **kwargs: Additional arguments, including:
+
             - `evaluate_metrics_on_dataset_batch_size`: Batch size for processing data
               (default: `data_batch_size`).
 
     Returns:
-        dict: A dictionary containing the evaluated metrics for the entire
-        dataset.
+        A dictionary containing the evaluated metrics for the entire dataset.
 
     Raises:
         ValueError: When metrics and metrics_dict are both None.
@@ -288,7 +291,7 @@ def evaluate_metrics_on_generator(
     transform: Callable = identity,
     reduce: Callable = identity,
     has_batch: bool = True,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> dict:
     """Evaluate a set of metrics on a data generator.
 
@@ -313,7 +316,7 @@ def evaluate_metrics_on_generator(
         **kwargs: Additional keyword arguments passed to the metrics functions.
 
     Returns:
-        dict: A dictionary containing the evaluated metrics for all data points.
+        A dictionary containing the evaluated metrics for all data points.
 
     Raises:
         ValueError: If neither metrics nor metric_dict is provided.

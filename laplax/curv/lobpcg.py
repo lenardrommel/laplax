@@ -26,7 +26,7 @@
 
 This module provides an implementation of the Locally Optimal Block
 Preconditioned Conjugate Gradient (LOBPCG) method for finding eigenvalues
-and eigenvectors of large Hermitian matrices. 
+and eigenvectors of large Hermitian matrices.
 
 ### This is a Wrapper
 
@@ -44,14 +44,14 @@ to support:
     - Computations inside the algorithm (such as orthonormalization, matrix-vector
             products, and eigenvalue updates) can be performed using higher precision
             (e.g., `float64`) to maintain numerical stability in critical steps.
-    - Matrix-vector products involving the operator `A` can be computed in lower 
+    - Matrix-vector products involving the operator `A` can be computed in lower
             precision (e.g., `float32`) to reduce memory usage and computation time.
 
 - **Non-Jittable Operator Support**
     - The implementation supports `A` as a non-jittable callable, enabling the use of
             external libraries such as `scipy.sparse.linalg` for matrix-vector products.
-            This is essential for cases where `A` cannot be expressed using JAX primitives
-            (e.g., external libraries or precompiled solvers).
+            This is essential for cases where `A` cannot be expressed using JAX
+            primitives (e.g., external libraries or precompiled solvers).
 
 
 ### Why this Wrapper?

@@ -74,6 +74,7 @@ from laplax.types import (
     Int,
     Iterable,
     KeyType,
+    Kwargs,
     ModelFn,
     Params,
     PriorArguments,
@@ -109,14 +110,10 @@ calibration_options: dict[CalibrationMethod | str, Callable] = {
 def _check_if_none(*args: Any) -> bool:
     """Check if any of the provided arguments are None.
 
-    Parameters
-    ----------
-    *args : Any
-        Arguments to check for None values.
+    Args:
+        *args: Arguments to check for None values.
 
     Returns:
-    -------
-    bool
         True if any argument is None, False otherwise.
     """
     return any(x is None for x in args)
@@ -125,19 +122,14 @@ def _check_if_none(*args: Any) -> bool:
 def _validate_and_get_transform(batch: Data | Any) -> Callable[[Any], Data]:
     """Return the transform that converts a single batch to (inputs, targets).
 
-    Parameters
-    ----------
-    batch : Data | Any
-        Batch to validate and get transform for.
+    Args:
+        batch: Batch to validate and get transform for.
 
     Returns:
-    -------
-    Callable[[Any], Data]
         Function that transforms a batch into (inputs, targets) format.
 
     Raises:
-    ------
-    ValueError: If batch is not a tuple/dict or misses required keys.
+        ValueError: If batch is not a tuple/dict or misses required keys.
     """
     if isinstance(batch, (tuple, list)):
         if len(batch) != 2:
@@ -168,18 +160,13 @@ def _maybe_wrap_loader_or_batch(
 ) -> Callable[..., Params]:
     """Wrap matrix-vector function with data loader if data is iterable.
 
-    Parameters
-    ----------
-    mv_fn : Callable[..., Params]
-        Matrix-vector product function to wrap.
-    data : Data | Iterable
-        Data to use with the function.
-    loader_kwargs : dict, optional
-        Additional arguments for the data loader.
+    Args:
+        mv_fn: Matrix-vector product function to wrap.
+        data: Data to use with the function.
+        transform: Data transform to apply.
+        loader_kwargs: Additional arguments for the data loader.
 
     Returns:
-    -------
-    Callable[..., Params]
         Wrapped matrix-vector function.
     """
     transform = (
@@ -210,23 +197,16 @@ def _convert_to_enum(
 ) -> StrEnum:
     """Convert string to enum, pass through if already enum.
 
-    Parameters
-    ----------
-    enum_cls : StrEnum
-        Enum class to convert to.
-    value : StrEnum | str
-        Value to convert.
-    str_default : bool, optional
-        Whether to return string if conversion fails.
+    Args:
+        enum_cls: Enum class to convert to.
+        value: Value to convert.
+        str_default: Whether to return string if conversion fails.
 
     Returns:
-    -------
-    StrEnum
         Converted enum value.
 
     Raises:
-    ------
-    ValueError: If conversion fails and str_default is False.
+        ValueError: If conversion fails and str_default is False.
     """
     if isinstance(value, enum_cls):
         return value
@@ -239,7 +219,7 @@ def _convert_to_enum(
 
 
 def get_pred_act(
-    results: dict[str, Array], aux: dict[str, Any], **kwargs
+    results: dict[str, Array], aux: dict[str, Any], **kwargs: Kwargs
 ) -> tuple[dict[str, Array], dict[str, Any]]:
     del kwargs
 
@@ -259,23 +239,16 @@ def _setup_pushforward(
 ) -> tuple[Callable, list[Callable]]:
     """Set up pushforward functions based on type and predictive method.
 
-    Parameters
-    ----------
-    pushforward_type : Pushforward | str
-        Type of pushforward approximation to use.
-    predictive_type : Predictive | str
-        Type of predictive distribution to use.
-    pushforward_fns : list[Callable] | None
-        Custom pushforward functions to use.
+    Args:
+        pushforward_type: Type of pushforward approximation to use.
+        predictive_type: Type of predictive distribution to use.
+        pushforward_fns: Custom pushforward functions to use.
 
     Returns:
-    -------
-    tuple[Callable, list[Callable]]
         (set_pushforward, list_of_fns) according to specification.
 
     Raises:
-    ------
-    ValueError: If pushforward or predictive type is invalid.
+        ValueError: If pushforward or predictive type is invalid.
     """
     pushforward_type = _convert_to_enum(Pushforward, pushforward_type)
     predictive_type = _convert_to_enum(Predictive, predictive_type)
@@ -318,27 +291,8 @@ def _setup_pushforward(
     return set_pushforward, pushforward_fns
 
 
-def register_calibration_method(method_name: str, method_fn: Callable) -> None:
-    """Register a new calibration method.
-
-    Parameters
-    ----------
-    method_name : str
-        Name of the calibration method.
-    method_fn : Callable
-        Function implementing the calibration method.
-
-    Notes:
-    -----
-    The method function should have signature:
-    method_fn(objective: Callable, **kwargs) -> float
-    """
-    calibration_options[method_name] = method_fn
-    logger.info(f"Registered new calibration method: {method_name}")
-
-
 def nll_gaussian_classification(
-    pred_mean: Array, pred_std: Array, target: Array, **kwargs
+    pred_mean: Array, pred_std: Array, target: Array, **kwargs: Kwargs
 ) -> Float:
     del kwargs
     target = jax.nn.one_hot(target, num_classes=pred_mean.shape[-1])
@@ -350,14 +304,11 @@ def _make_nll_objective(
 ) -> Callable[[PriorArguments, Data], Float]:
     """Create negative log-likelihood objective for calibration.
 
-    Parameters
-    ----------
-    set_prob_predictive : Callable
-        Function to set up predictive distribution.
+    Args:
+        set_prob_predictive: Function to set up predictive distribution.
+        is_classification: Whether we are in a classification setting.
 
     Returns:
-    -------
-    Callable[[PriorArguments, Data], Float]
         JIT-compiled objective function.
     """
     return jax.jit(
@@ -375,14 +326,10 @@ def _make_chi2_objective(
 ) -> Callable[[PriorArguments, Data], Float]:
     """Create chi-squared objective for calibration.
 
-    Parameters
-    ----------
-    set_prob_predictive : Callable
-        Function to set up predictive distribution.
+    Args:
+        set_prob_predictive: Function to set up predictive distribution.
 
     Returns:
-    -------
-    Callable[[PriorArguments, Data], Float]
         JIT-compiled objective function.
     """
     return jax.jit(
@@ -400,18 +347,14 @@ def _make_ece_objective(
 ) -> Callable[[PriorArguments, Data], Float]:
     """Create expected calibration error objective.
 
-    Parameters
-    ----------
-    set_prob_predictive : Callable
-        Function to set up predictive distribution.
+    Args:
+        set_prob_predictive: Function to set up predictive distribution.
 
     Returns:
-    -------
-    Callable[[PriorArguments, Data], Float]
         Objective function computing ECE.
     """
 
-    def ece(*, map: Array, pred_act: Array, target: Array, **kwargs) -> Float:
+    def ece(*, map: Array, pred_act: Array, target: Array, **kwargs: Kwargs) -> Float:
         del kwargs
         conf = jnp.max(pred_act, axis=-1)
         correct = correctness(map, target) * 1  # USE MAP
@@ -441,24 +384,15 @@ def _make_mll_objective(
 ) -> Callable[[PriorArguments, Data], Float]:
     """Create marginal log-likelihood objective for calibration.
 
-    Parameters
-    ----------
-    curv_estimate : PyTree
-        Estimated curvature.
-    model_fn : ModelFn
-        Neural network forward pass.
-    params : Params
-        Network parameters.
-    curv_type : CurvApprox
-        Type of curvature approximation.
-    loss_fn : LossFn
-        Loss function used.
-    has_batch : bool (optional)
-        If data has batch dimension, which the model doesn't support.
+    Args:
+        curv_estimate: Estimated curvature.
+        model_fn: Neural network forward pass.
+        params: Network parameters.
+        curv_type: Type of curvature approximation.
+        loss_fn: Loss function used.
+        has_batch: If data has batch dimension, which the model doesn't support.
 
     Returns:
-    -------
-    Callable[[PriorArguments, Data], Float]
         JIT-compiled objective function.
     """
     return jax.jit(
@@ -489,35 +423,22 @@ def _build_calibration_objective(
 ) -> Callable[[PriorArguments, Data], Float]:
     """Build calibration objective function based on type.
 
-    Parameters
-    ----------
-    objective_type : CalibrationObjective | str
-        Type of calibration objective.
-    set_prob_predictive : Callable
-        Function to set up predictive distribution.
-    curv_estimate : PyTree | None, optional
-        Estimated curvature.
-    model_fn : ModelFn | None, optional
-        Neural network forward pass.
-    params : Params | None, optional
-        Network parameters.
-    curv_type : CurvApprox | None, optional
-        Type of curvature approximation.
-    loss_fn : LossFn
-        Loss function used.
-    has_batch : bool (optional)
-        If data has batch dimension, which the model doesn't support.
-    is_classification : bool (optional)
-        Whether the model is a classification model.
+    Args:
+        objective_type: Type of calibration objective.
+        set_prob_predictive: Function to set up predictive distribution.
+        curv_estimate: Estimated curvature.
+        model_fn: Neural network forward pass.
+        params: Network parameters.
+        curv_type: Type of curvature approximation.
+        loss_fn: Loss function used.
+        has_batch: If data has batch dimension, which the model doesn't support.
+        is_classification: Whether the model is a classification model.
 
     Returns:
-    -------
-    Callable[[PriorArguments, Data], Float]
         Calibration objective function.
 
     Raises:
-    ------
-    ValueError: If required arguments are missing or objective type is invalid.
+        ValueError: If required arguments are missing or objective type is invalid.
     """
     objective_type = _convert_to_enum(CalibrationObjective, objective_type)
 
@@ -571,19 +492,14 @@ def _resolve_metrics(
 ) -> list[Callable]:
     """Resolve metrics to list of callable functions.
 
-    Parameters
-    ----------
-    metrics : DefaultMetrics | list[Callable] | str
-        Metrics specification to resolve.
+    Args:
+        metrics: Metrics specification to resolve.
 
     Returns:
-    -------
-    list[Callable]
         List of metric functions.
 
     Raises:
-    ------
-    ValueError: If metrics specification is invalid.
+        ValueError: If metrics specification is invalid.
     """
     if isinstance(metrics, str):
         metrics = _convert_to_enum(DefaultMetrics, metrics)
@@ -649,33 +565,21 @@ def GGN(
 ) -> Callable[[Params], Params]:
     """Create a GGN matrix-vector product function.
 
-    Parameters
-    ----------
-    model_fn : ModelFn
-        Neural network forward pass.
-    params : Params
-        Network parameters.
-    data : Data | Iterable
-        Training data.
-    loss_fn : LossFn
-        Loss function to use.
-    factor : float, optional
-        Scaling factor for GGN.
-    has_batch : bool, optional
-        Whether model expects batch dimension.
-    verbose_logging : bool, optional
-        Whether to enable verbose logging.
-    transform : Callable | None, optional
-        Transform to apply to data.
+    Args:
+        model_fn: Neural network forward pass.
+        params: Network parameters.
+        data: Training data.
+        loss_fn: Loss function to use.
+        factor: Scaling factor for GGN.
+        has_batch: Whether model expects batch dimension.
+        verbose_logging: Whether to enable verbose logging.
+        transform: Transform to apply to data.
 
     Returns:
-    -------
-    Callable[[Params], Params]
         GGN matrix-vector product function.
 
     Raises:
-    ------
-    ValueError: If input/output shapes don't match.
+        ValueError: If input/output shapes don't match.
     """
     ggn_mv = create_ggn_mv_without_data(  # type: ignore[call-arg]
         model_fn=model_fn,
@@ -722,43 +626,34 @@ def laplace(
     neural network weights. It estimates the curvature of the loss landscape and
     constructs a Gaussian approximation centered at the MAP estimate.
 
-    Parameters
-    ----------
-    model_fn : ModelFn
-        The neural network forward pass function that takes input and parameters.
-    params : Params
-        The MAP estimate of the network parameters.
-    data : Data | Iterable
-        Either a single batch (tuple/dict) or a DataLoader-like iterable containing
-        the training data.
-    loss_fn : LossFn
-        The supervised loss function to use (e.g., "mse" for regression).
-    curv_type : CurvApprox
-        Type of curvature approximation to use (e.g., "ggn", "diag-ggn").
-    num_curv_samples : Int, optional
-        Number of Monte Carlo samples used to estimate the GGN, by default 1.
-    num_total_samples : Int, optional
-        Total number of samples in the dataset, by default 1.
-    has_batch : bool, optional
-        Whether the model expects a leading batch axis, by default True.
-    **curv_kwargs
-        Additional arguments forwarded to the curvature estimation function.
+    Args:
+        model_fn: The neural network forward pass function that takes input and
+            parameters.
+        params: The MAP estimate of the network parameters.
+        data: Either a single batch (tuple/dict) or a DataLoader-like iterable
+            containing the training data.
+        loss_fn: The supervised loss function to use (e.g., "mse" for regression).
+        curv_type: Type of curvature approximation to use (e.g., "ggn", "diag-ggn").
+        num_curv_samples: Number of Monte Carlo samples used to estimate the GGN, by
+            default 1.
+        num_total_samples: Total number of samples in the dataset, by default 1.
+        has_batch: Whether the model expects a leading batch axis, by default True.
+        **curv_kwargs: Additional arguments forwarded to the curvature estimation
+            function.
 
     Returns:
-    -------
-    tuple[Callable[[PriorArguments, Float], Posterior], PyTree]
         A tuple containing:
-        - posterior_fn : Callable
-            Function that generates samples from the posterior given prior arguments.
-        - curv_estimate : PyTree
-            The estimated curvature in the chosen representation.
+
+            - posterior_fn: Function that generates samples from the posterior given
+                prior arguments.
+            - curv_estimate: The estimated curvature in the chosen representation.
 
     Notes:
-    -----
-    The function supports different curvature approximations:
-    - Full GGN: Computes the full Generalized Gauss-Newton matrix
-    - Diagonal GGN: Approximates the GGN with its diagonal
-    - Low-rank GGN: Uses Lanczos or LOBPCG for efficient approximation
+        The function supports different curvature approximations:
+
+        - Full GGN: Computes the full Generalized Gauss-Newton matrix
+        - Diagonal GGN: Approximates the GGN with its diagonal
+        - Low-rank GGN: Uses Lanczos or LOBPCG for efficient approximation
     """
     # Convert curv_type to enum
     curv_type_enum = _convert_to_enum(CurvApprox, curv_type)
@@ -828,41 +723,29 @@ def calibration(
     approximation by optimizing a specified objective function. It supports different
     calibration objectives and methods.
 
-    Parameters
-    ----------
-    posterior_fn : Callable[[PriorArguments, Float], Posterior]
-        Function that generates samples from the posterior.
-    model_fn : ModelFn
-        The neural network forward pass function.
-    params : Params
-        The MAP estimate of the network parameters.
-    data : Data
-        The validation data used for calibration.
-    loss_fn : LossFn
-        The supervised loss function used for training.
-    curv_estimate : PyTree
-        The estimated curvature from the Laplace approximation.
-    curv_type : CurvApprox
-        Type of curvature approximation used.
-    predictive_type : Predictive | str, optional
-        Type of predictive distribution to use, by default Predictive.NONE.
-    pushforward_type : Pushforward | str, optional
-        Type of pushforward approximation to use, by default Pushforward.LINEAR.
-    pushforward_fns : list[Callable] | None, optional
-        Custom pushforward functions to use, by default None.
-    calibration_objective : CalibrationObjective | str, optional
-        Objective function to optimize during calibration, by default
-        CalibrationObjective.NLL.
-    calibration_method : CalibrationMethod | str, optional
-        Method to use for calibration, by default CalibrationMethod.GRID_SEARCH.
-    has_batch : bool, optional
-        Whether the model expects a leading batch axis, by default True.
-    **calibration_kwargs
-        Additional arguments for the calibration method.
+    Args:
+        posterior_fn: Function that generates samples from the posterior.
+        model_fn: The neural network forward pass function.
+        params: The MAP estimate of the network parameters.
+        data: The validation data used for calibration.
+        loss_fn: The supervised loss function used for training.
+        curv_estimate: The estimated curvature from the Laplace approximation.
+        curv_type: Type of curvature approximation used.
+        predictive_type: Type of predictive distribution to use, by default
+            Predictive.NONE.
+        pushforward_type: Type of pushforward approximation to use, by default
+            Pushforward.LINEAR.
+        pushforward_fns: Custom pushforward functions to use, by default None.
+        sample_key: PRNG key.
+        num_samples: Number of MC samples for the predictive.
+        calibration_objective: Objective function to optimize during calibration, by
+            default CalibrationObjective.NLL.
+        calibration_method: Method to use for calibration, by default
+            CalibrationMethod.GRID_SEARCH.
+        has_batch: Whether the model expects a leading batch axis, by default True.
+        **calibration_kwargs: Additional arguments for the calibration method.
 
     Returns:
-    -------
-    tuple[PriorArguments, Callable[[InputArray], dict[str, Array]]]
         A tuple containing:
         - prior_arguments : PriorArguments
             Dictionary of calibrated hyperparameters.
@@ -870,19 +753,19 @@ def calibration(
             Function that creates a predictive distribution given prior arguments.
 
     Raises:
-    ------
-    ValueError: When an unknown calibration method is provided.
+        ValueError: When an unknown calibration method is provided.
 
     Notes:
-    -----
-    Supported calibration objectives:
-    - NLL: Negative log-likelihood
-    - CHI_SQUARED: Chi-squared statistic
-    - MARGINAL_LOG_LIKELIHOOD: Marginal log-likelihood
-    - ECE: Expected Calibration Error
+        Supported calibration objectives:
 
-    Supported calibration methods:
-    - GRID_SEARCH: Grid search over prior precision
+        - NLL: Negative log-likelihood
+        - CHI_SQUARED: Chi-squared statistic
+        - MARGINAL_LOG_LIKELIHOOD: Marginal log-likelihood
+        - ECE: Expected Calibration Error
+
+        Supported calibration methods:
+
+        - GRID_SEARCH: Grid search over prior precision
     """
     # If task is classification, then no NLL objective
     is_classification = predictive_type != Predictive.NONE
@@ -988,36 +871,24 @@ def evaluation(
     by computing various metrics on the test data. It supports both regression and
     classification tasks with different predictive distributions.
 
-    Parameters
-    ----------
-    posterior_fn : Callable[[PriorArguments, Float], Posterior]
-        Function that generates samples from the posterior.
-    model_fn : ModelFn
-        The neural network forward pass function.
-    params : Params
-        The MAP estimate of the network parameters.
-    arguments : PriorArguments
-        The calibrated prior arguments.
-    data : Data
-        The test data for evaluation.
-    metrics : DefaultMetrics | list[Callable] | str, optional
-        Metrics to compute during evaluation, by default DefaultMetrics.REGRESSION.
-    predictive_type : Predictive | str, optional
-        Type of predictive distribution to use, by default Predictive.NONE.
-    pushforward_type : Pushforward | str, optional
-        Type of pushforward approximation to use, by default Pushforward.LINEAR.
-    pushforward_fns : list[Callable] | None, optional
-        Custom pushforward functions to use, by default None.
-    reduce : Callable, optional
-        Function to reduce metrics across batches, by default identity.
-    sample_key : KeyType, optional
-        Random key for sampling, by default jax.random.key(0).
-    num_samples : int, optional
-        Number of samples for Monte Carlo predictions, by default 10.
+    Args:
+        posterior_fn: Function that generates samples from the posterior.
+        model_fn: The neural network forward pass function.
+        params: The MAP estimate of the network parameters.
+        arguments: The calibrated prior arguments.
+        data: The test data for evaluation.
+        metrics: Metrics to compute during evaluation, by default
+            DefaultMetrics.REGRESSION.
+        predictive_type: Type of predictive distribution to use, by default
+            Predictive.NONE.
+        pushforward_type: Type of pushforward approximation to use, by default
+            Pushforward.LINEAR.
+        pushforward_fns: Custom pushforward functions to use, by default None.
+        reduce: Function to reduce metrics across batches, by default identity.
+        sample_key: Random key for sampling, by default jax.random.key(0).
+        num_samples: Number of samples for Monte Carlo predictions, by default 10.
 
     Returns:
-    -------
-    tuple[dict[str, Array], Callable[[InputArray], dict[str, Array]]]
         A tuple containing:
         - results : dict
             Dictionary of computed metrics.
@@ -1025,14 +896,14 @@ def evaluation(
             The predictive distribution function.
 
     Notes:
-    -----
-    Supported metrics:
-    - REGRESSION: Default metrics for regression tasks
-    - CLASSIFICATION: Default metrics for classification tasks
-    - Custom metrics can be provided as a list of callables
+        Supported metrics:
 
-    The function supports both linearized and Monte Carlo predictions through
-    different pushforward types.
+        - REGRESSION: Default metrics for regression tasks
+        - CLASSIFICATION: Default metrics for classification tasks
+        - Custom metrics can be provided as a list of callables
+
+        The function supports both linearized and Monte Carlo predictions through
+        different pushforward types.
     """
     metrics_list = _resolve_metrics(metrics)
 
@@ -1054,13 +925,15 @@ def evaluation(
     )
 
     # Evaluate
-    isDataLoader = _is_data_loader(data)
-    transform = _validate_and_get_transform(next(iter(data)) if isDataLoader else data)
+    is_data_loader = _is_data_loader(data)
+    transform = _validate_and_get_transform(
+        next(iter(data)) if is_data_loader else data
+    )
 
-    if isDataLoader:
+    if is_data_loader:
         results = evaluate_metrics_on_generator(
             pred_fn=prob_predictive,
-            data_generator=data,
+            data_generator=cast("Iterator[Data]", data),
             metrics=metrics_list,
             transform=transform,
             reduce=jnp.concatenate,

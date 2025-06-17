@@ -2,7 +2,10 @@
   <img src="./images/laplax_logo.svg" width="541" height= "auto" alt="Laplax Logo"/>
 </p>
 
-# `laplax`
+---
+[![Python
+3.11+](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org/downloads/release/python-3110/)
+[![Test](https://github.com/laplax-org/laplax/actions/workflows/test.yaml/badge.svg)](https://github.com/laplax-org/laplax/actions/workflows/test.yaml) [![Coverage Status](https://coveralls.io/repos/github/laplax-org/laplax/badge.svg?branch=laplax_api)](https://coveralls.io/github/laplax-org/laplax?branch=laplax_api)
 
 > Laplace Approximations in JAX.
 

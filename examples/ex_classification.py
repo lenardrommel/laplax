@@ -6,13 +6,13 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import torch
+import wandb
 from flax import nnx
 from loguru import logger
 from plotting import create_proportion_diagram, create_reliability_diagram
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 
-import wandb
 from laplax.api import (
     GGN,
     CalibrationObjective,
@@ -21,7 +21,6 @@ from laplax.api import (
     calibration,
     evaluation,
     nll_gaussian_classification,
-    register_calibration_method,
 )
 from laplax.curv import estimate_curvature, set_posterior_fn
 from laplax.curv.cov import LowRankTerms
@@ -32,6 +31,7 @@ from laplax.eval.metrics import (
     correctness,
     expected_calibration_error,
 )
+from laplax.register import register_calibration_method
 
 from ex_helper import (  # isort: skip
     load_model_checkpoint,

@@ -6,7 +6,7 @@ from mkdocs_gen_files import open as gen_open
 
 
 def get_submodules(pkg, ref_dir):
-    """Return a list of (module, md_path) for all submodules of pkg (excluding __init__)."""
+    """Return a list of (module, md_path) for all submodules of pkg (excluding init)."""
     # Find the package's path
     spec = importlib.util.find_spec(pkg)
     if spec is None or not spec.submodule_search_locations:

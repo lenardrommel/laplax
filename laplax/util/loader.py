@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 from tqdm import tqdm
 
-from laplax.types import Any, Array, Callable, Data, Iterable, Layout, PyTree
+from laplax.types import Any, Array, Callable, Data, Iterable, Kwargs, Layout, PyTree
 from laplax.util.flatten import wrap_function
 from laplax.util.mv import diagonal, to_dense
 from laplax.util.tree import add
@@ -27,6 +27,7 @@ def input_target_split(batch: tuple[Array, Array]) -> Data:
 
     Returns:
         A dictionary containing:
+
             - "input": Input data from the batch.
             - "target": Target data from the batch.
     """
@@ -153,7 +154,7 @@ def process_batches(
     reduce: Callable,
     *args,
     verbose_logging: bool = False,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Any:
     """Process batches of data using a function, transformation, and reduction.
 
@@ -167,7 +168,7 @@ def process_batches(
         **kwargs: Additional keyword arguments for the processing function.
 
     Returns:
-        Any: The final result after processing all batches.
+        The final result after processing all batches.
 
     Raises:
         ValueError: If the data loader is empty.
@@ -197,7 +198,7 @@ def execute_with_data_loader(
     reduce: Callable = reduce_online_mean,
     *,
     jit: bool = False,
-    **kwargs,
+    **kwargs: Kwargs,
 ) -> Any:
     """Execute batch processing with a data loader.
 
@@ -212,7 +213,7 @@ def execute_with_data_loader(
         **kwargs: Additional keyword arguments for the processing function.
 
     Returns:
-        Any: The final result after processing all batches.
+        The final result after processing all batches.
     """
     fn = jax.jit(function) if jit else function
     return process_batches(fn, data_loader, transform, reduce, **kwargs)
@@ -241,7 +242,7 @@ def wrap_function_with_data_loader(
         jit: Whether to JIT compile the processing function (default: False).
 
     Returns:
-        Callable: A wrapped function for batch processing.
+        A wrapped function for batch processing.
     """
     fn = jax.jit(function) if jit else function
 
@@ -265,7 +266,7 @@ class DataLoaderMV:
         reduce: Callable = reduce_online_mean,
         *,
         verbose_logging: bool = False,
-        **kwargs,
+        **kwargs: Kwargs,
     ) -> None:
         """Initialize the DataLoaderMV object.
 
@@ -308,7 +309,7 @@ class DataLoaderMV:
             )
         )
 
-    def lower_func(self, func: Callable, **kwargs) -> Array:
+    def lower_func(self, func: Callable, **kwargs: Kwargs) -> Array:
         """Apply a function to the data loader and return the result.
 
         Args:
@@ -339,7 +340,7 @@ class DataLoaderMV:
 
 
 @to_dense.register
-def _(mv: DataLoaderMV, layout: Layout, **kwargs) -> Array:
+def _(mv: DataLoaderMV, layout: Layout, **kwargs: Kwargs) -> Array:
     """Apply to_dense to DataLoaderMV.
 
     Returns:

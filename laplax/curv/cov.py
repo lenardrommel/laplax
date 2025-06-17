@@ -178,10 +178,11 @@ def set_posterior_fn(
                 scaled. Defaults to 1.0.
 
         Returns:
-            A `Posterior` object containing:
-                - `state`: Updated state of the posterior.
-                - `cov_mv`: Function to compute covariance matrix-vector product.
-                - `scale_mv`: Function to compute scale matrix-vector product.
+            PosteriorState: Dictionary containing:
+
+                - 'state': Updated state of the posterior.
+                - 'cov_mv': Function to compute covariance matrix-vector product.
+                - 'scale_mv': Function to compute scale matrix-vector product.
         """
         # Calculate posterior precision.
         precision = CURVATURE_PRECISION_METHODS[curv_type](
@@ -233,8 +234,8 @@ def create_posterior_fn(
             `CurvApprox.DIAGONAL`, `CurvApprox.LANCZOS`, `CurvApprox.LOBPCG`) or
             corresponding string (`'full'`, `'diagonal'`, `'lanczos'`, `'lobpcg'`).
         mv: Function representing the curvature.
-        layout: Defines the format of the layout for matrix-vector products. If `None` or
-            an integer, no flattening/unflattening is used.
+        layout: Defines the format of the layout for matrix-vector products. If `None`
+            or an integer, no flattening/unflattening is used.
         **kwargs: Additional keyword arguments passed to the curvature estimation
             function.
 

@@ -58,7 +58,7 @@ def create_hessian_mv_without_data(
     single callable. It evaluates the Hessian at the provided model parameters, with
     respect to the model and loss function.
 
-    Mathematically: 
+    Mathematically:
 
     $$
     H \cdot v = \nabla^2 \mathcal{L}(f(x, \theta), y) \cdot v,
@@ -136,6 +136,7 @@ def create_hessian_mv(
         params: The parameters of the model.
         data: A batch of input and target data.
         loss_fn: The loss function to apply. Supported options are:
+
 
             - `LossFn.MSE` for mean squared error.
             - `LossFn.BINARY_CROSS_ENTROPY` for binary cross-entropy loss.

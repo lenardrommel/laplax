@@ -126,7 +126,7 @@ def create_loss_hessian_mv(
     automatic differentiation.
 
     Args:
-        loss_fn: Loss function to compute the Hessian-vector product for. Supported 
+        loss_fn: Loss function to compute the Hessian-vector product for. Supported
             options are:
 
             - `LossFn.BINARY_CROSS_ENTROPY` for binary cross-entropy loss.
@@ -141,7 +141,8 @@ def create_loss_hessian_mv(
         A function that computes the Hessian-vector product for the given loss function.
 
     Raises:
-        ValueError: When an unsupported loss function (not of type: `Callable`)is provided.
+        ValueError: When an unsupported loss function (not of type: `Callable`)is
+            provided.
     """
     del kwargs
 
@@ -279,7 +280,7 @@ def create_ggn_mv(
     loss function. For a given dataset, the GGN matrix-vector product is computed as:
 
     $$
-    G(\theta) = \text{factor} \sum_{i=1}^N J_i^\top \nabla^2_{f(x_i, \theta), f(x_i, 
+    G(\theta) = \text{factor} \sum_{i=1}^N J_i^\top \nabla^2_{f(x_i, \theta), f(x_i,
     \theta)} \mathcal{L}_i(f(x_i, \theta), y_i) J_i \cdot v
     $$
 
