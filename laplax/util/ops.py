@@ -26,7 +26,7 @@ def str_to_bool(value: str) -> bool:
         value: A string representation of a boolean ("True" or "False").
 
     Returns:
-        bool: The corresponding boolean value.
+        The corresponding boolean value.
 
     Raises:
         ValueError: If the string does not represent a valid boolean value.
@@ -61,8 +61,8 @@ def precompute_list(
             - precompute_list_batch_size: Batch size for precomputing results.
 
     Returns:
-        Callable: A function to retrieve precomputed elements by index, or the original
-        `func` if precomputation is disabled.
+        A function to retrieve precomputed elements by index, or the original
+            `func` if precomputation is disabled.
     """
     if precompute is None:
         precompute = DEFAULT_PRECOMPUTE_LIST
