@@ -43,7 +43,7 @@ def diagonal(
             diagonal_batch_size: Batch size for applying the MVP function.
 
     Returns:
-        jax.Array: An array representing the diagonal of the matrix.
+        An array representing the diagonal of the matrix.
 
     Raises:
         TypeError: If `layout` is not provided when `mv` is a callable.
@@ -99,7 +99,7 @@ def to_dense(mv: Callable, layout: Layout, **kwargs: Kwargs) -> Array:
             - `to_dense_batch_size`: Batch size for applying the MVP function.
 
     Returns:
-        jax.Array: A dense matrix representation of the MVP function.
+        A dense matrix representation of the MVP function.
 
     Raises:
         TypeError: If `layout` is neither an integer nor a PyTree structure.
