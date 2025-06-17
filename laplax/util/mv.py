@@ -31,9 +31,11 @@ def diagonal(
 
     Args:
         mv: Either:
+
             - A callable that implements the MVP, or
             - A dense matrix (jax.Array) for which the diagonal is directly extracted.
         layout: Specifies the structure of the matrix:
+
             - int: The size of the matrix (for flat MVP functions).
             - PyTree: A structure to generate basis vectors matching the matrix
                 dimensions.
@@ -92,10 +94,12 @@ def to_dense(mv: Callable, layout: Layout, **kwargs: Kwargs) -> Array:
     Args:
         mv: A callable implementing the matrix-vector product function.
         layout: Specifies the structure of the input:
+
             - int: The size of the input dimension (flat vectors).
             - PyTree: The structure for input to the MVP.
             - None: Defaults to an identity-like structure.
         **kwargs: Additional options:
+
             - `to_dense_batch_size`: Batch size for applying the MVP function.
 
     Returns:

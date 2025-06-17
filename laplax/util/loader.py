@@ -27,6 +27,7 @@ def input_target_split(batch: tuple[Array, Array]) -> Data:
 
     Returns:
         A dictionary containing:
+
             - "input": Input data from the batch.
             - "target": Target data from the batch.
     """

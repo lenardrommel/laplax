@@ -77,7 +77,8 @@ def create_pytree_flattener(
         tree: A PyTree to derive the structure for flattening and unflattening.
 
     Returns:
-        tuple:
+        Tuple containing:
+
             - `flatten`: A function that flattens a PyTree into a 1D array.
             - `unflatten`: A function that reconstructs the PyTree from a 1D array.
     """
