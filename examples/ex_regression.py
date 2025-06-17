@@ -4,12 +4,12 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import wandb  # Add wandb import
 from flax import nnx
 from helper import DataLoader, get_sinusoid_example
 from loguru import logger
 from plotting import plot_regression_with_uncertainty
 
-import wandb  # Add wandb import
 from laplax.api import (
     DEFAULT_REGRESSION_METRICS,
     CalibrationObjective,
@@ -24,11 +24,11 @@ from laplax.api import (
     nonlin_pred_mean,
     nonlin_pred_std,
     nonlin_setup,
-    register_calibration_method,
 )
 from laplax.enums import CurvApprox, LossFn
 from laplax.eval.pushforward import lin_samples, nonlin_samples
 from laplax.eval.utils import transfer_entry
+from laplax.register import register_calibration_method
 
 from ex_helper import (  # isort: skip
     generate_experiment_name,
