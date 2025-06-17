@@ -10,7 +10,7 @@ Currently supported curvatures-vector products are:
     v \mapsto \sum_{n=1}^{N} \mathcal{J}_\theta^\top(f_{\theta^*}(x_n)) \nabla^2_{f_{\theta^*}(x_n),f_{\theta^*}(x_n)} \ell(f_\theta(x_n), y_n) \mathcal{J}_\theta(f_{\theta^*})\, v
     $$
 
-- **Hessian-mv (Hessian):**:
+- **Hessian-mv (Hessian):**
     $$
     v \mapsto \sum_{n=1}^{N} \nabla_{\theta \theta}^2 \ell(f_\theta(x_n), y_n)\,v
     $$
@@ -47,11 +47,13 @@ This pipeline is controlled via the following three functions:
 
 - `laplax.curv.create_posterior_fn`: Combines the `estimate_curvature` and `set_posterior_fn`.
 
-
+### laplax.curv.estimate_curvature
 ::: laplax.curv.estimate_curvature
 
+### laplax.curv.set_posterior_fn
 ::: laplax.curv.set_posterior_fn
 
+### laplax.curv.create_posterior_fn
 ::: laplax.curv.create_posterior_fn
 
 <!-- ::: laplax.curv
