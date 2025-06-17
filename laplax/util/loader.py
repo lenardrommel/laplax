@@ -167,7 +167,7 @@ def process_batches(
         **kwargs: Additional keyword arguments for the processing function.
 
     Returns:
-        Any: The final result after processing all batches.
+        The final result after processing all batches.
 
     Raises:
         ValueError: If the data loader is empty.
@@ -212,7 +212,7 @@ def execute_with_data_loader(
         **kwargs: Additional keyword arguments for the processing function.
 
     Returns:
-        Any: The final result after processing all batches.
+        The final result after processing all batches.
     """
     fn = jax.jit(function) if jit else function
     return process_batches(fn, data_loader, transform, reduce, **kwargs)
@@ -241,7 +241,7 @@ def wrap_function_with_data_loader(
         jit: Whether to JIT compile the processing function (default: False).
 
     Returns:
-        Callable: A wrapped function for batch processing.
+        A wrapped function for batch processing.
     """
     fn = jax.jit(function) if jit else function
 
