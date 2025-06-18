@@ -1424,6 +1424,7 @@ wheels = [
 
 [[package]]
 name = "laplax"
+version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "jax" },
