@@ -4,6 +4,16 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+from ex_helper import (
+    CSVLogger,
+    fix_random_seed,
+    generate_experiment_name,
+    load_model_checkpoint,
+    optimize_prior_prec_gradient,
+    save_model_checkpoint,
+    split_model,
+    train_map_model,
+)
 from flax import nnx
 from helper import DataLoader, get_sinusoid_example
 from loguru import logger
@@ -29,17 +39,6 @@ from laplax.enums import CurvApprox, LossFn
 from laplax.eval.pushforward import lin_samples, nonlin_samples
 from laplax.eval.utils import transfer_entry
 from laplax.register import register_calibration_method
-
-from ex_helper import (  # isort: skip
-    generate_experiment_name,
-    load_model_checkpoint,
-    save_model_checkpoint,
-    train_map_model,
-    split_model,
-    CSVLogger,
-    optimize_prior_prec_gradient,
-    fix_random_seed,
-)
 
 # ------------------------------------------------------------------------------
 # TASK Setup
