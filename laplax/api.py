@@ -757,10 +757,11 @@ def calibration(
 
     Returns:
         A tuple containing:
-        - prior_arguments : PriorArguments
-            Dictionary of calibrated hyperparameters.
-        - set_prob_predictive : Callable
-            Function that creates a predictive distribution given prior arguments.
+
+            - prior_arguments : PriorArguments
+                Dictionary of calibrated hyperparameters.
+            - set_prob_predictive : Callable
+                Function that creates a predictive distribution given prior arguments.
 
     Raises:
         ValueError: When an unknown calibration method is provided.
@@ -912,10 +913,11 @@ def evaluation(
 
     Returns:
         A tuple containing:
-        - results : dict
-            Dictionary of computed metrics.
-        - prob_predictive : Callable
-            The predictive distribution function.
+
+            - results : dict
+                Dictionary of computed metrics.
+            - prob_predictive : Callable
+                The predictive distribution function.
 
     Notes:
         Supported metrics:
