@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import torch
+import wandb
 from ex_helper import (
     CSVLogger,
     LimitedLoader,
@@ -25,7 +26,6 @@ from plotting import create_proportion_diagram, create_reliability_diagram
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 
-import wandb
 from laplax.api import (
     GGN,
     CalibrationObjective,

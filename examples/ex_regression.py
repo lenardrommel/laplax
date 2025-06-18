@@ -4,6 +4,7 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import wandb
 from ex_helper import (
     CSVLogger,
     fix_random_seed,
@@ -19,7 +20,6 @@ from helper import DataLoader, get_sinusoid_example
 from loguru import logger
 from plotting import plot_regression_with_uncertainty
 
-import wandb  # Add wandb import
 from laplax.api import (
     DEFAULT_REGRESSION_METRICS,
     CalibrationObjective,
