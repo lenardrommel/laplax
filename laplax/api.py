@@ -642,7 +642,8 @@ def laplace(
             default 1.
         num_total_samples: Total number of samples in the dataset, by default 1.
         vmap_over_data: Whether the model expects a leading batch axis, by default True.
-        curv_mv_jit: Whether to jit the curvature matrix-vector product, by default False.
+        curv_mv_jit: Whether to jit the curvature matrix-vector product, by default
+            False.
         **curv_kwargs: Additional arguments forwarded to the curvature estimation
             function.
 
@@ -873,7 +874,10 @@ def evaluation(
     arguments: PriorArguments,
     data: Data | Iterator[Data],
     *,
-    metrics: DefaultMetrics | list[Callable] | Callable | str = DefaultMetrics.REGRESSION,
+    metrics: DefaultMetrics
+    | list[Callable]
+    | Callable
+    | str = DefaultMetrics.REGRESSION,
     predictive_type: Predictive | str = Predictive.NONE,
     pushforward_type: Pushforward | str = Pushforward.LINEAR,
     pushforward_fns: list[Callable] | None = None,

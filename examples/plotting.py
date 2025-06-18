@@ -49,6 +49,16 @@ def plot_regression_with_uncertainty(
             if y_std is not None:
                 y_std = np.array(y_std)
 
+    X_train_min = X_train.min()
+    X_train_max = X_train.max()
+
+    if X_test is not None:
+        X_test_min = X_test.min()
+        X_test_max = X_test.max()
+    else:
+        X_test_min = X_train_min
+        X_test_max = X_train_max
+
     # Plot training data
     plt.scatter(X_train, y_train, color="blue", alpha=0.6, label="Training data")
 
@@ -83,8 +93,8 @@ def plot_regression_with_uncertainty(
                 )
 
     # Plot true function
-    min_point = min(X_train.min(), X_test.min())
-    max_point = max(X_train.max(), X_test.max())
+    min_point = min(X_train_min, X_test_min)
+    max_point = max(X_train_max, X_test_max)
     x_true = np.linspace(min_point, max_point, 1000).reshape(-1, 1)
     y_true = np.sin(x_true)
     plt.plot(x_true, y_true, color="black", linestyle="--", label="True function")
