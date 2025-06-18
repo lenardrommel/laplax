@@ -538,13 +538,13 @@ def plot_figure_1(params, curv, *, save_fig=True):
     )  # , label="2-sigma (LapLaX)")
 
     # Set labels and limits
-    ax.set_xlabel(r"$\\theta_1$")
-    ax.set_ylabel(r"$\\theta_2$")
+    ax.set_xlabel(r"$\theta_1$")
+    ax.set_ylabel(r"$\theta_2$")
     ax.set_xlim(-3, 3)
     ax.set_ylim(-3, 3)
     ax.legend()
 
     if save_fig:
-        plt.savefig("laplax_figure_1.png", bbox_inches="tight")
+        plt.savefig("laplax_figure_1.png", bbox_inches="tight", dpi=600)
 
     return fig, ax
