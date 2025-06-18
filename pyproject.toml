@@ -4,10 +4,13 @@
 # See https://peps.python.org/pep-0621/
 
 [project]
+name = "laplax"
 authors = [
-    { name = "Bálint Mucsányi", email = "b.h.mucsanyi@gmail.com" },
-    { name = "Tobias Weber", email = "t.weber@uni-tuebingen.de" },
+    { name = "Bálint Mucsányi" },
+    { name = "Tobias Weber" },
 ]
+urls = { Repository = "https://github.com/laplax-org/laplax" }
+description = "Laplace approximations in JAX."
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -20,13 +23,6 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = ["jax", "jaxtyping", "loguru", "tqdm"]
-description = "Laplace approximations in JAX."
-keywords = [
-    "laplace approximation",
-    "uncertainty quantification",
-    "Pierre Simon Marquis de Laplace",
-]
-name = "laplax"
 version = "0.0.1"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
