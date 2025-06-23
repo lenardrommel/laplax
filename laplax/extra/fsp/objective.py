@@ -32,6 +32,7 @@ def create_loss_reg(
     model_fn: ModelFn,
     prior_mean: PredArray,
     prior_cov_kernel: Callable[[PredArray, PredArray], Float],
+    has_batch_dim: bool = True,
 ):
     r"""Create the FSP regularization loss function.
 
@@ -40,12 +41,27 @@ def create_loss_reg(
     \frac{1}{2} (f(c) - m)^T K^{-1}(c, c) (f(c) - m)
     $$
     """
+    if not has_batch_dim:
 
-    def loss_reg(context_points: PredArray, params: Params) -> Float:
-        f_c = jax.vmap(model_fn, in_axes=(0, None))(context_points, params) - prior_mean
-        K_c_c = prior_cov_kernel(context_points)
-        left = jax.scipy.linalg.solve(K_c_c, f_c, assume_a="sym")
-        return 0.5 * jax.numpy.einsum("ij,ij->", f_c, left)
+        def loss_reg(context_points: PredArray, params: Params) -> Float:
+            f_c = (
+                jax.vmap(model_fn, in_axes=(0, None))(context_points, params)
+                - prior_mean
+            )
+            K_c_c = prior_cov_kernel(*context_points)
+            left = jax.scipy.linalg.solve(K_c_c, f_c, assume_a="sym")
+            return 0.5 * jax.numpy.einsum("ij,ij->", f_c, left)
+
+    if has_batch_dim:
+
+        def loss_reg(context_points: PredArray, params: Params) -> Float:
+            f_c = (
+                jax.vmap(model_fn, in_axes=(0, None))(context_points[0], params)
+                - prior_mean[None, :]
+            )
+            K_c_c = prior_cov_kernel(*context_points)
+            left = jax.scipy.linalg.solve(K_c_c, f_c, assume_a="sym")
+            return 0.5 * jax.numpy.einsum("ij,ij->", f_c, left)
 
     return loss_reg
 
