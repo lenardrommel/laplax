@@ -97,10 +97,12 @@ class LinenClassificationTask(BaseClassificationTask):
                     strides=(self.avg_pool_strides, self.avg_pool_strides),
                 )
 
-                x = x.reshape((
-                    x.shape[0],
-                    -1,
-                ))  # Shape: (batch_size, flattened_features)
+                x = x.reshape(
+                    (
+                        x.shape[0],
+                        -1,
+                    )
+                )  # Shape: (batch_size, flattened_features)
 
                 x = nn.relu(self.linear1(x))
 

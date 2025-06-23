@@ -62,9 +62,9 @@ def diagonal(mv: Callable | jnp.ndarray, layout: Layout | None = None) -> Array:
             return basis_vector_from_index(idx, layout)
 
     # Compute the diagonal using basis vectors
-    return jnp.stack([
-        util.tree.tree_vec_get(mv(get_basis_vec(i)), i) for i in range(size)
-    ])
+    return jnp.stack(
+        [util.tree.tree_vec_get(mv(get_basis_vec(i)), i) for i in range(size)]
+    )
 
 
 def todense(mv: Callable, layout: Layout, **kwargs) -> Array:

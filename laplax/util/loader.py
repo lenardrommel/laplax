@@ -216,6 +216,7 @@ def wrap_function_with_data_loader(
     reduce: Callable = reduce_online_mean,
     *,
     jit: bool = False,
+    **kwargs,
 ) -> Callable:
     """Wrap a function to process batches with a data loader.
 
@@ -236,7 +237,9 @@ def wrap_function_with_data_loader(
     """
     fn = jax.jit(function) if jit else function
 
-    def wrapped(*args, **kwargs):
-        return process_batches(fn, data_loader, transform, reduce, *args, **kwargs)
+    def wrapped(*args, **local_kwargs):
+        return process_batches(
+            fn, data_loader, transform, reduce, *args, **kwargs, **local_kwargs
+        )
 
     return wrapped

@@ -179,7 +179,9 @@ class LaplaceComparison:
             raise RuntimeError(msg)
 
         if self.la_method == "full":
-            self.la_torch._posterior_scale = self.la_torch._posterior_scale.T  # noqa: SLF001
+            self.la_torch._posterior_scale = (
+                self.la_torch._posterior_scale.T
+            )  # noqa: SLF001
         # TODO(any): Check if this is a bug in laplace-redux.
 
         f_mu, f_var = self.la_torch(
@@ -190,7 +192,9 @@ class LaplaceComparison:
         )
 
         if self.la_method == "full":
-            self.la_torch._posterior_scale = self.la_torch._posterior_scale.T  # noqa: SLF001
+            self.la_torch._posterior_scale = (
+                self.la_torch._posterior_scale.T
+            )  # noqa: SLF001
         # TODO(any): Check if this is a bug in laplace-redux.
 
         f_mu = f_mu.squeeze().detach().cpu().numpy()

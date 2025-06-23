@@ -603,10 +603,12 @@ def register_curvature_method(
     create_fn: Callable[[CurvatureMV, Layout, Any], Any] | None = None,
     prior_fn: Callable | None = None,
     posterior_fn: Callable | None = None,
-    scale_fn: Callable[[PosteriorState], Callable[[FlatParams], FlatParams]]
-    | None = None,
-    cov_fn: Callable[[PosteriorState], Callable[[FlatParams], FlatParams]]
-    | None = None,
+    scale_fn: (
+        Callable[[PosteriorState], Callable[[FlatParams], FlatParams]] | None
+    ) = None,
+    cov_fn: (
+        Callable[[PosteriorState], Callable[[FlatParams], FlatParams]] | None
+    ) = None,
     default: CurvApprox | None = None,
 ) -> None:
     """Register a new curvature method with optional custom functions.
@@ -635,13 +637,15 @@ def register_curvature_method(
         ValueError: If no default is provided and required functions are missing.
     """
     # Check whether default is given
-    if default is None and not all((
-        create_fn,
-        prior_fn,
-        posterior_fn,
-        scale_fn,
-        cov_fn,
-    )):
+    if default is None and not all(
+        (
+            create_fn,
+            prior_fn,
+            posterior_fn,
+            scale_fn,
+            cov_fn,
+        )
+    ):
         missing_functions = [
             fn_name
             for fn_name, fn in zip(

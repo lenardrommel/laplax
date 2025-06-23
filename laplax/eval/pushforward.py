@@ -989,9 +989,12 @@ def set_posterior_gp_kernel(
     if kwargs.get("dense"):
         output_layout = kwargs.get("output_layout")
         if output_layout:
-            return lambda x1, x2: util.mv.todense(
-                lambda v: kernel_mv(v, x1, x2, dist_state), layout=output_layout
-            ), dist_state
+            return (
+                lambda x1, x2: util.mv.todense(
+                    lambda v: kernel_mv(v, x1, x2, dist_state), layout=output_layout
+                ),
+                dist_state,
+            )
         msg = "function should return a dense matrix, but no output layout is specified"
         raise ValueError(msg)
 

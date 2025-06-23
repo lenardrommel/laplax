@@ -155,7 +155,9 @@ def create_hessian_mv_without_data(
     """
     del kwargs
 
-    new_model_fn: Callable[[InputArray, TargetArray, Params], Num[Array, "..."]]  # noqa: UP037
+    new_model_fn: Callable[
+        [InputArray, TargetArray, Params], Num[Array, "..."]
+    ]  # noqa: UP037
 
     new_model_fn = concatenate_model_and_loss_fn(model_fn, loss_fn, has_batch=has_batch)
 
