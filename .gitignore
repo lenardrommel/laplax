@@ -4,12 +4,16 @@ checkpoints/*
 results/*
 wandb/*
 data/*
+examples/pipeline/*
+examples/fsplaplace/*
+
 
 # Temporary files (documentation)
 *.tmp
 
 # Pytest
 .pytest_cache/
+
 
 # Development
 local_*
