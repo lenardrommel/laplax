@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+from tueplots import bundles
 
 
 def plot_regression_with_uncertainty(
@@ -31,8 +32,15 @@ def plot_regression_with_uncertainty(
         y_std: Prediction standard deviation (shape: n_samples, 1), optional
         y_samples: Samples from the posterior (shape: n_samples, n_posterior_samples), optional
         title: Plot title, optional
+<<<<<<< HEAD
         y_max: Maximum scale for the y-axis, optional.
     """  # noqa: D205
+=======
+
+    Returns:
+        The figure.
+    """
+>>>>>>> upstream/main
     plt.figure(figsize=(10, 6))
     # Convert to numpy arrays if they are JAX arrays
     if hasattr(X_train, "device_buffer"):
@@ -48,6 +56,16 @@ def plot_regression_with_uncertainty(
         y_std = np.array(y_std)
     if y_samples is not None:
         y_samples = np.array(y_samples)
+
+    X_train_min = X_train.min()
+    X_train_max = X_train.max()
+
+    if X_test is not None:
+        X_test_min = X_test.min()
+        X_test_max = X_test.max()
+    else:
+        X_test_min = X_train_min
+        X_test_max = X_train_max
 
     # Plot training data
     plt.scatter(X_train, y_train, color="blue", alpha=0.6, label="Training data")
@@ -97,8 +115,15 @@ def plot_regression_with_uncertainty(
                     )
 
     # Plot true function
+<<<<<<< HEAD
     x_true = np.linspace(-1, 1, 1000).reshape(-1, 1)
     y_true = np.sin(2 * jnp.pi * x_true)
+=======
+    min_point = min(X_train_min, X_test_min)
+    max_point = max(X_train_max, X_test_max)
+    x_true = np.linspace(min_point, max_point, 1000).reshape(-1, 1)
+    y_true = np.sin(x_true)
+>>>>>>> upstream/main
     plt.plot(x_true, y_true, color="black", linestyle="--", label="True function")
 
     # Add labels and title
@@ -130,6 +155,9 @@ def plot_posterior_samples(
         X_train: Training input data (shape: n_train_samples, 1)
         y_train: Training target data (shape: n_train_samples, 1)
         title: Plot title
+
+    Returns:
+        The figure.
     """
     plt.figure(figsize=(10, 6))
 
@@ -179,6 +207,9 @@ def plot_predictive_distribution(
         y_pred_mean: Predictive mean (shape: n_pred_samples, 1)
         y_pred_std: Predictive standard deviation (shape: n_pred_samples, 1)
         title: Plot title
+
+    Returns:
+        The figure.
     """
     # Convert to numpy arrays if they are JAX arrays
     if hasattr(X_train, "device_buffer"):
@@ -297,6 +328,8 @@ def create_reliability_diagram(
     else:
         plt.show()
 
+    return plt.gcf()
+
 
 def create_proportion_diagram(
     bin_proportions: jax.Array,
@@ -335,6 +368,8 @@ def create_proportion_diagram(
 
     else:
         plt.show()
+
+    return plt.gcf()
 
 
 def plot_sinusoid_task(
@@ -450,6 +485,7 @@ def print_results(results_dict, title=None):
                 print(f"{key!s:<{max_key_length}} : {value}")  # noqa: T201
 
 
+<<<<<<< HEAD
 def plot_gp_prediction(
     X_train: jax.Array,
     y_train: jax.Array,
@@ -506,3 +542,98 @@ def plot_gp_prediction(
     ax.grid(True)
     plt.tight_layout()
     return fig
+=======
+def plot_figure_1(params, curv, *, save_fig=True):
+    """Plot the loss landscape and Laplace approximation ellipses.
+
+    Args:
+        params: Dictionary of model parameters
+        curv: Scale matrix from the posterior (R_laplax)
+        save_fig: Whether to save the figure (default: True)
+
+    Returns:
+        fig: The matplotlib figure object
+        ax: The matplotlib axes object
+    """
+    # Select a style bundle
+    style = bundles.icml2024(usetex=True)
+
+    # Apply the style to matplotlib
+    plt.rcParams.update(style)
+
+    # Get the optimal parameters
+    w1_opt_laplax = params["theta1"]
+    w2_opt_laplax = params["theta2"]
+
+    # Create parameter grid for visualization
+    W1, W2 = jnp.meshgrid(jnp.linspace(-3, 3, 1000), jnp.linspace(-3, 3, 1000))
+
+    # Compute loss landscape
+    b = -1
+    eps = 0.2
+    x1, y1 = 1, 1
+    x2, y2 = -1, -1
+
+    f1 = jax.nn.relu(W1.ravel() * x1 + b) * W2.ravel()
+    f2 = jax.nn.relu(W1.ravel() * x2 + b) * W2.ravel()
+
+    loss = 0.5 * ((f1 - y1) ** 2 + (f2 - y2) ** 2).reshape(W1.shape) + 0.5 * eps * (
+        W1**2 + W2**2
+    )
+
+    # Create figure
+    fig, ax = plt.subplots()
+
+    # Plot contours of the loss landscape
+    levels = [0.95, 1.0, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 20]
+    CS = plt.contour(
+        W1, W2, loss, levels=levels, colors="k", alpha=0.5
+    )  # , fontsize=3)  # Added smaller fontsize
+
+    # Add contour labels
+    def fmt(x):
+        s = f"{x:.1f}"
+        if s.endswith("0"):
+            s = f"{x:.0f}"
+        return f"{s}"
+
+    ax.clabel(CS, CS.levels, fmt=fmt, fontsize=6)
+
+    # Plot the optimal point
+    ax.plot(w1_opt_laplax, w2_opt_laplax, "ko")  # , label="Optimal Parameters")
+
+    # Plot the ellipse representing the curvature
+    ellipse = jnp.linspace(-jnp.pi, jnp.pi, 100)
+    x = jnp.cos(ellipse)
+    y = jnp.sin(ellipse)
+    xy = jnp.vstack((x, y))
+    xy = curv @ xy
+
+    # Plot 1-sigma and 2-sigma ellipses
+    ax.plot(
+        w1_opt_laplax + xy[0, :],
+        w2_opt_laplax + xy[1, :],
+        linestyle="solid",
+        color="#00695b",
+        lw=2,
+    )  # , label="1-sigma (LapLaX)")
+    ax.plot(
+        w1_opt_laplax + 2 * xy[0, :],
+        w2_opt_laplax + 2 * xy[1, :],
+        linestyle="--",
+        color="#00695b",
+        lw=2,
+    )  # , label="2-sigma (LapLaX)")
+
+    # Set labels and limits
+    ax.set_xlabel(r"$\theta_1$")
+    ax.set_ylabel(r"$\theta_2$")
+    ax.set_xlim(-3, 3)
+    ax.set_ylim(-3, 3)
+    ax.legend()
+
+    if save_fig:
+        plt.savefig("laplax_figure_1.png", bbox_inches="tight", dpi=600)
+
+    return fig, ax
+>>>>>>> upstream/main
