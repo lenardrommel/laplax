@@ -581,6 +581,8 @@ def lin_pred_var(
         tuple: Updated `results` and `aux`.
     """
     cov = results.get("pred_cov", aux["cov_mv"])
+    low_rank = kwargs.get("low_rank", False)
+    print("Using low_rank:", low_rank)
 
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
@@ -588,7 +590,9 @@ def lin_pred_var(
     pred_mean = results["pred_mean"]
 
     # Compute diagonal as variance
-    results["pred_var"] = util.mv.diagonal(cov, layout=math.prod(pred_mean.shape))
+    results["pred_var"] = util.mv.diagonal(
+        cov, layout=math.prod(pred_mean.shape), low_rank=low_rank
+    )
     return results, aux
 
 
