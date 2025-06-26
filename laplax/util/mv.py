@@ -21,6 +21,7 @@ def diagonal(
     layout: Layout | None = None,
     *,
     mv_jittable: bool = True,
+    low_rank: bool = False,
     **kwargs,
 ) -> Array:
     """Compute the diagonal of a matrix represented by a matrix-vector product function.
@@ -39,6 +40,7 @@ def diagonal(
                 dimensions.
             - None: If `mv` is a dense matrix.
         mv_jittable: Whether to JIT compile the basis vector generator.
+        low_rank: Assumes VV^T, where mv = V is a low-rank matrix.
         **kwargs:
             diagonal_batch_size: Batch size for applying the MVP function.
 
@@ -51,6 +53,14 @@ def diagonal(
     if isinstance(mv, Callable) and layout is None:
         msg = "either size or tree needs to be present"
         raise TypeError(msg)
+
+    if isinstance(mv, jax.Array) and low_rank:
+        """
+        Implements diag(VV^T) = Σⱼ V[:,j]².
+        When mv is a low-rank matrix V, the diagonal of VV^T
+        can be computed as the row-wise sum of squared elements.
+        """
+        return jnp.sum(mv**2, axis=1)
 
     if isinstance(mv, jax.Array):
         return jnp.diag(mv)
@@ -76,6 +86,9 @@ def diagonal(
 
     if mv_jittable:
         diag_elem = jax.jit(diag_elem)
+
+    if kwargs.get("low_rank"):
+        pass
 
     return jax.lax.map(
         diag_elem, jnp.arange(size), batch_size=kwargs.get("diagonal_batch_size")
