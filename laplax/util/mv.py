@@ -87,9 +87,6 @@ def diagonal(
     if mv_jittable:
         diag_elem = jax.jit(diag_elem)
 
-    if kwargs.get("low_rank"):
-        pass
-
     return jax.lax.map(
         diag_elem, jnp.arange(size), batch_size=kwargs.get("diagonal_batch_size")
     )
