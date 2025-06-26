@@ -8,13 +8,29 @@ import pytest_cases
 
 from laplax.curv.ggn import create_ggn_mv, create_loss_hessian_mv
 from laplax.enums import LossFn
-from laplax.util.ops import lmap
 
 from .cases.rosenbrock import RosenbrockCase
 
 # ---------------------------------------------------------------
 # Loss Hessian
 # ---------------------------------------------------------------
+
+
+def test_binary_cross_entropy_loss_hessian():
+    key = jax.random.key(0)
+    target = jnp.asarray(0)
+    logits = jax.random.normal(key, (1,))
+
+    # Set loss hessian via autodiff
+    hess_autodiff = jax.hessian(
+        optax.sigmoid_binary_cross_entropy,
+    )(logits, target)
+
+    # Set loss hessian via laplax mv
+    hess_mv = create_loss_hessian_mv("binary_cross_entropy")
+    hess_laplax = jax.vmap(partial(hess_mv, pred=logits))(jnp.eye(1))
+
+    assert jnp.allclose(hess_autodiff, hess_laplax, atol=1e-8)
 
 
 def test_cross_entropy_loss_hessian():
@@ -98,7 +114,7 @@ def test_ggn_rosenbrock(rosenbrock):
     )
 
     # Compute the GGN
-    ggn_calc = lmap(ggn_mv, jnp.eye(2))
+    ggn_calc = jax.lax.map(ggn_mv, jnp.eye(2))
 
     # Compare with the manual GGN
     ggn_manual = rosenbrock.ggn_manual

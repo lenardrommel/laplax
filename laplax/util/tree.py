@@ -8,16 +8,15 @@ from itertools import starmap
 import jax
 import jax.numpy as jnp
 
-from laplax.types import Any, Array, Callable, Float, KeyType, PyTree
+from laplax.types import Any, Array, Callable, Float, KeyType, Kwargs, PyTree
 from laplax.util.flatten import unravel_array_into_pytree
-from laplax.util.ops import lmap
 
 # ---------------------------------------------------------------
 # Tree utilities
 # ---------------------------------------------------------------
 
 
-def get_size(tree: PyTree) -> PyTree:
+def get_size(tree: PyTree) -> int:
     """Compute the total number of elements in a PyTree.
 
     Args:
@@ -126,7 +125,7 @@ def invert(tree: PyTree) -> PyTree:
     return jax.tree.map(jnp.invert, tree)
 
 
-def mean(tree: PyTree, **kwargs) -> PyTree:
+def mean(tree: PyTree, **kwargs: Kwargs) -> PyTree:
     """Compute the mean of each element in a PyTree.
 
     Args:
@@ -139,7 +138,7 @@ def mean(tree: PyTree, **kwargs) -> PyTree:
     return jax.tree.map(partial(jnp.mean, **kwargs), tree)
 
 
-def std(tree: PyTree, **kwargs) -> PyTree:
+def std(tree: PyTree, **kwargs: Kwargs) -> PyTree:
     """Compute the standard deviation of each element in a PyTree.
 
     Args:
@@ -152,7 +151,7 @@ def std(tree: PyTree, **kwargs) -> PyTree:
     return jax.tree.map(partial(jnp.std, **kwargs), tree)
 
 
-def var(tree: PyTree, **kwargs) -> PyTree:
+def var(tree: PyTree, **kwargs: Kwargs) -> PyTree:
     """Compute the variance of each element in a PyTree.
 
     Args:
@@ -165,7 +164,7 @@ def var(tree: PyTree, **kwargs) -> PyTree:
     return jax.tree.map(partial(jnp.var, **kwargs), tree)
 
 
-def cov(tree: PyTree, **kwargs) -> PyTree:
+def cov(tree: PyTree, **kwargs: Kwargs) -> PyTree:
     """Compute the covariance of each element in a PyTree.
 
     Args:
@@ -349,7 +348,9 @@ def eye_like_with_basis_vector(tree: PyTree) -> PyTree:
         A PyTree of basis vectors.
     """
     num_elems = get_size(tree)
-    return lmap(partial(basis_vector_from_index, tree=tree), jnp.arange(num_elems))
+    return jax.lax.map(
+        partial(basis_vector_from_index, tree=tree), jnp.arange(num_elems)
+    )
 
 
 def eye_like(tree: PyTree) -> PyTree:

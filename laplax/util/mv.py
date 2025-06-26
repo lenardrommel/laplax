@@ -1,13 +1,13 @@
 """Matrix-free array operations for matrix-vector products."""
 
 from collections.abc import Callable
+from functools import singledispatch
 
 import jax
 import jax.numpy as jnp
 
 from laplax import util
-from laplax.types import Array, Layout, PyTree
-from laplax.util.ops import lmap
+from laplax.types import Array, Kwargs, Layout, PyTree
 from laplax.util.tree import (
     basis_vector_from_index,
     eye_like,
@@ -15,7 +15,14 @@ from laplax.util.tree import (
 )
 
 
-def diagonal(mv: Callable | jnp.ndarray, layout: Layout | None = None) -> Array:
+@singledispatch
+def diagonal(
+    mv: Callable | jnp.ndarray,
+    layout: Layout | None = None,
+    *,
+    mv_jittable: bool = True,
+    **kwargs: Kwargs,
+) -> Array:
     """Compute the diagonal of a matrix represented by a matrix-vector product function.
 
     This function extracts the diagonal of a matrix using basis vectors and a
@@ -24,16 +31,21 @@ def diagonal(mv: Callable | jnp.ndarray, layout: Layout | None = None) -> Array:
 
     Args:
         mv: Either:
+
             - A callable that implements the MVP, or
             - A dense matrix (jax.Array) for which the diagonal is directly extracted.
         layout: Specifies the structure of the matrix:
+
             - int: The size of the matrix (for flat MVP functions).
             - PyTree: A structure to generate basis vectors matching the matrix
                 dimensions.
             - None: If `mv` is a dense matrix.
+        mv_jittable: Whether to JIT compile the basis vector generator.
+        **kwargs:
+            diagonal_batch_size: Batch size for applying the MVP function.
 
     Returns:
-        jax.Array: An array representing the diagonal of the matrix.
+        An array representing the diagonal of the matrix.
 
     Raises:
         TypeError: If `layout` is not provided when `mv` is a callable.
@@ -61,13 +73,19 @@ def diagonal(mv: Callable | jnp.ndarray, layout: Layout | None = None) -> Array:
         def get_basis_vec(idx: int) -> PyTree:
             return basis_vector_from_index(idx, layout)
 
-    # Compute the diagonal using basis vectors
-    return jnp.stack(
-        [util.tree.tree_vec_get(mv(get_basis_vec(i)), i) for i in range(size)]
+    def diag_elem(i):
+        return util.tree.tree_vec_get(mv(get_basis_vec(i)), i)
+
+    if mv_jittable:
+        diag_elem = jax.jit(diag_elem)
+
+    return jax.lax.map(
+        diag_elem, jnp.arange(size), batch_size=kwargs.get("diagonal_batch_size")
     )
 
 
-def todense(mv: Callable, layout: Layout, **kwargs) -> Array:
+@singledispatch
+def to_dense(mv: Callable, layout: Layout, **kwargs: Kwargs) -> Array:
     """Generate a dense matrix representation from a matrix-vector product function.
 
     Converts a matrix-vector product function into its equivalent dense matrix form
@@ -76,14 +94,16 @@ def todense(mv: Callable, layout: Layout, **kwargs) -> Array:
     Args:
         mv: A callable implementing the matrix-vector product function.
         layout: Specifies the structure of the input:
+
             - int: The size of the input dimension (flat vectors).
             - PyTree: The structure for input to the MVP.
             - None: Defaults to an identity-like structure.
         **kwargs: Additional options:
-            - `lmap_dense`: Batch size for applying the MVP function.
+
+            - `to_dense_batch_size`: Batch size for applying the MVP function.
 
     Returns:
-        jax.Array: A dense matrix representation of the MVP function.
+        A dense matrix representation of the MVP function.
 
     Raises:
         TypeError: If `layout` is neither an integer nor a PyTree structure.
@@ -98,5 +118,6 @@ def todense(mv: Callable, layout: Layout, **kwargs) -> Array:
         raise TypeError(msg)
 
     return jax.tree.map(
-        jnp.transpose, lmap(mv, identity, batch_size=kwargs.get("lmap_dense", "mv"))
-    )  # Lmap shares along the first axis (rows instead of columns).
+        jnp.transpose,
+        jax.lax.map(mv, identity, batch_size=kwargs.get("to_dense_batch_size")),
+    )  # jax.lax.map shares along the first axis (rows instead of columns).

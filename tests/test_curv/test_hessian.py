@@ -1,9 +1,9 @@
+import jax
 import jax.numpy as jnp
 import pytest
 import pytest_cases
 
 from laplax.curv.hessian import create_hessian_mv
-from laplax.util.ops import lmap
 
 from .cases.rosenbrock import RosenbrockCase
 
@@ -26,8 +26,9 @@ def test_hessian_rosenbrock(rosenbrock):
         data={"input": jnp.zeros(1), "target": jnp.zeros(1)},
         loss_fn=rosenbrock.loss_fn,
         num_total_samples=1,
+        vmap_over_data=False,
     )
 
-    hessian_calc = lmap(hessian_mv, jnp.eye(2))
+    hessian_calc = jax.lax.map(hessian_mv, jnp.eye(2))
     hessian_manual = rosenbrock.hessian_manual
     assert jnp.allclose(hessian_calc, hessian_manual)

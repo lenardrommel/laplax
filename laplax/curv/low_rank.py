@@ -1,179 +1,213 @@
-"""Higher-level API for Low-Rank Approximations.
-
-This module provides utilities for computing low-rank approximations using
-the Locally Optimal Block Preconditioned Conjugate Gradient (LOBPCG) algorithm.
-It supports mixed-precision arithmetic, customizable data types, and optional
-JIT compilation for optimized performance.
-
-The primary function, `get_low_rank_approximation`, computes the leading eigenvalues
-and eigenvectors of a matrix represented by a matrix-vector product function.
-This allows for scalable computation without explicitly constructing the full
-matrix, making it efficient for large-scale problems.
-
-Key Features:
-- Mixed-precision support for reduced memory usage and improved performance.
-- Flexible tolerance and iteration settings for adaptive convergence.
-- JIT compilation for efficient matrix-vector product computations.
-"""
-
-import warnings
-from dataclasses import dataclass
+"""Low-rank curvature approximation."""
 
 import jax
 import jax.numpy as jnp
 
-from laplax.curv.lanczos import lobpcg_standard
-from laplax.types import Array, Callable, DType, Float, KeyType, Num
-from laplax.util.flatten import wrap_function
-
-# -----------------------------------------------------------------------------
-# Low-rank terms
-# -----------------------------------------------------------------------------
-
-
-@dataclass
-class LowRankTerms:
-    """Components of the low-rank curvature approximation.
-
-    This dataclass encapsulates the results of the low-rank approximation, including
-    the eigenvectors, eigenvalues, and a scalar factor which can be used for the prior.
-
-    Attributes:
-        U: Matrix of eigenvectors, where each column corresponds to an eigenvector.
-        S: Array of eigenvalues associated with the eigenvectors.
-        scalar: Scalar factor added to the matrix during the approximation.
-    """
-
-    U: Num[Array, "P R"]
-    S: Num[Array, " R"]
-    scalar: Float[Array, ""]
-
-
-jax.tree_util.register_pytree_node(
-    LowRankTerms,
-    lambda node: ((node.U, node.S, node.scalar), None),
-    lambda _, children: LowRankTerms(U=children[0], S=children[1], scalar=children[2]),
+from laplax.curv.lanczos import lanczos_lowrank
+from laplax.curv.lobpcg import lobpcg_lowrank
+from laplax.curv.utils import LowRankTerms
+from laplax.enums import LowRankMethod
+from laplax.types import (
+    Callable,
+    CurvatureMV,
+    FlatParams,
+    Float,
+    Kwargs,
+    Layout,
+    PriorArguments,
 )
 
 
-# -----------------------------------------------------------------------------
-# Low-rank approximation
-# -----------------------------------------------------------------------------
-
-
-def get_low_rank_approximation(
-    mv: Callable[[Array], Array],
-    key: KeyType,
-    size: int,
-    maxiter: int = 20,
-    mv_dtype: DType = jnp.float32,
-    calc_dtype: DType = jnp.float64,
-    return_dtype: DType = jnp.float32,
-    tol: float | None = None,
-    *,
-    mv_jittable: bool = True,
-    **kwargs,
+def create_low_rank_curvature(
+    mv: CurvatureMV,
+    layout: Layout,
+    low_rank_method: LowRankMethod = LowRankMethod.LANCZOS,
+    **kwargs: Kwargs,
 ) -> LowRankTerms:
-    r"""Compute a low-rank approximation using the LOBPCG algorithm.
+    r"""Generate a low-rank curvature approximation.
 
-    This function computes the leading eigenvalues and eigenvectors of a matrix
-    represented by a matrix-vector product function `mv`, without explicitly forming
-    the matrix. It uses the Locally Optimal Block Preconditioned Conjugate Gradient
-    (LOBPCG) algorithm to achieve efficient low-rank approximation, with support
-    for mixed-precision arithmetic and optional JIT compilation.
+    The low-rank curvature is computed as an approximation to the full curvature matrix
+    using the provided matrix-vector product function and either the Lanczos or LOBPCG
+    algorithm. The low-rank approximation is returned as a `LowRankTerms` object.
+    The low-rank approximation is computed as:
 
-    Mathematically, the low-rank approximation seeks to find the leading eigenpairs
-    $(\lambda_i, u_i)$ such that:
-    $A u_i = \lambda_i u_i \quad \text{for } i = 1, \ldots, k$, where $A$ is the matrix
-    represented by the matrix-vector product `mv`, and $k$ is the number of eigenpairs.
+    $$
+    \text{\textbf{Curv}} \approx U S U^{\top}
+    $$
+
+    where $U$ are the eigenvectors and $S$ are the eigenvalues. The `LowRankTerms` holds
+    the eigenvectors, eigenvalues, and a scalar factor. The latter can be used to
+    express an isotropic Gaussian prior.
 
     Args:
-        mv: A callable that computes the matrix-vector product, representing the matrix
-            $A(x)$.
-        key: PRNG key for random initialization of the search directions.
-        size: Dimension of the input/output space of the matrix.
-        maxiter: Maximum number of LOBPCG iterations. Defaults to 20.
-        mv_dtype: Data type for the matrix-vector product function.
-        calc_dtype: Data type for internal calculations during LOBPCG.
-        return_dtype: Data type for the final results.
-        tol: Convergence tolerance for the algorithm. If `None`, the machine epsilon
-            for `calc_dtype` is used.
-        mv_jittable: If `True`, enables JIT compilation for the matrix-vector product.
-        **kwargs: Additional arguments (ignored).
+        mv: Matrix-vector product function representing the curvature.
+        layout: Structure defining the parameter layout that is assumed by the
+            matrix-vector product function.
+        low_rank_method: Method to use for computing the low-rank approximation.
+            Can be either `LowRankMethod.LANCZOS` or `LowRankMethod.LOBPCG`.
+            Defaults to `LowRankMethod.LANCZOS`.
+        **kwargs: Additional arguments passed to the low-rank method.
 
     Returns:
-        LowRankTerms: A dataclass containing:
-            - `U`: Eigenvectors as a matrix of shape `(size, rank)`.
-            - `S`: Eigenvalues as an array of length `rank`.
-            - `scalar`: Scalar factor, initialized to 0.0.
-
-    Raises:
-        ValueError: If `size` is insufficient to perform the requested number of
-            iterations.
-
-    Notes:
-        - If the size of the matrix is small relative to `maxiter`, the number of
-          iterations is reduced to avoid over-computation.
-        - Mixed precision can significantly reduce memory usage, especially for large
-          matrices.
-
-    Example:
-        ```python
-        def mv_function(x):
-            return A @ x  # Replace A with your matrix or matrix representation
-
-        low_rank_terms = get_low_rank_approximation(
-            mv=mv_function,
-            key=jax.random.PRNGKey(42),
-            size=1000,
-            maxiter=10,
-            tol=1e-6,
-        )
-        ```
+        A LowRankTerms object representing the low-rank curvature approximation.
     """
-    del kwargs
+    # Select and apply the low-rank method.
+    low_rank_terms = {
+        LowRankMethod.LANCZOS: lanczos_lowrank,
+        LowRankMethod.LOBPCG: lobpcg_lowrank,
+    }[low_rank_method](mv, layout=layout, **kwargs)
 
-    # Adjust maxiter if it's too large compared to problem size
-    if size < maxiter * 5:
-        maxiter = max(1, size // 5 - 1)
-        msg = f"reduced maxiter to {maxiter} due to insufficient size"
-        warnings.warn(msg, stacklevel=1)
+    return low_rank_terms
 
-    is_compute_in_float64 = jax.config.read("jax_enable_x64")
-    if jnp.float64 in {mv_dtype, calc_dtype, return_dtype}:
-        jax.config.update("jax_enable_x64", True)
 
-    # Wrap to_dtype around mv if necessary.
-    if mv_dtype != calc_dtype:
-        mv = wrap_function(
-            mv,
-            input_fn=lambda x: jnp.asarray(x, dtype=mv_dtype),
-            output_fn=lambda x: jnp.asarray(x, dtype=calc_dtype),
+def create_low_rank_mv(
+    low_rank_terms: LowRankTerms,
+) -> Callable[[FlatParams], FlatParams]:
+    r"""Create a low-rank matrix-vector product function.
+
+    The low-rank matrix-vector product is computed as the sum of the scalar multiple of
+    the vector by the scalar and the product of the matrix-vector product of the
+    eigenvectors and the eigenvalues times the eigenvector-vector product:
+
+    $$
+    scalar * \text{vec} + U @ (S * (U.T @ \text{vec}))
+    $$
+
+    Args:
+        low_rank_terms: Low-rank curvature approximation.
+
+    Returns:
+        A function that computes the low-rank matrix-vector product.
+    """
+    U, S, scalar = jax.tree_util.tree_leaves(low_rank_terms)
+
+    def low_rank_mv(vec: FlatParams) -> FlatParams:
+        return scalar * vec + U @ (S * (U.T @ vec))
+
+    return low_rank_mv
+
+
+def low_rank_square(
+    state: LowRankTerms,
+) -> LowRankTerms:
+    r"""Square the low-rank curvature approximation.
+
+    This returns the `LowRankTerms` which correspond to the squared low-rank
+    approximation. The squared low-rank approximation is computed as:
+
+    $$
+    (U S U^{\top} + scalar I) ** 2
+    = scalar**2 + U ((S + scalar) ** 2 - scalar**2) U^{\top}
+    $$
+
+    Args:
+        state: Low-rank curvature approximation.
+
+    Returns:
+        A `LowRankTerms` object representing the squared low-rank curvature
+            approximation.
+    """
+    U, S, scalar = jax.tree_util.tree_leaves(state)
+    scalar_sq = scalar**2
+    return LowRankTerms(
+        U=U,
+        S=(S + scalar) ** 2 - scalar_sq,
+        scalar=scalar_sq,
+    )
+
+
+def low_rank_curvature_to_precision(
+    curv_estimate: LowRankTerms,
+    prior_arguments: PriorArguments,
+    loss_scaling_factor: Float = 1.0,
+) -> LowRankTerms:
+    r"""Add prior precision to the low-rank curvature estimate.
+
+    The prior precision (of an isotropic Gaussian prior) is read from the
+    `prior_arguments` dictionary and added to the scalar component of the
+    LowRankTerms.
+
+    Args:
+        curv_estimate: Low-rank curvature approximation.
+        prior_arguments: Dictionary containing prior precision
+            as 'prior_prec'.
+        loss_scaling_factor: Factor by which the user-provided loss function is
+            scaled. Defaults to 1.0.
+
+    Returns:
+        LowRankTerms: Updated low-rank curvature approximation with added prior
+            precision.
+    """
+    prior_prec = prior_arguments["prior_prec"]
+    sigma_squared = prior_arguments.get("sigma_squared", 1.0)
+    U, S, _ = jax.tree.leaves(curv_estimate)
+    return LowRankTerms(
+        U=U,
+        S=(sigma_squared * S),
+        scalar=prior_prec / loss_scaling_factor,
+    )
+
+
+def low_rank_prec_to_posterior_state(
+    curv_estimate: LowRankTerms,
+) -> dict[str, LowRankTerms]:
+    """Convert the low-rank precision representation to a posterior state.
+
+    The scalar component and eigenvalues of the low-rank curvature estimate are
+    transformed to represent the posterior scale, creating again a `LowRankTerms`
+    representation. The scale matrix is the diagonal matrix with the inverse of the
+    square root of the low-rank approximation using the Woodbury identity for analytic
+    inversion.
+
+    Args:
+        curv_estimate: Low-rank curvature estimate.
+
+    Returns:
+        A dictionary with the posterior state represented as `LowRankTerms`.
+    """
+    U, S, scalar = jax.tree_util.tree_leaves(curv_estimate)
+    scalar_sqrt_inv = jnp.reciprocal(jnp.sqrt(scalar))
+    return {
+        "scale": LowRankTerms(
+            U=U,
+            S=jnp.reciprocal(jnp.sqrt(S + scalar)) - scalar_sqrt_inv,
+            scalar=scalar_sqrt_inv,
         )
+    }
 
-    # Initialize random search directions
-    X = jax.random.normal(key, (size, maxiter), dtype=calc_dtype)
 
-    # Perform LOBPCG for eigenvalues and eigenvectors using the new wrapper
-    eigenvals, eigenvecs, _ = lobpcg_standard(
-        A=mv,
-        X=X,
-        m=maxiter,
-        tol=tol,
-        calc_dtype=calc_dtype,
-        a_dtype=mv_dtype,
-        A_jittable=mv_jittable,
-    )
+def low_rank_posterior_state_to_scale(
+    state: dict[str, LowRankTerms],
+) -> Callable[[FlatParams], FlatParams]:
+    """Create a matrix-vector product function for the scale matrix.
 
-    # Prepare and convert the results
-    low_rank_result = LowRankTerms(
-        U=jnp.asarray(eigenvecs, dtype=return_dtype),
-        S=jnp.asarray(eigenvals, dtype=return_dtype),
-        scalar=jnp.asarray(0.0, dtype=return_dtype),
-    )
+    The state dictionary containing the low-rank representation of the covariance state
+    is used to create a function that computes the matrix-vector product for the scale
+    matrix. The scale matrix is the diagonal matrix with the inverse of the square root
+    of the eigenvalues.
 
-    # Restore the original configuration dtype
-    if is_compute_in_float64 != jax.config.read("jax_enable_x64"):
-        jax.config.update("jax_enable_x64", is_compute_in_float64)
+    Args:
+        state: Dictionary containing the low-rank scale.
 
-    return low_rank_result
+    Returns:
+        A function that computes the scale matrix-vector product.
+    """
+    return create_low_rank_mv(state["scale"])
+
+
+def low_rank_posterior_state_to_cov(
+    state: dict[str, LowRankTerms],
+) -> Callable[[FlatParams], FlatParams]:
+    """Create a matrix-vector product function for the covariance matrix.
+
+    The state dictionary containing the low-rank representation of the covariance state
+    is used to create a function that computes the matrix-vector product for the
+    covariance matrix. The covariance matrix is the low-rank approximation squared.
+
+    Args:
+        state: Dictionary containing the low-rank scale.
+
+    Returns:
+        A function that computes the covariance matrix-vector product.
+    """
+    return create_low_rank_mv(low_rank_square(state["scale"]))
