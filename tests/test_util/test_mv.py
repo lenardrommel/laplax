@@ -37,6 +37,34 @@ def test_diagonal_and_to_dense_flat_mvp(n):
     np.testing.assert_allclose(dense_computed, A, atol=1e-7, rtol=1e-7)
 
 
+@pytest.mark.parametrize("n", [2, 5, 20, 100])
+def test_diagonal_low_rank(n):
+    key = jax.random.PRNGKey(42)
+    key1, key2 = jax.random.split(key)
+
+    # Rank-1: V is n x 1, VV^T is rank-1 positive semidefinite
+    u = jax.random.normal(key1, (n,))
+    rank1_factor = u.reshape(-1, 1)  # n x 1 matrix
+    rank1_matrix = rank1_factor @ rank1_factor.T  # uu^T, not uv^T
+
+    key3 = jax.random.split(key2)[0]
+    V_rank2 = jax.random.normal(key3, (n, 2))
+    rank2_matrix = V_rank2 @ V_rank2.T
+
+    key4 = jax.random.split(key3)[0]
+    V_rank5 = jax.random.normal(key4, (n, 5))
+    rank5_matrix = V_rank5 @ V_rank5.T
+
+    def compare_diagonals(full_matrix, factor_matrix):
+        assert jnp.allclose(
+            jnp.diag(full_matrix), diagonal(factor_matrix, layout=n, low_rank=True)
+        ), "Diagonal computation mismatch for low-rank matrix"
+
+    compare_diagonals(rank1_matrix, rank1_factor)
+    compare_diagonals(rank2_matrix, V_rank2)
+    compare_diagonals(rank5_matrix, V_rank5)
+
+
 @pytest.mark.parametrize(("n1", "n2"), [(2, 3), (3, 4)])
 def test_diagonal_and_to_dense_pytree_mvp(n1, n2):
     key = jax.random.PRNGKey(999)

@@ -582,6 +582,7 @@ def lin_pred_var(
     """
     cov = results.get("pred_cov", aux["cov_mv"])
     low_rank = kwargs.get("low_rank", False)
+    print("Using low_rank:", low_rank)
 
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
