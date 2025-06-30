@@ -66,7 +66,12 @@ def set_get_weight_sample(key, mean_params, scale_mv, num_samples, **kwargs):
     keys = jax.random.split(key, num_samples)
 
     def get_weight_sample(idx):
-        return util.tree.normal_like(keys[idx], mean=mean_params, scale_mv=scale_mv)
+        return util.tree.normal_like(
+            keys[idx],
+            mean=mean_params,
+            scale_mv=scale_mv,
+            rank=kwargs.get("rank", None),  # If scale_mv assumes lower rank.
+        )
 
     return precompute_list(
         get_weight_sample,
@@ -195,6 +200,7 @@ def get_dist_state(
             mean_params=weight_sample_mean,
             scale_mv=posterior_state.scale_mv(posterior_state.state),
             num_samples=num_samples,
+            rank=posterior_state.rank,
             **kwargs,
         )
         dist_state["get_weight_samples"] = get_weight_samples
@@ -575,6 +581,7 @@ def lin_pred_var(
         tuple: Updated `results` and `aux`.
     """
     cov = results.get("pred_cov", aux["cov_mv"])
+    low_rank = kwargs.get("low_rank", False)
 
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
@@ -582,7 +589,9 @@ def lin_pred_var(
     pred_mean = results["pred_mean"]
 
     # Compute diagonal as variance
-    results["pred_var"] = util.mv.diagonal(cov, layout=math.prod(pred_mean.shape))
+    results["pred_var"] = util.mv.diagonal(
+        cov, layout=math.prod(pred_mean.shape), low_rank=low_rank
+    )
     return results, aux
 
 
