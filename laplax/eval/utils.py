@@ -357,6 +357,18 @@ def evaluate_metrics_on_generator(
     if not all_results:
         return {}
 
+    def flatten_recursive(d: dict, sep: str = "_") -> dict[str, any]:
+        items: dict[str, any] = {}
+        for k, v in d.items():
+            if isinstance(v, dict):
+                items.update(flatten_recursive(v, k, sep=sep))
+            else:
+                items[k] = v
+        return items
+
+    # Flatten the results if they are nested dictionaries
+    all_results = [flatten_recursive(result) for result in all_results]
+
     # Get all metric names from the first result
     metric_names = all_results[0].keys()
 

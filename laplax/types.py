@@ -46,3 +46,36 @@ CurvatureKeyType = CurvApprox | str | None
 
 # Utility types
 Kwargs = Any
+
+# Declare all types as api
+__all__ = [
+    "KeyType",
+    "DType",
+    "ShapeType",
+    "PyTreeDef",
+    "InputArray",
+    "PredArray",
+    "TargetArray",
+    "FlatParams",
+    "Params",
+    "ModelFn",
+    "CurvatureMV",
+    "Data",
+    "Layout",
+    "PriorArguments",
+    "PosteriorState",
+    "DistState",
+    "CurvatureKeyType",
+    "Kwargs",
+    "Array",
+    "Float",
+    "Int",
+    "Num",
+    "PyTree",
+    "Callable",
+    "Iterable",
+    "Mapping",
+    "Any",
+    "CurvApprox",
+    "PRNGKeyArray",
+]

@@ -10,9 +10,11 @@ import math
 
 import jax
 import jax.numpy as jnp
+import jax.scipy as jsp
 
 from laplax import util
 from laplax.curv.cov import Posterior
+from laplax.curv.utils import LowRankTerms
 from laplax.eval.predictives import (
     laplace_bridge,
     mean_field_0_predictive,
@@ -35,6 +37,7 @@ from laplax.types import (
     PredArray,
     PriorArguments,
 )
+from laplax.util.flatten import create_pytree_flattener
 from laplax.util.ops import precompute_list
 from laplax.util.tree import add
 
@@ -186,8 +189,13 @@ def get_dist_state(
             )
             return vjp_fun(vector.reshape(out.shape))
 
-        dist_state["vjp"] = pf_vjp
-        dist_state["jvp"] = pf_jvp
+        batched_computation = kwargs.get("batched_computation", False)
+        if not batched_computation:
+            dist_state["vjp"] = pf_vjp
+            dist_state["jvp"] = pf_jvp
+        else:
+            dist_state["vjp"] = jax.vmap(pf_vjp, in_axes=(0, 0), out_axes=0)
+            dist_state["jvp"] = jax.vmap(pf_jvp, in_axes=(0, None), out_axes=0)
 
     if num_samples > 0:
         weight_sample_mean = (
@@ -484,6 +492,64 @@ def set_output_mv(
     return {"cov_mv": output_cov_mv, "jac_mv": output_jac_mv}
 
 
+def set_output_low_rank_mv(
+    posterior_state: Posterior,
+    input: InputArray,
+    jvp: Callable[[InputArray, Params], PredArray],
+    vjp: Callable[[InputArray, PredArray], Params],
+    mean_params: Params,
+):
+    low_rank_terms = posterior_state.low_rank_terms
+    model_params = mean_params
+    flatten, unflatten = create_pytree_flattener(mean_params)
+    sigma_sq = mean_params["param"]
+    mean_params = mean_params["model"]
+
+    def cov_mv(x):
+        flatten, unflatten = create_pytree_flattener(x)
+        x_flat = flatten(x)
+        range_proj = low_rank_terms.U.T @ x_flat
+        range_inv = range_proj / (sigma_sq.value + low_rank_terms.S**2)
+        range_result = low_rank_terms.U @ range_inv
+        null_proj = x_flat - low_rank_terms.U @ (low_rank_terms.U.T @ x_flat)
+        null_result = null_proj / sigma_sq.value
+        result = range_result + null_result
+
+        return unflatten(result)
+
+    flatten, unflatten = create_pytree_flattener(model_params)
+
+    def output_cov_mv(vec: PredArray) -> PredArray:
+        return jvp(input, cov_mv(vjp(input, vec)[0]))
+
+    def output_jac_mv(vec: PredArray) -> PredArray:
+        return jvp(input, vec)
+
+    U_param = low_rank_terms.U
+    U_output_columns = []
+
+    for i in range(U_param.shape[1]):
+        u_col_flat = U_param[:, i]
+        u_col_pytree = unflatten(u_col_flat)
+
+        u_col_output = jvp(input, u_col_pytree)
+        U_output_columns.append(u_col_output.flatten())
+
+    U_output = jnp.column_stack(U_output_columns)
+
+    S_output = low_rank_terms.S
+
+    output_low_rank_terms = LowRankTerms(
+        U=U_output, S=S_output, scalar=low_rank_terms.scalar
+    )
+
+    return {
+        "cov_mv": output_cov_mv,
+        "jac_mv": output_jac_mv,
+        "low_rank_terms": output_low_rank_terms,
+    }
+
+
 def lin_setup(
     results: dict[str, Array],
     aux: dict[str, Any],
@@ -508,7 +574,8 @@ def lin_setup(
 
     Returns:
         tuple: Updated `results` and `aux`.
-    """
+    """  # noqa: DOC501
+    low_rank = kwargs.get("low_rank", False)
     del kwargs
 
     jvp = dist_state["jvp"]
@@ -527,6 +594,15 @@ def lin_setup(
     if not isinstance(vjp, Callable):
         msg = "VJP is not a VJPType"
         raise TypeError(msg)
+
+    if low_rank:
+        mv_lr = set_output_low_rank_mv(
+            posterior_state, input, jvp, vjp, mean_params=aux["mean_params"]
+        )
+        aux["cov_lr_mv"] = mv_lr["cov_mv"]
+        aux["jac_lr_mv"] = mv_lr["jac_mv"]
+        results["low_rank_terms"] = mv_lr["low_rank_terms"]
+        results["observation_noise"] = aux["mean_params"]["param"]
 
     mv = set_output_mv(posterior_state, input, jvp, vjp)
     aux["cov_mv"] = mv["cov_mv"]
@@ -556,6 +632,7 @@ def lin_pred_mean(
     Note:
         This function is used for the linearized mean prediction.
     """
+
     del kwargs
 
     results["pred_mean"] = results["map"]
@@ -650,6 +727,25 @@ def lin_pred_cov(
     cov_mv = aux["cov_mv"]
 
     results["pred_cov"] = util.mv.to_dense(cov_mv, layout=pred_mean)
+    return results, aux
+
+
+def lin_pred_lsqrt_low_rank_cov(
+    results: dict[str, Array],
+    aux: dict[str, Any],
+    **kwargs,
+) -> tuple[dict[str, Array], dict[str, Any]]:
+    if "pred_mean" not in results:
+        results, aux = lin_pred_mean(results, aux, **kwargs)
+
+    pred_mean = results["pred_mean"]
+    cov_lr_mv = aux["cov_lr_mv"]
+    if cov_lr_mv is None:
+        raise TypeError(
+            "Low-rank covariance matrix-vector product function is not set."
+        )
+
+    results["pred_lr_cov"] = util.mv.to_dense(cov_lr_mv, layout=pred_mean)
     return results, aux
 
 
@@ -753,6 +849,7 @@ DEFAULT_LIN_FINALIZE_FNS = [
     lin_setup,
     lin_pred_mean,
     lin_pred_cov,
+    lin_pred_lsqrt_low_rank_cov,
     lin_pred_var,
     lin_pred_std,
     lin_samples,
@@ -796,6 +893,7 @@ def set_prob_predictive(
         # MAP prediction
         pred_map = model_fn(input=input, params=mean_params)
         aux = {"model_fn": model_fn, "mean_params": mean_params}
+
         results = {"map": pred_map}
 
         # Compute prediction
@@ -900,6 +998,7 @@ def set_lin_pushforward(
             (default: `DEFAULT_LIN_FINALIZE`).
         **kwargs: Additional arguments passed to the pushforward functions, including:
             - `n_samples`: Number of samples for approximating uncertainty metrics.
+            - `batched_computation`: Whether to use batched computation.
             - `key`: PRNG key for generating random samples.
 
     Returns:
