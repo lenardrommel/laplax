@@ -254,7 +254,11 @@ def adam(
     return best_prior_prec
 
 
-def optimize_prior_prec(
+def adam_with_restarts():
+    pass
+
+
+def optimize_prior_prec_with_grid_search(
     objective: Callable[[PriorArguments], float],
     log_prior_prec_min: float = -5.0,
     log_prior_prec_max: float = 6.0,
@@ -290,5 +294,73 @@ def optimize_prior_prec(
         objective,
         **kwargs,
     )
+
+    return prior_prec
+
+
+def optimize_prior_prec_with_adam(
+    objective: Callable[[PriorArguments], float],
+    initial_log_prior_prec: float = 0.0,
+    restarts: int = 1,
+    **kwargs: Kwargs,
+) -> Float:
+    if restarts <= 1:
+        prior_prec = adam(
+            objective,
+            initial_log_prior_prec,
+            **kwargs,
+        )
+    else:
+        prior_prec = adam_with_restarts(
+            objective,
+            initial_log_prior_prec,
+            restarts,
+            **kwargs,
+        )
+
+    return prior_prec
+
+
+def optimize_prior_prec(
+    objective: Callable[[PriorArguments], float],
+    log_prior_prec_min: float = -5.0,
+    log_prior_prec_max: float = 6.0,
+    grid_size: int = 300,
+    stochastic: bool = False,
+    **kwargs: Kwargs,
+) -> Float:
+    """Optimize prior precision using logarithmic grid search.
+
+    This function creates a logarithmically spaced interval of prior precision
+    values and performs a grid search to find the optimal value that minimizes
+    the specified objective function.
+
+    Args:
+        objective: A callable objective function that takes `PriorArguments` as input
+            and returns a float result.
+        log_prior_prec_min: The base-10 logarithm of the minimum prior precision
+            value (default: -5.0).
+        log_prior_prec_max: The base-10 logarithm of the maximum prior precision
+            value (default: 6.0).
+        grid_size: The number of points in the grid interval (default: 300).
+        **kwargs: Additional arguments passed to `grid_search`.
+
+    Returns:
+        The optimized prior precision value.
+    """
+    if not stochastic:
+        prior_prec = optimize_prior_prec_with_grid_search(
+            objective,
+            log_prior_prec_min,
+            log_prior_prec_max,
+            grid_size,
+            **kwargs,
+        )
+    else:
+        initial_log_prior_prec = (log_prior_prec_min + log_prior_prec_max) / 2.0
+        prior_prec = optimize_prior_prec_with_adam(
+            objective,
+            initial_log_prior_prec,
+        )
 
     return prior_prec
