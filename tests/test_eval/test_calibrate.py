@@ -18,10 +18,10 @@ from laplax.eval.pushforward import set_lin_pushforward
 
 from .cases.regression import case_regression
 
-
+@pytest_cases.parametrize("stochastic", [False, True])
 @pytest_cases.parametrize("curv_op", [CurvApprox.FULL])
 @pytest_cases.parametrize_with_cases("task", cases=case_regression)
-def test_lin_pushforward(curv_op, task):
+def test_lin_pushforward(curv_op, task, stochastic):
     """Test for pipeline integration of calibration function."""
     model_fn = task.get_model_fn()
     params = task.get_parameters()
@@ -67,6 +67,7 @@ def test_lin_pushforward(curv_op, task):
     prior_prec = optimize_prior_prec(
         objective=calibration_objective,
         grid_size=10,
+        stochastic=stochastic,
     )
 
     # Calculate values for comparison.
