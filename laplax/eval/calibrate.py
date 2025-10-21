@@ -17,6 +17,7 @@ from collections.abc import Callable
 import jax
 import jax.numpy as jnp
 import numpy as np
+import optax
 from loguru import logger
 
 from laplax.eval.metrics import chi_squared_zero
@@ -138,6 +139,118 @@ def grid_search(
     best_prior_prec = prior_precs[np.nanargmin(results)]
     logger.info(f"Chosen prior prec = {best_prior_prec:.4f}")
 
+    return best_prior_prec
+
+
+def adam(
+    objective: Callable[[PriorArguments], float],
+    initial_log_prior_prec: float,
+    learning_rate: float = 1e-2,
+    max_iter: int | None = None,
+    patience: int | None = None,
+    tol: float | None = None,
+    bounds: tuple[float, float] | None = None,
+    **kwargs: Kwargs,
+    ) -> Float:
+    """Perform adam to optimize prior precision.
+    
+    This function uses the Adam optimizer to find the optimal prior precision by minimizing
+    an objective function. The optimization is performed in log-space for numerical stability.
+    The function includes early stopping mechanisms based on gradient tolerance and patience
+    for consecutive loss increases.
+    Args:
+        prior_prec_interval: An array of prior precision values to search.
+        objective: A callable objective function that takes `PriorArguments` as input
+            and returns a float result.
+        patience: The number of consecutive iterations with increasing results to
+            tolerate before stopping (default: 5).
+        max_iterations: The maximum number of iterations to perform (default: None).
+
+    Returns:
+        The prior precision value that minimizes the objective function.
+    """
+    clip_grad = kwargs.get("clip_grad", 1.0)
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(clip_grad), optax.adam(learning_rate)
+    )
+
+    param = jnp.array(initial_log_prior_prec)
+    opt_state = optimizer.init(param)
+
+    history = {"loss": [], "prior_prec": [], "log_prior_prec": [], "grad_norm": []}
+    value_and_grad_fn = jax.value_and_grad(objective)
+
+    best_loss = float("inf")
+    best_param = param
+    previous_loss: float | None = None
+    increasing_count = 0
+
+    for i in range(max_iter or 1000):
+        prior_prec = jnp.exp(param)
+
+        try:
+            loss, grad = value_and_grad_fn({"prior_prec": prior_prec})
+        except ValueError as error:
+            logger.warning(f"Caught an exception in validate {error}")
+            loss = jnp.inf
+            grad = {"prior_prec": jnp.array(0.0, dtype=param.dtype)}
+
+        if jnp.isnan(loss):
+            logger.info("Caught nan, setting result to inf.")
+            loss = jnp.inf
+
+        grad_prior = grad["prior_prec"]
+        grad_log_prior = grad_prior * prior_prec
+
+        if not jnp.isfinite(loss) or not jnp.isfinite(grad_log_prior):
+            logger.warning(f"NaN/Inf detected at iteration {i}, stopping early")
+            break
+
+        if loss < best_loss:
+            best_loss = float(loss)
+            best_param = param
+
+        grad_norm = float(jnp.abs(grad_log_prior))
+
+        history["loss"].append(float(loss))
+        history["prior_prec"].append(float(prior_prec))
+        history["log_prior_prec"].append(float(param))
+        history["grad_norm"].append(grad_norm)
+
+        if i % 10 == 0:
+            logger.debug(
+                f"Iter {i:3d}: loss={loss:.4e}, prior_prec={prior_prec:.4e}, "
+                f"|grad|={grad_norm:.4e}"
+            )
+
+        if tol is not None and grad_norm < tol:
+            logger.info(f"Converged at iteration {i} (|grad|={grad_norm:.4e})")
+            break
+
+        if patience is not None and previous_loss is not None:
+            if loss > previous_loss:
+                increasing_count += 1
+                logger.debug(
+                    f"Loss increased; increasing_count={increasing_count}"
+                )
+            else:
+                increasing_count = 0
+
+            if increasing_count >= patience:
+                logger.info(
+                    f"Stopping after {increasing_count} consecutive loss increases"
+                )
+                break
+
+        previous_loss = float(loss)
+
+        updates, opt_state = optimizer.update(grad_log_prior, opt_state, param)
+        param = optax.apply_updates(param, updates)
+
+        if bounds is not None:
+            param = jnp.clip(param, bounds[0], bounds[1])
+
+    best_prior_prec = float(jnp.exp(best_param))
     return best_prior_prec
 
 
