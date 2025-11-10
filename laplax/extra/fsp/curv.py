@@ -1,9 +1,9 @@
 import jax
 from jax import numpy as jnp
+
 import laplax
 from laplax.extra.fsp.objective import select_context_points
-
-from laplax.types import ModelFn, Params, Data, PredArray
+from laplax.types import Data, ModelFn, Params, PredArray
 
 
 def compute_curvature_fn(

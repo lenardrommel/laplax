@@ -1,3 +1,5 @@
+# utils.py
+
 """Pushforward utilities for evaluating probabilistic predictions on datasets.
 
 This module provides utilities for evaluating probabilistic models on datasets and
@@ -29,6 +31,7 @@ def finalize_fns(
     fns: list[Callable],
     results: dict,  # Typing must allow empty dict for initializations
     aux: dict[str, Any] | None = None,
+    low_rank: bool = False,
     **kwargs: Kwargs,
 ) -> dict:
     """Execute a set of functions and store their results in a dictionary.
@@ -49,7 +52,7 @@ def finalize_fns(
             executed functions.
     """
     for func in fns:
-        results, aux = func(results=results, aux=aux, **kwargs)
+        results, aux = func(results=results, aux=aux, low_rank=low_rank, **kwargs)
     return results
 
 
@@ -295,6 +298,7 @@ def evaluate_metrics_on_generator(
     transform: Callable = identity,
     reduce: Callable = identity,
     vmap_over_data: bool = True,
+    low_rank: bool = False,
     **kwargs: Kwargs,
 ) -> dict:
     """Evaluate a set of metrics on a data generator.
@@ -317,6 +321,7 @@ def evaluate_metrics_on_generator(
         reduce: A callable to transform the evaluated metrics (default: identity).
         vmap_over_data: Data batches from generator have unaccounted batch dimension
             (default: True).
+        low_rank: (default: False).
         **kwargs: Additional keyword arguments passed to the metrics functions.
 
     Returns:
@@ -343,12 +348,15 @@ def evaluate_metrics_on_generator(
 
     def evaluate_data(dp: Data) -> dict[str, Array]:
         pred = {**pred_fn(dp["input"]), "target": dp["target"]}
-        return finalize_fns(fns=metrics, results={}, aux=pred, **kwargs)
+        return finalize_fns(
+            fns=metrics, results={}, aux=pred, low_rank=low_rank, **kwargs
+        )
 
     # Vmap over batch dimension, if necessary.
     if vmap_over_data:
         evaluate_data = jax.vmap(evaluate_data)
-    evaluate_data = jax.jit(evaluate_data)
+    if not kwargs.get("debug", False):
+        evaluate_data = jax.jit(evaluate_data)
 
     # Evaluate metrics by iterating over the generator
     all_results = [evaluate_data(transform(dp)) for dp in data_generator]

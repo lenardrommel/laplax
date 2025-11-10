@@ -1,3 +1,5 @@
+# pushforward.py
+
 """Pushforward Functions for Weight Space Uncertainty.
 
 This module provides functions to propagate uncertainty in weight space to
@@ -480,6 +482,7 @@ def set_output_mv(
         dict: A dictionary with:
             - `cov_mv`: Function for the output covariance matrix-vector product.
             - `jac_mv`: Function for the JVP with a fixed input.
+            - `low_rank_terms`: Low-rank terms from the posterior state.
     """
     cov_mv = posterior_state.cov_mv(posterior_state.state)
 
@@ -489,7 +492,13 @@ def set_output_mv(
     def output_jac_mv(vec: PredArray) -> PredArray:
         return jvp(input, vec)
 
-    return {"cov_mv": output_cov_mv, "jac_mv": output_jac_mv}
+    low_rank_terms = posterior_state.low_rank_terms
+
+    return {
+        "cov_mv": output_cov_mv,
+        "jac_mv": output_jac_mv,
+        "low_rank_terms": low_rank_terms,
+    }
 
 
 def set_output_low_rank_mv(
@@ -497,27 +506,11 @@ def set_output_low_rank_mv(
     input: InputArray,
     jvp: Callable[[InputArray, Params], PredArray],
     vjp: Callable[[InputArray, PredArray], Params],
-    mean_params: Params,
+    model_fn: ModelFn,
+    params: Params,
 ):
-    low_rank_terms = posterior_state.low_rank_terms
-    model_params = mean_params
-    flatten, unflatten = create_pytree_flattener(mean_params)
-    sigma_sq = mean_params["param"]
-    mean_params = mean_params["model"]
-
-    def cov_mv(x):
-        flatten, unflatten = create_pytree_flattener(x)
-        x_flat = flatten(x)
-        range_proj = low_rank_terms.U.T @ x_flat
-        range_inv = range_proj / (sigma_sq.value + low_rank_terms.S**2)
-        range_result = low_rank_terms.U @ range_inv
-        null_proj = x_flat - low_rank_terms.U @ (low_rank_terms.U.T @ x_flat)
-        null_result = null_proj / sigma_sq.value
-        result = range_result + null_result
-
-        return unflatten(result)
-
-    flatten, unflatten = create_pytree_flattener(model_params)
+    flatten, unflatten = create_pytree_flattener(params)
+    cov_mv = posterior_state.cov_mv(posterior_state.state)
 
     def output_cov_mv(vec: PredArray) -> PredArray:
         return jvp(input, cov_mv(vjp(input, vec)[0]))
@@ -525,29 +518,69 @@ def set_output_low_rank_mv(
     def output_jac_mv(vec: PredArray) -> PredArray:
         return jvp(input, vec)
 
-    U_param = low_rank_terms.U
-    U_output_columns = []
 
-    for i in range(U_param.shape[1]):
-        u_col_flat = U_param[:, i]
-        u_col_pytree = unflatten(u_col_flat)
+# def set_output_low_rank_mv(
+#     posterior_state: Posterior,
+#     input: InputArray,
+#     jvp: Callable[[InputArray, Params], PredArray],
+#     vjp: Callable[[InputArray, PredArray], Params],
+#     mean_params: Params,
+#     *,
+#     model_fn: Callable | None = None,
+# ):
+#     low_rank_terms = posterior_state.low_rank_terms
+#     posterior_mean_full = mean_params
+#     sigma_sq = posterior_mean_full["param"]
+#     model_params = posterior_mean_full["model"]
+#     flatten, unflatten = create_pytree_flattener(model_params)
 
-        u_col_output = jvp(input, u_col_pytree)
-        U_output_columns.append(u_col_output.flatten())
+#     def cov_mv(x):
+#         flatten, unflatten = create_pytree_flattener(x)
+#         x_flat = flatten(x)
+#         range_proj = low_rank_terms.U.T @ x_flat
+#         range_inv = range_proj / (sigma_sq.value + low_rank_terms.S**2)
+#         range_result = low_rank_terms.U @ range_inv
+#         null_proj = x_flat - low_rank_terms.U @ (low_rank_terms.U.T @ x_flat)
+#         null_result = null_proj / sigma_sq.value
+#         result = range_result + null_result
 
-    U_output = jnp.column_stack(U_output_columns)
+#         return unflatten(result)
 
-    S_output = low_rank_terms.S
+#     def output_cov_mv(vec: PredArray) -> PredArray:
+#         return jvp(input, cov_mv(vjp(input, vec)[0]))
 
-    output_low_rank_terms = LowRankTerms(
-        U=U_output, S=S_output, scalar=low_rank_terms.scalar
-    )
+#     def output_jac_mv(vec: PredArray) -> PredArray:
+#         return jvp(input, vec)
 
-    return {
-        "cov_mv": output_cov_mv,
-        "jac_mv": output_jac_mv,
-        "low_rank_terms": output_low_rank_terms,
-    }
+#     U_param = low_rank_terms.U  # (P, k)
+
+#     if model_fn is not None:
+#         _, lin = jax.linearize(lambda p: model_fn(input=input, params=p), model_params)
+
+#         def apply_col(u_flat):
+#             return jnp.ravel(lin(unflatten(u_flat)))
+
+#         U_output = jax.vmap(apply_col)(jnp.moveaxis(U_param, 1, 0))  # (k, D)
+#         U_output = jnp.moveaxis(U_output, 0, 1)  # (D, k)
+#     else:
+
+#         def apply_col(u_flat):
+#             return jnp.ravel(jvp(input, unflatten(u_flat)))
+
+#         U_output = jax.vmap(apply_col)(jnp.moveaxis(U_param, 1, 0))  # (k, D)
+#         U_output = jnp.moveaxis(U_output, 0, 1)  # (D, k)
+
+#     S_output = low_rank_terms.S
+
+#     output_low_rank_terms = LowRankTerms(
+#         U=U_output, S=S_output, scalar=low_rank_terms.scalar
+#     )
+
+#     return {
+#         "cov_mv": output_cov_mv,
+#         "jac_mv": output_jac_mv,
+#         "low_rank_terms": output_low_rank_terms,
+#     }
 
 
 def lin_setup(
@@ -595,18 +628,24 @@ def lin_setup(
         msg = "VJP is not a VJPType"
         raise TypeError(msg)
 
-    if low_rank:
-        mv_lr = set_output_low_rank_mv(
-            posterior_state, input, jvp, vjp, mean_params=aux["mean_params"]
-        )
-        aux["cov_lr_mv"] = mv_lr["cov_mv"]
-        aux["jac_lr_mv"] = mv_lr["jac_mv"]
-        results["low_rank_terms"] = mv_lr["low_rank_terms"]
-        results["observation_noise"] = aux["mean_params"]["param"]
+    # if low_rank:
+    #     mv_lr = set_output_low_rank_mv(
+    #         posterior_state,
+    #         input,
+    #         jvp,
+    #         vjp,
+    #         mean_params=aux["mean_params"],
+    #         model_fn=aux["model_fn"],
+    #     )
+    #     aux["cov_lr_mv"] = mv_lr["cov_mv"]
+    #     aux["jac_lr_mv"] = mv_lr["jac_mv"]
+    #     results["low_rank_terms"] = mv_lr["low_rank_terms"]
+    #     results["observation_noise"] = aux["mean_params"]["param"]
 
     mv = set_output_mv(posterior_state, input, jvp, vjp)
     aux["cov_mv"] = mv["cov_mv"]
     aux["jac_mv"] = mv["jac_mv"]
+    results["low_rank_terms"] = mv["low_rank_terms"]
 
     return results, aux
 
@@ -658,8 +697,6 @@ def lin_pred_var(
         tuple: Updated `results` and `aux`.
     """
     cov = results.get("pred_cov", aux["cov_mv"])
-    low_rank = kwargs.get("low_rank", False)
-    print("Using low_rank:", low_rank)
 
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
@@ -667,9 +704,14 @@ def lin_pred_var(
     pred_mean = results["pred_mean"]
 
     # Compute diagonal as variance
-    results["pred_var"] = util.mv.diagonal(
-        cov, layout=math.prod(pred_mean.shape), low_rank=low_rank
+    pred_var = util.mv.diagonal(
+        cov,
+        layout=math.prod(pred_mean.shape),
+        mv_jittable=kwargs.get("mv_jittable", True),
+        low_rank=False,
     )
+    results["pred_var"] = pred_var.reshape(pred_mean.shape)
+
     return results, aux
 
 
@@ -695,7 +737,7 @@ def lin_pred_std(
         results, aux = lin_pred_var(results, aux, **kwargs)
 
     var = results["pred_var"]
-    results["pred_std"] = util.tree.sqrt(var)
+    results["pred_std"] = util.tree.sqrt(jnp.abs(var))  # abs to avoid numerical issues
     return results, aux
 
 
@@ -735,17 +777,25 @@ def lin_pred_lsqrt_low_rank_cov(
     aux: dict[str, Any],
     **kwargs,
 ) -> tuple[dict[str, Array], dict[str, Any]]:
+    """Attach low-rank predictive info and cheap diagonal.
+
+    - Keeps `low_rank_terms` (computed in lin_setup when low_rank=True).
+    - Computes `pred_var` from the low-rank factors without densifying.
+      For Σ = U diag(S²) Uᵀ + σ² I with U ∈ R^{D×k},
+      diag(Σ) = σ² 1 + Σ_j (S_j U[:, j])².
+    """
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
 
-    pred_mean = results["pred_mean"]
-    cov_lr_mv = aux["cov_lr_mv"]
-    if cov_lr_mv is None:
-        raise TypeError(
-            "Low-rank covariance matrix-vector product function is not set."
-        )
+    if "low_rank_terms" in results and "observation_noise" in results:
+        lr = results["low_rank_terms"]
+        sigma = jnp.exp(results["observation_noise"])
+        # sum over columns: (S * U)^2
+        U_scaled = lr.U * lr.S  # broadcast over columns
+        pred_var = jnp.sum(U_scaled * U_scaled, axis=1) + sigma**2
+        pred_mean = results["pred_mean"]
+        results["pred_var"] = pred_var.reshape(pred_mean.shape)
 
-    results["pred_lr_cov"] = util.mv.to_dense(cov_lr_mv, layout=pred_mean)
     return results, aux
 
 
@@ -853,6 +903,14 @@ DEFAULT_LIN_FINALIZE_FNS = [
     lin_pred_var,
     lin_pred_std,
     lin_samples,
+]
+
+# A leaner finalize chain for FSP-style metrics that avoids dense covariance.
+DEFAULT_LIN_FSP_FINALIZE_FNS = [
+    lin_setup,
+    lin_pred_mean,
+    lin_pred_lsqrt_low_rank_cov,
+    lin_pred_std,
 ]
 
 

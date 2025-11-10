@@ -5,11 +5,11 @@ from laplax.curv.ggn import create_ggn_mv_without_data
 from laplax.enums import LossFn
 from laplax.types import (
     Array,
+    Callable,
     Data,
     Float,
     Int,
     ModelFn,
-    Callable,
     Num,
     Params,
     PredArray,
@@ -40,7 +40,7 @@ def create_fsp_ggn_mv(
 
     This equation describes the FSP-Laplace approximation for the Generalized Gauss-Newton
     matrix in the context of Bayesian deep learning.
-    """  # noqa: D415
+    """  # noqa: D415, DOC201
     _u, _s, _ = jnp.linalg.svd(M, full_matrices=False)
     tol = jnp.finfo(M.dtype).eps ** 2
     s = _s[_s > tol]

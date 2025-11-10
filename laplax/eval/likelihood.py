@@ -1,3 +1,5 @@
+# likelihood.py
+
 """Compute the marginal log-likelihood for different curvature estimations.
 
 Implemented according to:
@@ -78,8 +80,8 @@ def joint_log_likelihood(
     log_prior = log_prior_term1 + log_prior_term2
 
     # Compute the log-likelihood
-    sigma = prior_arguments.get("sigma", 1.0)
-    log_likelihood = -(1 / (2 * sigma)) * full_fn(
+    sigma = prior_arguments["sigma"]
+    log_likelihood = -(1 / (2 * sigma**2)) * full_fn(
         data["input"],
         data["target"],
         params,
