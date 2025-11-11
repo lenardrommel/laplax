@@ -12,13 +12,12 @@ from laplax.eval.pushforward import (
     lin_setup,
     set_lin_pushforward,
 )
-from laplax.extra.fsp.lanczos_isqrt import (
-    lanczos_jacobian_initialization,
-    lanczos_invert_sqrt,
-)
-from laplax.extra.fsp.ggn import create_fsp_ggn_mv
 from laplax.extra.fsp.curv import compute_curvature_fn
-
+from laplax.extra.fsp.ggn import create_fsp_ggn_mv
+from laplax.extra.fsp.lanczos_isqrt import (
+    lanczos_invert_sqrt,
+    lanczos_jacobian_initialization,
+)
 from laplax.types import Data, ModelFn, Params, PosteriorState, PredArray
 from laplax.util.flatten import create_partial_pytree_flattener, create_pytree_flattener
 
