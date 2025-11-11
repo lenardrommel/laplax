@@ -1,5 +1,3 @@
-from typing import Optional, Sequence, Union
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -9,10 +7,12 @@ from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 from torch.utils.data import DataLoader
 
+from laplax.types import Array
+
 
 def _load_all_data_from_dataloader(
     dataloader: DataLoader,
-) -> tuple[jax.Array, jax.Array]:
+) -> tuple[Array, Array]:
     """Load all batches from a DataLoader into JAX arrays.
 
     Args:
@@ -34,7 +34,7 @@ def _load_all_data_from_dataloader(
     return all_x, all_y
 
 
-def _flatten_spatial_dims(data: jax.Array) -> tuple[jax.Array, tuple]:
+def _flatten_spatial_dims(data: Array) -> tuple[Array, tuple]:
     """Flatten all axes except batch and last channel axis.
 
     Avoids using jax.numpy on Python tuples by computing the product
@@ -56,10 +56,10 @@ def _flatten_spatial_dims(data: jax.Array) -> tuple[jax.Array, tuple]:
 
 
 def _pca_transform_jax(
-    y_data: jax.Array,
-    n_components: Optional[int] = None,
+    y_data: Array,
+    n_components: int | None = None,
     variance_threshold: float = 0.95,
-) -> tuple[jax.Array, PCA]:
+) -> tuple[Array, PCA]:
     """Standardize features and run PCA transformation.
 
     Centers and scales each feature to unit variance prior to PCA.
@@ -95,7 +95,7 @@ def _generate_low_discrepancy_sequence(
     n_dims: int,
     n_points: int,
     sequence_type: str = "sobol",
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> np.ndarray:
     """Generate low-discrepancy quasi-random sequences.
 
@@ -167,11 +167,11 @@ def _pca_context_points(
     dataloader: DataLoader,
     n_context_points: int,
     sequence_type: str = "sobol",
-    n_pca_components: Optional[int] = None,
+    n_pca_components: int | None = None,
     pca_variance_threshold: float = 0.95,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     return_pca: bool = False,
-) -> Union[tuple[jax.Array, jax.Array], tuple[jax.Array, jax.Array, PCA]]:
+) -> tuple[Array, Array] | tuple[Array, Array, PCA]:
     """Select context points using PCA-based low-discrepancy sampling.
 
     Projects output space to PCA coordinates, generates low-discrepancy
@@ -252,10 +252,10 @@ def _pca_context_points(
 def _sobol_context_points(
     dataloader: DataLoader,
     n_context_points: int,
-    n_pca_components: Optional[int] = None,
+    n_pca_components: int | None = None,
     pca_variance_threshold: float = 0.95,
-    seed: Optional[int] = None,
-) -> tuple[jax.Array, jax.Array]:
+    seed: int | None = None,
+) -> tuple[Array, Array]:
     """Select context points using Sobol sequences in PCA space."""
     return _pca_context_points(
         dataloader=dataloader,
@@ -270,10 +270,10 @@ def _sobol_context_points(
 def _latin_hypercube_context_points(
     dataloader: DataLoader,
     n_context_points: int,
-    n_pca_components: Optional[int] = None,
+    n_pca_components: int | None = None,
     pca_variance_threshold: float = 0.95,
-    seed: Optional[int] = None,
-) -> tuple[jax.Array, jax.Array]:
+    seed: int | None = None,
+) -> tuple[Array, Array]:
     """Select context points using Latin Hypercube sampling in PCA space."""
     return _pca_context_points(
         dataloader=dataloader,
@@ -288,10 +288,10 @@ def _latin_hypercube_context_points(
 def _halton_context_points(
     dataloader: DataLoader,
     n_context_points: int,
-    n_pca_components: Optional[int] = None,
+    n_pca_components: int | None = None,
     pca_variance_threshold: float = 0.95,
-    seed: Optional[int] = None,
-) -> tuple[jax.Array, jax.Array]:
+    seed: int | None = None,
+) -> tuple[Array, Array]:
     """Select context points using Halton sequences in PCA space."""
     return _pca_context_points(
         dataloader=dataloader,
@@ -306,8 +306,8 @@ def _halton_context_points(
 def _random_context_points(
     dataloader: DataLoader,
     n_context_points: int,
-    seed: Optional[int] = None,
-) -> tuple[jax.Array, jax.Array]:
+    seed: int | None = None,
+) -> tuple[Array, Array]:
     """Select context points randomly from the dataset.
 
     Args:
@@ -407,12 +407,12 @@ def select_context_points(
     dataloader: DataLoader,
     context_selection: str,
     n_context_points: int = 50,
-    n_pca_components: Optional[int] = None,
+    n_pca_components: int | None = None,
     pca_variance_threshold: float = 0.95,
-    seed: Optional[int] = None,
-    time_keep: Optional[int] = None,
-    grid_stride: Optional[Union[int, Sequence[int]]] = None,
-) -> tuple[jax.Array, jax.Array, Optional[jax.Array]]:
+    seed: int | None = None,
+    time_keep: int | None = None,
+    grid_stride: int | tuple[int, ...] | None = None,
+) -> tuple[Array, Array, Array | None]:
     """Select context points from a dataset using various strategies.
 
     Supports single and combined strategies (e.g., 'random+sobol').
