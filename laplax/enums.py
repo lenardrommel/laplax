@@ -70,3 +70,14 @@ class DefaultMetrics(StrEnum):
 
     CLASSIFICATION = "classification"
     REGRESSION = "regression"
+
+
+# ------------------------------------------------------------------------------
+# Additional FSP specific enumerations
+# ------------------------------------------------------------------------------
+class CovarianceStructure(StrEnum):
+    """Supported covariance structures for FSP Laplace approximations."""
+
+    FULL = "full"
+    KRONECKER = "kronecker"
+    DIAGONAL = "diagonal"
