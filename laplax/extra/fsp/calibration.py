@@ -1,27 +1,22 @@
 """Prior calibration utilities for FSP inference.
 
 This module provides tools for calibrating GP priors for FSP inference,
-including hyperparameter optimization and kernel composition.
+including hyperparameter optimization with simple callable kernels.
+
+Note: For full-featured GP kernels, use GPJax or GPyTorch and wrap with adapters.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
 import optax
 from optax import tree_utils as otu
 
-from laplax.extra.fsp.kernels import (
-    AdditiveKernel,
-    Kernel,
-    KroneckerKernel,
-    Matern52Kernel,
-    RBFKernel,
-    build_gram_matrix,
-)
-from laplax.types import Array, Callable, Float, Params
+from laplax.extra.fsp.kernels import KernelProtocol, build_gram_matrix
+from laplax.types import Array, Callable, Float
 
 
 # =============================================================================
@@ -91,28 +86,37 @@ def load_hyperparameters(path: Path) -> PriorHyperparameters:
 
 
 class SimpleGPPrior:
-    """Simple GP prior with single kernel.
+    """Simple GP prior with callable kernel.
 
-    This is a lightweight alternative to ModularGPPrior for standard cases.
+    This provides basic GP functionality for calibration and prediction.
+    For advanced features, use GPJax or GPyTorch.
+
+    Examples
+    --------
+    >>> def rbf_kernel(x1, x2=None):
+    ...     if x2 is None: x2 = x1
+    ...     r2 = jnp.sum((x1[:, None, :] - x2[None, :, :]) ** 2, axis=-1)
+    ...     return jnp.exp(-r2 / 2.0)
+    >>> prior = SimpleGPPrior(rbf_kernel, noise_variance=0.01)
+    >>> nll = prior.log_likelihood(x_train, y_train)
     """
 
     def __init__(
-        self, kernel: Kernel, noise_variance: float = 0.01, optimize_noise: bool = True
+        self,
+        kernel: Callable | KernelProtocol,
+        noise_variance: float = 0.01,
     ):
         """Initialize GP prior.
 
         Parameters
         ----------
-        kernel : Kernel
+        kernel : Callable or KernelProtocol
             Prior covariance kernel
         noise_variance : float
             Observation noise variance (in linear space)
-        optimize_noise : bool
-            Whether to optimize noise variance during calibration
         """
         self.kernel = kernel
         self.noise_variance = jnp.log(noise_variance)  # Store in log space
-        self.optimize_noise = optimize_noise
 
     def log_likelihood(
         self, x: Array, y: Array, kernel_params: Optional[Dict] = None
@@ -126,7 +130,7 @@ class SimpleGPPrior:
         y : Array
             Observations of shape (N,) or (N, 1)
         kernel_params : Dict, optional
-            Kernel hyperparameters in log space
+            Kernel hyperparameters (not used for callable kernels)
 
         Returns
         -------
@@ -161,7 +165,7 @@ class SimpleGPPrior:
             return quad + logdet + const
 
         except Exception:
-            # If Cholesky fails, use pseudo-inverse (more stable but slower)
+            # If Cholesky fails, use eigendecomposition (more stable but slower)
             eigvals, eigvecs = jnp.linalg.eigh(K_noisy)
             eigvals = jnp.maximum(eigvals, 1e-8)  # Ensure positive
 
@@ -231,19 +235,20 @@ class SimpleGPPrior:
 
 
 def calibrate_gp_prior(
-    kernel: Kernel,
+    kernel_factory: Callable,
     x: Array,
     y: Array,
     init_hparams: Optional[PriorHyperparameters] = None,
     max_iter: int = 100,
     tol: float = 1e-3,
-) -> Tuple[PriorHyperparameters, SimpleGPPrior]:
+) -> Tuple[PriorHyperparameters, Callable, SimpleGPPrior]:
     """Calibrate GP prior hyperparameters using L-BFGS.
 
     Parameters
     ----------
-    kernel : Kernel
-        Kernel to calibrate
+    kernel_factory : Callable
+        Function that creates kernel given hyperparameters.
+        Signature: kernel_factory(lengthscale, variance) -> kernel_fn
     x : Array
         Training inputs of shape (N, D)
     y : Array
@@ -257,30 +262,29 @@ def calibrate_gp_prior(
 
     Returns
     -------
-    Tuple[PriorHyperparameters, SimpleGPPrior]
-        Calibrated hyperparameters and GP prior
+    Tuple[PriorHyperparameters, Callable, SimpleGPPrior]
+        Calibrated hyperparameters, calibrated kernel, and GP prior
 
     Examples
     --------
-    >>> from laplax.extra.fsp import RBFKernel, calibrate_gp_prior
-    >>> kernel = RBFKernel(lengthscale=1.0, variance=1.0)
-    >>> hparams, prior = calibrate_gp_prior(kernel, x_train, y_train)
+    >>> def rbf_factory(lengthscale, variance):
+    ...     def kernel(x1, x2=None):
+    ...         if x2 is None: x2 = x1
+    ...         r2 = jnp.sum((x1[:, None, :] - x2[None, :, :]) ** 2, axis=-1)
+    ...         return variance * jnp.exp(-r2 / (2 * lengthscale**2))
+    ...     return kernel
+    >>> hparams, kernel, prior = calibrate_gp_prior(rbf_factory, x_train, y_train)
     """
     if init_hparams is None:
         init_hparams = PriorHyperparameters()
 
-    # Create GP prior
-    prior = SimpleGPPrior(kernel)
-
     # Define loss function
     def loss_fn(params_dict):
-        # Update kernel parameters
-        if hasattr(kernel, "lengthscale"):
-            kernel.lengthscale = jnp.exp(params_dict["lengthscale"])
-        if hasattr(kernel, "variance"):
-            kernel.variance = jnp.exp(params_dict["variance"])
+        lengthscale = jnp.exp(params_dict["lengthscale"])
+        variance = jnp.exp(params_dict["variance"])
+        kernel = kernel_factory(lengthscale, variance)
 
-        # Update noise
+        prior = SimpleGPPrior(kernel)
         prior.noise_variance = params_dict["noise_variance"]
 
         return prior.log_likelihood(x, y)
@@ -317,79 +321,16 @@ def calibrate_gp_prior(
 
     print(f"Final NLL: {loss_fn(final_params):.4e}")
 
-    # Create calibrated hyperparameters
+    # Create calibrated hyperparameters and kernel
     final_hparams = PriorHyperparameters.from_dict(final_params)
+    transformed = final_hparams.transform()
 
-    # Update kernel with calibrated parameters
-    if hasattr(kernel, "lengthscale"):
-        kernel.lengthscale = jnp.exp(final_hparams.lengthscale)
-    if hasattr(kernel, "variance"):
-        kernel.variance = jnp.exp(final_hparams.variance)
+    calibrated_kernel = kernel_factory(transformed["lengthscale"], transformed["variance"])
+    prior = SimpleGPPrior(calibrated_kernel)
     prior.noise_variance = final_hparams.noise_variance
 
     print("\nCalibrated hyperparameters:")
-    transformed = final_hparams.transform()
     for key, value in transformed.items():
         print(f"  {key}: {value:.6f}")
 
-    return final_hparams, prior
-
-
-# =============================================================================
-# UTILITIES
-# =============================================================================
-
-
-def create_kernel_from_config(config: Dict[str, Any]) -> Kernel:
-    """Create kernel from configuration dictionary.
-
-    Parameters
-    ----------
-    config : Dict[str, Any]
-        Kernel configuration with keys:
-        - type: "rbf", "matern52", "additive", "kronecker"
-        - lengthscale: lengthscale parameter
-        - variance: variance parameter
-        - components: list of sub-configs for composite kernels
-
-    Returns
-    -------
-    Kernel
-        Configured kernel object
-
-    Examples
-    --------
-    >>> config = {"type": "rbf", "lengthscale": 1.0, "variance": 1.0}
-    >>> kernel = create_kernel_from_config(config)
-
-    >>> composite_config = {
-    ...     "type": "additive",
-    ...     "components": [
-    ...         {"type": "rbf", "lengthscale": 1.0},
-    ...         {"type": "matern52", "lengthscale": 0.5}
-    ...     ]
-    ... }
-    >>> kernel = create_kernel_from_config(composite_config)
-    """
-    kernel_type = config.get("type", "rbf").lower()
-
-    if kernel_type == "rbf":
-        return RBFKernel(
-            lengthscale=config.get("lengthscale", 1.0),
-            variance=config.get("variance", 1.0),
-        )
-    elif kernel_type == "matern52":
-        return Matern52Kernel(
-            lengthscale=config.get("lengthscale", 1.0),
-            variance=config.get("variance", 1.0),
-        )
-    elif kernel_type == "additive":
-        components = config.get("components", [])
-        kernels = [create_kernel_from_config(c) for c in components]
-        return AdditiveKernel(kernels)
-    elif kernel_type == "kronecker":
-        components = config.get("components", [])
-        kernels = [create_kernel_from_config(c) for c in components]
-        return KroneckerKernel(kernels)
-    else:
-        raise ValueError(f"Unknown kernel type: {kernel_type}")
+    return final_hparams, calibrated_kernel, prior

@@ -4,7 +4,6 @@ from .calibration import (
     PriorHyperparameters,
     SimpleGPPrior,
     calibrate_gp_prior,
-    create_kernel_from_config,
     load_hyperparameters,
     save_hyperparameters,
 )
@@ -12,13 +11,9 @@ from .fsp import compute_matrix_jacobian_product, fsp_laplace
 from .ggn import create_fsp_ggn_mv
 from .inference import fsp_inference, fsp_operator_inference
 from .kernels import (
-    AdditiveKernel,
     GPJaxKernelAdapter,
-    Kernel,
-    KroneckerKernel,
-    Matern52Kernel,
-    ProductKernel,
-    RBFKernel,
+    GPyTorchKernelAdapter,
+    KernelProtocol,
     build_gram_matrix,
     kernel_variance,
     wrap_kernel_fn,
@@ -49,14 +44,10 @@ __all__ = [
     "fsp_inference",
     "fsp_laplace",
     "fsp_operator_inference",
-    # Kernels
-    "AdditiveKernel",
+    # Kernel interface (no implementations - use GPJax/GPyTorch or callables)
+    "KernelProtocol",
     "GPJaxKernelAdapter",
-    "Kernel",
-    "KroneckerKernel",
-    "Matern52Kernel",
-    "ProductKernel",
-    "RBFKernel",
+    "GPyTorchKernelAdapter",
     "build_gram_matrix",
     "kernel_variance",
     "wrap_kernel_fn",
@@ -64,7 +55,6 @@ __all__ = [
     "PriorHyperparameters",
     "SimpleGPPrior",
     "calibrate_gp_prior",
-    "create_kernel_from_config",
     "load_hyperparameters",
     "save_hyperparameters",
     # Metrics

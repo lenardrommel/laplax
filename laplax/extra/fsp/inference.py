@@ -17,8 +17,7 @@ from laplax.curv.cov import Posterior, PosteriorState
 from laplax.curv.utils import LowRankTerms
 from laplax.extra.fsp.ggn import create_fsp_ggn_mv
 from laplax.extra.fsp.kernels import (
-    Kernel,
-    KroneckerKernel,
+    KernelProtocol,
     build_gram_matrix,
     kernel_variance,
     wrap_kernel_fn,
@@ -99,7 +98,7 @@ def fsp_inference(
     model_fn: ModelFn,
     params: Params,
     data: Data,
-    prior_cov_kernel: Callable | Kernel,
+    prior_cov_kernel: Callable | KernelProtocol,
     *,
     context_selection: str = "grid",
     n_context_points: int = 100,
@@ -117,11 +116,12 @@ def fsp_inference(
         Model parameters (at MAP estimate)
     data : Data
         Full dataset for GGN computation
-    prior_cov_kernel : Callable or Kernel
+    prior_cov_kernel : Callable or KernelProtocol
         Prior covariance kernel. Can be:
-        - A Kernel object (from laplax.extra.fsp.kernels)
+        - A kernel from GPJax (e.g., gpx.kernels.RBF())
+        - A kernel from GPyTorch (wrapped with GPyTorchKernelAdapter)
         - A callable: kernel_fn(x1, x2) -> K
-        - A GPJax/GPyTorch kernel (will be wrapped automatically)
+        - Any object implementing __call__(x1, x2) -> K
     context_selection : str
         Method for selecting context points
     n_context_points : int
@@ -140,15 +140,18 @@ def fsp_inference(
 
     Examples
     --------
-    Using a laplax Kernel object:
+    Using a GPJax kernel:
 
-    >>> from laplax.extra.fsp.kernels import RBFKernel
-    >>> kernel = RBFKernel(lengthscale=0.5, variance=1.0)
-    >>> posterior = fsp_inference(model_fn, params, data, kernel)
+    >>> import gpjax as gpx
+    >>> kernel = gpx.kernels.RBF()
+    >>> from laplax.extra.fsp import GPJaxKernelAdapter
+    >>> adapted_kernel = GPJaxKernelAdapter(kernel, params={"lengthscale": 1.0})
+    >>> posterior = fsp_inference(model_fn, params, data, adapted_kernel)
 
     Using a callable kernel function:
 
-    >>> def rbf_kernel(x1, x2):
+    >>> def rbf_kernel(x1, x2=None):
+    ...     if x2 is None: x2 = x1
     ...     sq_dist = jnp.sum((x1[:, None, :] - x2[None, :, :]) ** 2, axis=-1)
     ...     return jnp.exp(-sq_dist / 2.0)
     >>> posterior = fsp_inference(model_fn, params, data, rbf_kernel)
@@ -156,8 +159,8 @@ def fsp_inference(
     if key is None:
         key = jax.random.PRNGKey(0)
 
-    # Wrap kernel if needed
-    if not isinstance(prior_cov_kernel, Kernel):
+    # Wrap kernel if it's a simple callable without diagonal method
+    if not hasattr(prior_cov_kernel, "diagonal"):
         prior_cov_kernel = wrap_kernel_fn(prior_cov_kernel)
 
     # Select context points
