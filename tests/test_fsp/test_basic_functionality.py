@@ -36,9 +36,9 @@ def test_imports():
 
 def test_lanczos_initialization():
     """Test standard Lanczos initialization."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Testing Lanczos Jacobian Initialization")
-    print("="*60)
+    print("=" * 60)
 
     # Create model
     model = SimpleModel(
@@ -70,9 +70,9 @@ def test_lanczos_initialization():
 
 def test_hosvd_initialization():
     """Test HOSVD initialization for operator learning."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Testing HOSVD Initialization")
-    print("="*60)
+    print("=" * 60)
 
     # Create model
     model = SimpleModel(
@@ -113,9 +113,9 @@ def test_hosvd_initialization():
 
 def test_context_selection():
     """Test context point selection strategies."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Testing Context Point Selection")
-    print("="*60)
+    print("=" * 60)
 
     key = jax.random.PRNGKey(123)
     n_context = 15
@@ -146,9 +146,9 @@ def test_context_selection():
 
 def test_M_batch_computation():
     """Test batch matrix-Jacobian product."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Testing M Batch Computation")
-    print("="*60)
+    print("=" * 60)
 
     # Create model
     model = SimpleModel(
@@ -172,7 +172,9 @@ def test_M_batch_computation():
     # Verify
     first_leaf = jax.tree_util.tree_leaves(M)[0]
     print(f"  First leaf shape: {first_leaf.shape}")
-    print(f"  All finite: {jax.tree_util.tree_all(jax.tree_util.tree_map(lambda x: jnp.isfinite(x).all(), M))}")
+    print(
+        f"  All finite: {jax.tree_util.tree_all(jax.tree_util.tree_map(lambda x: jnp.isfinite(x).all(), M))}"
+    )
 
     assert jax.tree_util.tree_all(
         jax.tree_util.tree_map(lambda x: jnp.isfinite(x).all(), M)
@@ -180,31 +182,3 @@ def test_M_batch_computation():
     assert first_leaf.shape[-1] == rank
 
     print("✓ M batch computation test passed")
-
-
-def main():
-    """Run all tests."""
-    print("\n" + "="*70)
-    print("FSP MODULE BASIC FUNCTIONALITY TESTS")
-    print("="*70)
-
-    try:
-        test_imports()
-        test_lanczos_initialization()
-        test_hosvd_initialization()
-        test_context_selection()
-        test_M_batch_computation()
-
-        print("\n" + "="*70)
-        print("ALL TESTS PASSED! ✓")
-        print("="*70 + "\n")
-
-    except Exception as e:
-        print(f"\n✗ Test failed with error: {e}")
-        import traceback
-        traceback.print_exc()
-        raise
-
-
-if __name__ == "__main__":
-    main()
