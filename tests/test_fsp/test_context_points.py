@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from torch.utils.data import DataLoader, Dataset
 
-from laplax.extra.fsp.context_points import (
+from laplax.util.context_points import (
     _flatten_spatial_dims,
     _generate_low_discrepancy_sequence,
     _halton_context_points,

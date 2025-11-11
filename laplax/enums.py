@@ -78,6 +78,5 @@ class DefaultMetrics(StrEnum):
 class CovarianceStructure(StrEnum):
     """Supported covariance structures for FSP Laplace approximations."""
 
-    FULL = "full"
+    NONE = "none"
     KRONECKER = "kronecker"
-    DIAGONAL = "diagonal"
