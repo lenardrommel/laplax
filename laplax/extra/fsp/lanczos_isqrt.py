@@ -89,6 +89,26 @@ def lanczos_jacobian_initialization(
     *,
     lanczos_initialization_batch_size: int = 20,
 ):
+    """Initialize Lanczos vector using model Jacobian.
+
+    This is the simple initialization for standard FSP on regression tasks.
+
+    Parameters
+    ----------
+    model_fn : ModelFn
+        Model function
+    params : Params
+        Model parameters
+    data : Data
+        Input data for initialization
+    lanczos_initialization_batch_size : int
+        Batch size for initialization (not currently used)
+
+    Returns
+    -------
+    jnp.ndarray
+        Normalized initial vector
+    """
     # Define model Jacobian vector product
     initial_vec = jax.jvp(
         lambda w: model_fn(data, params=w),
@@ -98,6 +118,92 @@ def lanczos_jacobian_initialization(
     initial_vec = initial_vec / jnp.linalg.norm(initial_vec, 2)
 
     return initial_vec.squeeze(-1)
+
+
+def lanczos_hosvd_initialization(
+    model_fn,
+    params,
+    data,
+    *,
+    num_chunks: int = 1,
+):
+    """Initialize Lanczos using Higher-Order SVD (HOSVD).
+
+    For operator learning with spatial structure, this computes initial
+    vectors by performing SVD along each mode of the tensor output.
+
+    Parameters
+    ----------
+    model_fn : ModelFn
+        Model function
+    params : Params
+        Model parameters
+    data : Data
+        Input data with shape (B, S1, S2, ..., C)
+        where B is batch/function dimension, S1, S2, ... are spatial dimensions,
+        and C is channel dimension
+    num_chunks : int
+        Number of chunks for memory efficiency
+
+    Returns
+    -------
+    tuple
+        (initial_vectors_function, initial_vectors_spatial)
+        Initial vectors for function space and spatial modes
+    """
+    assert (
+        data.ndim >= 4
+    ), f"Input must have shape (B, S1, S2, ..., C), but got {data.shape}"
+
+    ones_pytree = tree.ones_like(params)
+
+    model_jvp = jax.vmap(
+        lambda x: jax.jvp(
+            lambda w: model_fn(x, w),
+            (params,),
+            (ones_pytree,),
+        )[1],
+        in_axes=0,
+        out_axes=0,
+    )
+
+    # Compute JVP in chunks for memory efficiency
+    b = jnp.concatenate(
+        [model_jvp(data_batch) for data_batch in jnp.split(data, num_chunks, axis=0)],
+        axis=0,
+    )
+
+    # Extract spatial dimensions (exclude batch and possibly channel dimensions)
+    # Assuming shape is (B, S1, S2, ..., [C]) where C is channels (last dim)
+    spatial_dims = tuple(s for s in data.shape[1:-1] if s > 1)
+    n_function = data.shape[0]
+
+    # Reshape to (n_function, *spatial_dims)
+    # If output has channels, take the first one or squeeze
+    if b.ndim > len(spatial_dims) + 1:
+        b = b[..., 0]  # Take first channel if multiple
+    b = b.reshape((n_function,) + spatial_dims)
+
+    initial_vectors = []
+
+    # HOSVD: compute SVD along each mode
+    for mode in range(len(b.shape)):
+        # Unfold along mode
+        n_mode = b.shape[mode]
+        b_unfolded = jnp.moveaxis(b, mode, 0).reshape(n_mode, -1)
+
+        # SVD
+        u, s, v = jnp.linalg.svd(b_unfolded, full_matrices=False)
+
+        # Take dominant singular vector and normalize
+        vec = u[:, 0] / jnp.linalg.norm(u[:, 0])
+        initial_vectors.append(vec)
+
+    # Split into function and spatial
+    initial_vectors_function = [initial_vectors[0]]
+    initial_vectors_spatial = initial_vectors[1:]
+
+    return initial_vectors_function, initial_vectors_spatial
 
 
 # def test_lanczos_compute_efficient():
