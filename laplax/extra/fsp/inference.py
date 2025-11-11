@@ -16,6 +16,13 @@ from loguru import logger
 from laplax.curv.cov import Posterior, PosteriorState
 from laplax.curv.utils import LowRankTerms
 from laplax.extra.fsp.ggn import create_fsp_ggn_mv
+from laplax.extra.fsp.kernels import (
+    Kernel,
+    KroneckerKernel,
+    build_gram_matrix,
+    kernel_variance,
+    wrap_kernel_fn,
+)
 from laplax.extra.fsp.lanczos_isqrt import (
     lanczos_hosvd_initialization,
     lanczos_invert_sqrt,
@@ -92,7 +99,7 @@ def fsp_inference(
     model_fn: ModelFn,
     params: Params,
     data: Data,
-    prior_cov_kernel: Callable,
+    prior_cov_kernel: Callable | Kernel,
     *,
     context_selection: str = "grid",
     n_context_points: int = 100,
@@ -110,8 +117,11 @@ def fsp_inference(
         Model parameters (at MAP estimate)
     data : Data
         Full dataset for GGN computation
-    prior_cov_kernel : Callable
-        Prior covariance kernel function
+    prior_cov_kernel : Callable or Kernel
+        Prior covariance kernel. Can be:
+        - A Kernel object (from laplax.extra.fsp.kernels)
+        - A callable: kernel_fn(x1, x2) -> K
+        - A GPJax/GPyTorch kernel (will be wrapped automatically)
     context_selection : str
         Method for selecting context points
     n_context_points : int
@@ -127,9 +137,28 @@ def fsp_inference(
     -------
     Posterior
         FSP posterior
+
+    Examples
+    --------
+    Using a laplax Kernel object:
+
+    >>> from laplax.extra.fsp.kernels import RBFKernel
+    >>> kernel = RBFKernel(lengthscale=0.5, variance=1.0)
+    >>> posterior = fsp_inference(model_fn, params, data, kernel)
+
+    Using a callable kernel function:
+
+    >>> def rbf_kernel(x1, x2):
+    ...     sq_dist = jnp.sum((x1[:, None, :] - x2[None, :, :]) ** 2, axis=-1)
+    ...     return jnp.exp(-sq_dist / 2.0)
+    >>> posterior = fsp_inference(model_fn, params, data, rbf_kernel)
     """
     if key is None:
         key = jax.random.PRNGKey(0)
+
+    # Wrap kernel if needed
+    if not isinstance(prior_cov_kernel, Kernel):
+        prior_cov_kernel = wrap_kernel_fn(prior_cov_kernel)
 
     # Select context points
     context_kwargs = {
@@ -157,9 +186,9 @@ def fsp_inference(
     # Initialize Lanczos
     v = lanczos_jacobian_initialization(model_fn, params, context_points)
 
-    # Build covariance matrix
-    cov_matrix = prior_cov_kernel(context_points, context_points)
-    prior_var = jnp.diag(cov_matrix)
+    # Build covariance matrix using Kernel interface
+    cov_matrix = build_gram_matrix(prior_cov_kernel, context_points, jitter=1e-8)
+    prior_var = prior_cov_kernel.diagonal(context_points)
 
     # Lanczos inverse sqrt
     L = lanczos_invert_sqrt(cov_matrix, v, tol=jnp.finfo(v.dtype).eps)
