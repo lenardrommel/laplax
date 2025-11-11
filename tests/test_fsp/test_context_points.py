@@ -1,0 +1,506 @@
+import jax
+import jax.numpy as jnp
+import numpy as np
+import pytest
+from torch.utils.data import DataLoader, TensorDataset
+
+from laplax.extra.fsp.context_points import (
+    _flatten_spatial_dims,
+    _generate_low_discrepancy_sequence,
+    _halton_context_points,
+    _latin_hypercube_context_points,
+    _load_all_data_from_dataloader,
+    _make_grid_from_data_shape,
+    _normalize_to_unit_cube,
+    _pca_context_points,
+    _pca_transform_jax,
+    _random_context_points,
+    _sobol_context_points,
+    select_context_points,
+)
+
+
+def _create_dummy_dataloader(
+    n_samples: int = 100,
+    input_shape: tuple = (32,),
+    output_shape: tuple = (10,),
+    batch_size: int = 16,
+) -> DataLoader:
+    """Create a dummy DataLoader for testing."""
+    key = jax.random.PRNGKey(42)
+    key_x, key_y = jax.random.split(key)
+
+    x = jax.random.normal(key_x, (n_samples,) + input_shape)
+    y = jax.random.normal(key_y, (n_samples,) + output_shape)
+
+    dataset = TensorDataset(
+        jnp.array(x),
+        jnp.array(y),
+    )
+    return DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+
+def test_load_all_data_from_dataloader():
+    """Test loading all data from a DataLoader."""
+    dataloader = _create_dummy_dataloader(n_samples=50, batch_size=10)
+    all_x, all_y = _load_all_data_from_dataloader(dataloader)
+
+    assert all_x.shape == (50, 32)
+    assert all_y.shape == (50, 10)
+    assert isinstance(all_x, jax.Array)
+    assert isinstance(all_y, jax.Array)
+
+
+def test_flatten_spatial_dims():
+    """Test flattening of spatial dimensions."""
+    data = jnp.ones((4, 8, 8, 3))
+    flattened, original_shape = _flatten_spatial_dims(data)
+
+    assert flattened.shape == (4, 64)
+    assert original_shape == (4, 8, 8, 3)
+
+
+def test_flatten_spatial_dims_1d():
+    """Test flattening with 1D spatial data."""
+    data = jnp.ones((10, 32, 2))
+    flattened, original_shape = _flatten_spatial_dims(data)
+
+    assert flattened.shape == (10, 32)
+    assert original_shape == (10, 32, 2)
+
+
+def test_pca_transform():
+    """Test PCA transformation."""
+    key = jax.random.PRNGKey(0)
+    data = jax.random.normal(key, (100, 50))
+
+    transformed, pca = _pca_transform_jax(data, n_components=10)
+
+    assert transformed.shape == (100, 10)
+    assert pca.n_components_ == 10
+
+
+def test_pca_transform_variance_threshold():
+    """Test PCA transformation with variance threshold."""
+    key = jax.random.PRNGKey(0)
+    data = jax.random.normal(key, (100, 50))
+
+    transformed, pca = _pca_transform_jax(data, variance_threshold=0.95)
+
+    assert transformed.shape[0] == 100
+    assert pca.n_components_ <= 50
+    assert np.sum(pca.explained_variance_ratio_) >= 0.95
+
+
+def test_generate_low_discrepancy_sobol():
+    """Test Sobol sequence generation."""
+    points = _generate_low_discrepancy_sequence(
+        n_dims=5, n_points=32, sequence_type="sobol", seed=42
+    )
+
+    assert points.shape == (32, 5)
+    assert np.all(points >= 0.0) and np.all(points <= 1.0)
+
+
+def test_generate_low_discrepancy_halton():
+    """Test Halton sequence generation."""
+    points = _generate_low_discrepancy_sequence(
+        n_dims=5, n_points=50, sequence_type="halton", seed=42
+    )
+
+    assert points.shape == (50, 5)
+    assert np.all(points >= 0.0) and np.all(points <= 1.0)
+
+
+def test_generate_low_discrepancy_latin_hypercube():
+    """Test Latin Hypercube sequence generation."""
+    points = _generate_low_discrepancy_sequence(
+        n_dims=5, n_points=50, sequence_type="latin_hypercube", seed=42
+    )
+
+    assert points.shape == (50, 5)
+    assert np.all(points >= 0.0) and np.all(points <= 1.0)
+
+
+def test_generate_low_discrepancy_invalid_type():
+    """Test that invalid sequence type raises error."""
+    with pytest.raises(ValueError, match="Unknown sequence type"):
+        _generate_low_discrepancy_sequence(
+            n_dims=5, n_points=50, sequence_type="invalid"
+        )
+
+
+def test_normalize_to_unit_cube():
+    """Test normalization to unit hypercube."""
+    data = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+    normalized, data_min, data_max = _normalize_to_unit_cube(data)
+
+    assert normalized.shape == data.shape
+    np.testing.assert_array_equal(data_min, [1.0, 2.0])
+    np.testing.assert_array_equal(data_max, [5.0, 6.0])
+    assert np.all(normalized >= 0.0) and np.all(normalized <= 1.0)
+
+
+def test_random_context_points():
+    """Test random context point selection."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 20
+
+    context_x, context_y = _random_context_points(dataloader, n_context, seed=42)
+
+    assert context_x.shape == (n_context, 32)
+    assert context_y.shape == (n_context, 10)
+
+
+def test_random_context_points_reproducibility():
+    """Test that random selection is reproducible with same seed."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 20
+
+    cx1, cy1 = _random_context_points(dataloader, n_context, seed=42)
+    cx2, cy2 = _random_context_points(dataloader, n_context, seed=42)
+
+    np.testing.assert_array_equal(cx1, cx2)
+    np.testing.assert_array_equal(cy1, cy2)
+
+
+def test_random_context_points_all_data():
+    """Test random selection when requesting all or more points."""
+    dataloader = _create_dummy_dataloader(n_samples=50)
+
+    context_x, context_y = _random_context_points(dataloader, n_context_points=60, seed=42)
+
+    assert context_x.shape == (50, 32)
+    assert context_y.shape == (50, 10)
+
+
+def test_sobol_context_points():
+    """Test Sobol-based context point selection."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 16
+
+    context_x, context_y = _sobol_context_points(
+        dataloader, n_context, n_pca_components=5, seed=42
+    )
+
+    assert context_x.shape == (n_context, 32)
+    assert context_y.shape == (n_context, 10)
+
+
+def test_halton_context_points():
+    """Test Halton-based context point selection."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 20
+
+    context_x, context_y = _halton_context_points(
+        dataloader, n_context, n_pca_components=5, seed=42
+    )
+
+    assert context_x.shape == (n_context, 32)
+    assert context_y.shape == (n_context, 10)
+
+
+def test_latin_hypercube_context_points():
+    """Test Latin Hypercube-based context point selection."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 20
+
+    context_x, context_y = _latin_hypercube_context_points(
+        dataloader, n_context, n_pca_components=5, seed=42
+    )
+
+    assert context_x.shape == (n_context, 32)
+    assert context_y.shape == (n_context, 10)
+
+
+def test_pca_context_points_reproducibility():
+    """Test that PCA-based selection is reproducible with same seed."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 16
+
+    cx1, cy1 = _pca_context_points(
+        dataloader, n_context, sequence_type="sobol", n_pca_components=5, seed=42
+    )
+    cx2, cy2 = _pca_context_points(
+        dataloader, n_context, sequence_type="sobol", n_pca_components=5, seed=42
+    )
+
+    np.testing.assert_array_equal(cx1, cx2)
+    np.testing.assert_array_equal(cy1, cy2)
+
+
+def test_pca_context_points_return_pca():
+    """Test that PCA model can be returned."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 16
+
+    result = _pca_context_points(
+        dataloader, n_context, n_pca_components=5, seed=42, return_pca=True
+    )
+
+    assert len(result) == 3
+    context_x, context_y, pca = result
+    assert context_x.shape == (n_context, 32)
+    assert context_y.shape == (n_context, 10)
+    assert pca.n_components_ == 5
+
+
+def test_make_grid_from_data_shape_1d():
+    """Test 1D grid generation."""
+    data_shape = (10, 32, 2)
+    grid, dx = _make_grid_from_data_shape(data_shape)
+
+    assert grid.shape == (32,)
+    assert dx > 0
+
+
+def test_make_grid_from_data_shape_2d():
+    """Test 2D grid generation."""
+    data_shape = (10, 16, 16, 3)
+    grid, dx = _make_grid_from_data_shape(data_shape)
+
+    assert grid.shape == (16, 16, 2)
+    assert dx > 0
+
+
+def test_make_grid_from_data_shape_3d():
+    """Test 3D grid generation."""
+    data_shape = (10, 8, 8, 8, 4)
+    grid, dx = _make_grid_from_data_shape(data_shape)
+
+    assert grid.shape == (8, 8, 8, 3)
+    assert dx > 0
+
+
+def test_select_context_points_random():
+    """Test select_context_points with random strategy."""
+    dataloader = _create_dummy_dataloader(n_samples=100, input_shape=(32,))
+    n_context = 20
+
+    context_x, context_y, grid = select_context_points(
+        dataloader, context_selection="random", n_context_points=n_context, seed=42
+    )
+
+    assert context_x.shape == (n_context, 32)
+    assert context_y.shape == (n_context, 10)
+    assert grid is not None
+
+
+def test_select_context_points_sobol():
+    """Test select_context_points with Sobol strategy."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 16
+
+    context_x, context_y, grid = select_context_points(
+        dataloader,
+        context_selection="sobol",
+        n_context_points=n_context,
+        n_pca_components=5,
+        seed=42,
+    )
+
+    assert context_x.shape == (n_context, 32)
+    assert context_y.shape == (n_context, 10)
+
+
+def test_select_context_points_halton():
+    """Test select_context_points with Halton strategy."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 20
+
+    context_x, context_y, grid = select_context_points(
+        dataloader,
+        context_selection="halton",
+        n_context_points=n_context,
+        n_pca_components=5,
+        seed=42,
+    )
+
+    assert context_x.shape == (n_context, 32)
+    assert context_y.shape == (n_context, 10)
+
+
+def test_select_context_points_latin_hypercube():
+    """Test select_context_points with Latin Hypercube strategy."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 20
+
+    context_x, context_y, grid = select_context_points(
+        dataloader,
+        context_selection="latin_hypercube",
+        n_context_points=n_context,
+        n_pca_components=5,
+        seed=42,
+    )
+
+    assert context_x.shape == (n_context, 32)
+    assert context_y.shape == (n_context, 10)
+
+
+def test_select_context_points_combined_strategy():
+    """Test select_context_points with combined strategy."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 20
+
+    context_x, context_y, grid = select_context_points(
+        dataloader,
+        context_selection="random+sobol",
+        n_context_points=n_context,
+        n_pca_components=5,
+        seed=42,
+    )
+
+    assert context_x.shape == (n_context, 32)
+    assert context_y.shape == (n_context, 10)
+
+
+def test_select_context_points_combined_three_strategies():
+    """Test select_context_points with three combined strategies."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 30
+
+    context_x, context_y, grid = select_context_points(
+        dataloader,
+        context_selection="random+sobol+halton",
+        n_context_points=n_context,
+        n_pca_components=5,
+        seed=42,
+    )
+
+    assert context_x.shape == (n_context, 32)
+    assert context_y.shape == (n_context, 10)
+
+
+def test_select_context_points_combined_uneven_split():
+    """Test that combined strategy handles uneven splits correctly."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 25
+
+    context_x, context_y, grid = select_context_points(
+        dataloader,
+        context_selection="random+sobol",
+        n_context_points=n_context,
+        seed=42,
+    )
+
+    assert context_x.shape == (n_context, 32)
+
+
+def test_select_context_points_reproducibility_across_strategies():
+    """Test that different strategies produce different results but are reproducible."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 20
+
+    cx_random, cy_random, _ = select_context_points(
+        dataloader, context_selection="random", n_context_points=n_context, seed=42
+    )
+
+    cx_sobol, cy_sobol, _ = select_context_points(
+        dataloader,
+        context_selection="sobol",
+        n_context_points=n_context,
+        n_pca_components=5,
+        seed=42,
+    )
+
+    with np.testing.assert_raises(AssertionError):
+        np.testing.assert_array_equal(cx_random, cx_sobol)
+
+
+def test_select_context_points_invalid_strategy():
+    """Test that invalid strategy raises error."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+
+    with pytest.raises(ValueError, match="Unknown context_selection"):
+        select_context_points(
+            dataloader, context_selection="invalid_strategy", n_context_points=20
+        )
+
+
+def test_select_context_points_with_grid_stride_1d():
+    """Test grid striding with 1D data."""
+    dataloader = _create_dummy_dataloader(n_samples=100, input_shape=(64, 2))
+    n_context = 20
+
+    context_x, context_y, grid = select_context_points(
+        dataloader,
+        context_selection="random",
+        n_context_points=n_context,
+        grid_stride=2,
+        seed=42,
+    )
+
+    assert context_x.shape[1] == 32
+    assert grid.shape == (32,)
+
+
+def test_select_context_points_with_time_keep():
+    """Test time_keep parameter."""
+    dataloader = _create_dummy_dataloader(n_samples=100, input_shape=(32, 10, 2))
+    n_context = 20
+
+    context_x, context_y, grid = select_context_points(
+        dataloader,
+        context_selection="random",
+        n_context_points=n_context,
+        time_keep=5,
+        seed=42,
+    )
+
+    assert context_x.shape[-2] == 5
+
+
+def test_pca_aliases():
+    """Test that PCA aliases work correctly."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 16
+
+    cx1, cy1, _ = select_context_points(
+        dataloader, context_selection="pca", n_context_points=n_context, seed=42
+    )
+
+    cx2, cy2, _ = select_context_points(
+        dataloader,
+        context_selection="pca_sobol",
+        n_context_points=n_context,
+        seed=42,
+    )
+
+    np.testing.assert_array_equal(cx1, cx2)
+    np.testing.assert_array_equal(cy1, cy2)
+
+
+def test_context_y_values_match_input_data():
+    """Test that context_y values actually come from the dataset."""
+    dataloader = _create_dummy_dataloader(n_samples=50, batch_size=50)
+    all_x, all_y = _load_all_data_from_dataloader(dataloader)
+
+    n_context = 10
+    context_x, context_y, _ = select_context_points(
+        dataloader, context_selection="random", n_context_points=n_context, seed=42
+    )
+
+    for cy in context_y:
+        found = False
+        for ay in all_y:
+            if np.allclose(cy, ay):
+                found = True
+                break
+        assert found, "context_y contains values not in original dataset"
+
+
+def test_different_seeds_produce_different_results():
+    """Test that different seeds produce different results."""
+    dataloader = _create_dummy_dataloader(n_samples=100)
+    n_context = 20
+
+    cx1, cy1, _ = select_context_points(
+        dataloader, context_selection="random", n_context_points=n_context, seed=42
+    )
+
+    cx2, cy2, _ = select_context_points(
+        dataloader, context_selection="random", n_context_points=n_context, seed=123
+    )
+
+    with np.testing.assert_raises(AssertionError):
+        np.testing.assert_array_equal(cx1, cx2)
