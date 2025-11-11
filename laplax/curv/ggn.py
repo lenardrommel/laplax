@@ -357,3 +357,68 @@ def create_ggn_mv(
         return ggn_mv(vec, data)
 
     return wrapped_ggn_mv
+
+
+def create_ggn_pytree_mv(
+    model_fn: ModelFn,
+    params: Params,
+    x_context: Num[Array, "..."],
+    hessian_diag: bool = True,
+) -> Callable[[Params], Array]:
+    """Create a GGN matrix-vector product function that works with pytrees.
+
+    This function creates a Generalized Gauss-Newton (GGN) matrix-vector product
+    operator that works directly with pytree parameters without requiring linear
+    operators or dense matrices.
+
+    Args:
+        model_fn: Model function taking input and params
+        params: Model parameters as pytree
+        x_context: Context points for GGN computation
+        hessian_diag: If True, assumes diagonal Hessian (identity for regression)
+
+    Returns:
+        Function that computes GGN @ u for pytree u
+    """
+
+    def _jacobian_matrix_product(u):
+        """Calculates the product of the Jacobian and matrix u (pytree).
+
+        Parameters
+        ----------
+        u : pytree
+            Parameter pytree with same structure as params
+
+        Returns
+        -------
+        Array with shape (B,) + output_shape + (R,)
+            Batch of Jacobian-matrix products
+        """
+        return jax.vmap(
+            lambda x_c: jax.vmap(
+                lambda u_c: jax.jvp(lambda p: model_fn(x_c, p), (params,), (u_c,))[1],
+                in_axes=-1,
+                out_axes=-1,
+            )(u)
+        )(x_context)
+
+    def ggn_vector_product(u):
+        """Compute u^T @ GGN @ u.
+
+        Args:
+            u: pytree with same structure as params
+
+        Returns:
+            GGN matrix-vector product
+        """
+        if hessian_diag:
+            ju = _jacobian_matrix_product(u)
+            batch_size = ju.shape[0]
+            rank = ju.shape[-1]
+            ju_flat = ju.reshape(batch_size, -1, rank)
+            return jax.numpy.einsum("bji,bjk->ik", ju_flat, ju_flat)
+        else:
+            msg = "Full Hessian not implemented yet."
+            raise NotImplementedError(msg)
+
+    return ggn_vector_product
