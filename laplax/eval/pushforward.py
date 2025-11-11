@@ -12,11 +12,9 @@ import math
 
 import jax
 import jax.numpy as jnp
-import jax.scipy as jsp
 
 from laplax import util
 from laplax.curv.cov import Posterior
-from laplax.curv.utils import LowRankTerms
 from laplax.eval.predictives import (
     laplace_bridge,
     mean_field_0_predictive,
@@ -39,7 +37,6 @@ from laplax.types import (
     PredArray,
     PriorArguments,
 )
-from laplax.util.flatten import create_pytree_flattener
 from laplax.util.ops import precompute_list
 from laplax.util.tree import add
 
@@ -75,7 +72,7 @@ def set_get_weight_sample(key, mean_params, scale_mv, num_samples, **kwargs):
             keys[idx],
             mean=mean_params,
             scale_mv=scale_mv,
-            rank=kwargs.get("rank", None),  # If scale_mv assumes lower rank.
+            rank=kwargs.get("rank"),  # If scale_mv assumes lower rank.
         )
 
     return precompute_list(
@@ -501,88 +498,6 @@ def set_output_mv(
     }
 
 
-def set_output_low_rank_mv(
-    posterior_state: Posterior,
-    input: InputArray,
-    jvp: Callable[[InputArray, Params], PredArray],
-    vjp: Callable[[InputArray, PredArray], Params],
-    model_fn: ModelFn,
-    params: Params,
-):
-    flatten, unflatten = create_pytree_flattener(params)
-    cov_mv = posterior_state.cov_mv(posterior_state.state)
-
-    def output_cov_mv(vec: PredArray) -> PredArray:
-        return jvp(input, cov_mv(vjp(input, vec)[0]))
-
-    def output_jac_mv(vec: PredArray) -> PredArray:
-        return jvp(input, vec)
-
-
-# def set_output_low_rank_mv(
-#     posterior_state: Posterior,
-#     input: InputArray,
-#     jvp: Callable[[InputArray, Params], PredArray],
-#     vjp: Callable[[InputArray, PredArray], Params],
-#     mean_params: Params,
-#     *,
-#     model_fn: Callable | None = None,
-# ):
-#     low_rank_terms = posterior_state.low_rank_terms
-#     posterior_mean_full = mean_params
-#     sigma_sq = posterior_mean_full["param"]
-#     model_params = posterior_mean_full["model"]
-#     flatten, unflatten = create_pytree_flattener(model_params)
-
-#     def cov_mv(x):
-#         flatten, unflatten = create_pytree_flattener(x)
-#         x_flat = flatten(x)
-#         range_proj = low_rank_terms.U.T @ x_flat
-#         range_inv = range_proj / (sigma_sq.value + low_rank_terms.S**2)
-#         range_result = low_rank_terms.U @ range_inv
-#         null_proj = x_flat - low_rank_terms.U @ (low_rank_terms.U.T @ x_flat)
-#         null_result = null_proj / sigma_sq.value
-#         result = range_result + null_result
-
-#         return unflatten(result)
-
-#     def output_cov_mv(vec: PredArray) -> PredArray:
-#         return jvp(input, cov_mv(vjp(input, vec)[0]))
-
-#     def output_jac_mv(vec: PredArray) -> PredArray:
-#         return jvp(input, vec)
-
-#     U_param = low_rank_terms.U  # (P, k)
-
-#     if model_fn is not None:
-#         _, lin = jax.linearize(lambda p: model_fn(input=input, params=p), model_params)
-
-#         def apply_col(u_flat):
-#             return jnp.ravel(lin(unflatten(u_flat)))
-
-#         U_output = jax.vmap(apply_col)(jnp.moveaxis(U_param, 1, 0))  # (k, D)
-#         U_output = jnp.moveaxis(U_output, 0, 1)  # (D, k)
-#     else:
-
-#         def apply_col(u_flat):
-#             return jnp.ravel(jvp(input, unflatten(u_flat)))
-
-#         U_output = jax.vmap(apply_col)(jnp.moveaxis(U_param, 1, 0))  # (k, D)
-#         U_output = jnp.moveaxis(U_output, 0, 1)  # (D, k)
-
-#     S_output = low_rank_terms.S
-
-#     output_low_rank_terms = LowRankTerms(
-#         U=U_output, S=S_output, scalar=low_rank_terms.scalar
-#     )
-
-#     return {
-#         "cov_mv": output_cov_mv,
-#         "jac_mv": output_jac_mv,
-#         "low_rank_terms": output_low_rank_terms,
-#     }
-
-
 def lin_setup(
     results: dict[str, Array],
     aux: dict[str, Any],
@@ -608,14 +523,12 @@ def lin_setup(
     Returns:
         tuple: Updated `results` and `aux`.
     """  # noqa: DOC501
-    low_rank = kwargs.get("low_rank", False)
     del kwargs
 
     jvp = dist_state["jvp"]
     vjp = dist_state["vjp"]
     posterior_state = dist_state["posterior_state"]
 
-    # Check types (mainly needed for type checker)
     if not isinstance(posterior_state, Posterior):
         msg = "posterior state is not a Posterior type"
         raise TypeError(msg)
@@ -627,20 +540,6 @@ def lin_setup(
     if not isinstance(vjp, Callable):
         msg = "VJP is not a VJPType"
         raise TypeError(msg)
-
-    # if low_rank:
-    #     mv_lr = set_output_low_rank_mv(
-    #         posterior_state,
-    #         input,
-    #         jvp,
-    #         vjp,
-    #         mean_params=aux["mean_params"],
-    #         model_fn=aux["model_fn"],
-    #     )
-    #     aux["cov_lr_mv"] = mv_lr["cov_mv"]
-    #     aux["jac_lr_mv"] = mv_lr["jac_mv"]
-    #     results["low_rank_terms"] = mv_lr["low_rank_terms"]
-    #     results["observation_noise"] = aux["mean_params"]["param"]
 
     mv = set_output_mv(posterior_state, input, jvp, vjp)
     aux["cov_mv"] = mv["cov_mv"]
@@ -671,7 +570,6 @@ def lin_pred_mean(
     Note:
         This function is used for the linearized mean prediction.
     """
-
     del kwargs
 
     results["pred_mean"] = results["map"]
@@ -703,7 +601,6 @@ def lin_pred_var(
 
     pred_mean = results["pred_mean"]
 
-    # Compute diagonal as variance
     pred_var = util.mv.diagonal(
         cov,
         layout=math.prod(pred_mean.shape),
@@ -761,7 +658,7 @@ def lin_pred_cov(
 
     Raises:
         TypeError: If the covariance matrix-vector product function is invalid.
-    """
+    """  # noqa: DOC502
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
 
@@ -783,15 +680,15 @@ def lin_pred_lsqrt_low_rank_cov(
     - Computes `pred_var` from the low-rank factors without densifying.
       For Σ = U diag(S²) Uᵀ + σ² I with U ∈ R^{D×k},
       diag(Σ) = σ² 1 + Σ_j (S_j U[:, j])².
-    """
+    """  # noqa: DOC201
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
 
     if "low_rank_terms" in results and "observation_noise" in results:
         lr = results["low_rank_terms"]
         sigma = jnp.exp(results["observation_noise"])
-        # sum over columns: (S * U)^2
-        U_scaled = lr.U * lr.S  # broadcast over columns
+        # sum over columns: (S * U)^2 for low-rank diag
+        U_scaled = lr.U * lr.S
         pred_var = jnp.sum(U_scaled * U_scaled, axis=1) + sigma**2
         pred_mean = results["pred_mean"]
         results["pred_var"] = pred_var.reshape(pred_mean.shape)
@@ -822,7 +719,7 @@ def lin_samples(
 
     Raises:
         TypeError: If the scale matrix or sampling functions are invalid.
-    """
+    """  # noqa: DOC502
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
 
@@ -948,13 +845,11 @@ def set_prob_predictive(
     """
 
     def prob_predictive(input: InputArray) -> dict[str, Array]:
-        # MAP prediction
         pred_map = model_fn(input=input, params=mean_params)
         aux = {"model_fn": model_fn, "mean_params": mean_params}
 
         results = {"map": pred_map}
 
-        # Compute prediction
         return finalize_fns(
             fns=pushforward_fns,
             results=results,
@@ -1063,10 +958,8 @@ def set_lin_pushforward(
         Callable: A probabilistic predictive function that computes predictions
         and uncertainty metrics using a linearized approximation.
     """
-    # Create posterior state
     posterior_state = posterior_fn(prior_arguments, loss_scaling_factor)
 
-    # Posterior state to dist_state
     dist_state = get_dist_state(
         mean_params,
         model_fn,
@@ -1075,7 +968,6 @@ def set_lin_pushforward(
         **kwargs,
     )
 
-    # Set prob predictive
     prob_predictive = set_prob_predictive(
         model_fn=model_fn,
         mean_params=mean_params,
@@ -1122,10 +1014,8 @@ def set_posterior_gp_kernel(
     Raises:
         ValueError: If `dense` is True but `output_layout` is not specified.
     """
-    # Create posterior state
     posterior_state = posterior_fn(prior_arguments, loss_scaling_factor)
 
-    # Posterior state to dist_state
     dist_state = get_dist_state(
         mean,
         model_fn,
@@ -1135,7 +1025,6 @@ def set_posterior_gp_kernel(
         **kwargs,
     )
 
-    # Kernel mv
     def kernel_mv(
         vec: PredArray, x1: InputArray, x2: InputArray, dist_state: dict[str, Any]
     ) -> PredArray:
