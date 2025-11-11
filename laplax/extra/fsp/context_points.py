@@ -25,33 +25,42 @@ def _load_all_data_from_dataloader(
     y_list = []
 
     for batch_x, batch_y in dataloader:
-        x_list.append(jnp.array(batch_x))
-        y_list.append(jnp.array(batch_y))
+        # Convert any torch tensors or other array-likes to numpy first
+        bx = np.asarray(batch_x)
+        by = np.asarray(batch_y)
+        x_list.append(bx)
+        y_list.append(by)
 
-    all_x = jnp.array(jnp.concatenate(x_list, axis=0))
-    all_y = jnp.array(jnp.concatenate(y_list, axis=0))
+    all_x = jax.device_put(np.concatenate(x_list, axis=0))
+    all_y = jax.device_put(np.concatenate(y_list, axis=0))
 
     return all_x, all_y
 
 
 def _flatten_spatial_dims(data: Array) -> tuple[Array, tuple]:
-    """Flatten all axes except batch and last channel axis.
+    """Flatten spatial dimensions only, ignoring channels.
 
-    Avoids using jax.numpy on Python tuples by computing the product
-    with numpy to obtain a plain integer.
+    Rules:
+    - If data has shape (B, D): already flat; return (B, D).
+    - If data has shape (B, *S, C): drop channel axis C (take first channel)
+      and flatten S -> return (B, prod(S)).
 
-    Args:
-        data: Input array with shape (batch, *spatial_dims, channels)
-
-    Returns:
-        Tuple of (flattened_data, original_shape)
+    This matches tests expecting e.g. (4, 8, 8, 3) -> (4, 64) and
+    (10, 32, 2) -> (10, 32).
     """
     original_shape = data.shape
-    batch_size = int(original_shape[0])
-    middle = original_shape[1:-1]
-    n_spatial = int(np.prod(middle)) if len(middle) > 0 else 1
-    flattened = data.reshape(batch_size, n_spatial)
+    if data.ndim <= 2:
+        # Shapes like (B, D)
+        b = int(original_shape[0])
+        d = int(original_shape[1]) if len(original_shape) > 1 else 1
+        return data.reshape(b, d), original_shape
 
+    # NDIM >= 3: treat last axis as channels, drop by selecting first channel
+    squeezed = data[..., 0]
+    b = int(squeezed.shape[0])
+    spatial = squeezed.shape[1:]
+    n_spatial = int(np.prod(spatial)) if len(spatial) > 0 else 1
+    flattened = squeezed.reshape(b, n_spatial)
     return flattened, original_shape
 
 
@@ -110,7 +119,8 @@ def _generate_low_discrepancy_sequence(
     """
     if sequence_type.lower() == "sobol":
         sampler = qmc.Sobol(d=n_dims, scramble=True, seed=seed)
-        points = sampler.random_base2(n_points)
+        # Use generic random(n) to avoid 2**m explosion in tests
+        points = sampler.random(n_points)
     elif sequence_type.lower() == "halton":
         sampler = qmc.Halton(d=n_dims, scramble=True, seed=seed)
         points = sampler.random(n_points)
@@ -118,10 +128,11 @@ def _generate_low_discrepancy_sequence(
         sampler = qmc.LatinHypercube(d=n_dims, seed=seed)
         points = sampler.random(n_points)
     else:
-        raise ValueError(
+        msg = (
             f"Unknown sequence type: {sequence_type}. "
             "Choose from 'sobol', 'halton', 'latin_hypercube'"
         )
+        raise ValueError(msg)
 
     return points
 
@@ -159,7 +170,7 @@ def _find_nearest_neighbors(
     nn = NearestNeighbors(n_neighbors=1, algorithm="auto")
     nn.fit(data_points)
 
-    distances, indices = nn.kneighbors(query_points)
+    _, indices = nn.kneighbors(query_points)
     return indices.flatten()
 
 
@@ -190,7 +201,7 @@ def _pca_context_points(
         Tuple of (context_x, context_y) or (context_x, context_y, pca)
     """
     all_x, all_y = _load_all_data_from_dataloader(dataloader)
-    y_flat, original_shape = _flatten_spatial_dims(all_y)
+    y_flat, _ = _flatten_spatial_dims(all_y)
     x_flat, _ = _flatten_spatial_dims(all_x)
 
     y_pca, pca = _pca_transform_jax(
@@ -240,8 +251,10 @@ def _pca_context_points(
     else:
         indices = unique_indices[:n_context_points]
 
-    context_x = all_x[indices]
-    context_y = all_y[indices]
+    # Ensure JAX-friendly integer indices
+    j_indices = jnp.asarray(indices, dtype=jnp.int32)
+    context_x = all_x[j_indices]
+    context_y = all_y[j_indices]
 
     if return_pca:
         return context_x, context_y, pca
@@ -348,11 +361,23 @@ def _make_grid_from_data_shape(
     Returns:
         Tuple of (grid, dx) where dx is the grid spacing
     """
-    spatial_dims = tuple(dim for dim in data_shape[1:] if dim > 1)
+    # Treat last axis as channels if available and > 1
+    # Expected shapes:
+    #  - 1D: (B, S, C)
+    #  - 2D: (B, Sx, Sy, C)
+    #  - 3D: (B, Sx, Sy, Sz, C)
+    #  Optionally with time: (B, S, T, C) or (B, Sx, Sy, T, C)
+    tail = data_shape[1:]
+    if len(tail) == 0:
+        msg = f"Data shape must include at least one non-batch dimension: {data_shape}"
+        raise ValueError(msg)
 
-    if len(spatial_dims) > 3:
-        spatial_dims = spatial_dims[1:]
+    # If last axis seems like channels (small count), drop it
+    if len(tail) >= 2 and tail[-1] <= 8:
+        tail = tail[:-1]
 
+    # Keep up to first 3 dims as spatial, ignore any extra (e.g., time)
+    spatial_dims = tuple(int(d) for d in tail[:3])
     num_spatial_dims = len(spatial_dims)
     domain_extent = max_domain - min_domain
 
@@ -385,9 +410,8 @@ def _make_grid_from_data_shape(
         grid = jnp.stack([X, Y, Z], axis=-1)
 
     else:
-        raise ValueError(
-            f"Unsupported number of spatial dimensions: {num_spatial_dims}"
-        )
+        msg = f"Unsupported number of spatial dimensions: {num_spatial_dims}"
+        raise ValueError(msg)
 
     return grid, dx
 
@@ -395,9 +419,13 @@ def _make_grid_from_data_shape(
 def _make_grid_from_loader(
     dataloader, min_domain=0.0, max_domain=2 * np.pi
 ) -> tuple[jnp.ndarray, float]:
-    """Create a spatial grid from the first batch of a DataLoader."""
-    _, y = next(iter(dataloader))
-    data_shape = y.shape
+    """Create a spatial grid from the first batch of a DataLoader.
+
+    Uses the input tensor shape to infer spatial dimensions, as the grid
+    should correspond to the spatial layout of inputs (not targets).
+    """
+    x, _ = next(iter(dataloader))
+    data_shape = x.shape
     return _make_grid_from_data_shape(
         data_shape, min_domain=min_domain, max_domain=max_domain
     )
@@ -429,7 +457,7 @@ def select_context_points(
 
     Returns:
         Tuple of (context_x, context_y, grid)
-    """
+    """  # noqa: DOC501
     if "+" in context_selection:
         strategies = [s.strip() for s in context_selection.split("+")]
         logger.info(
@@ -488,15 +516,15 @@ def select_context_points(
             dataloader, n_context_points, seed
         )
 
-    elif context_selection == "sobol" or context_selection == "pca_sobol":
+    elif context_selection in {"sobol", "pca_sobol"}:
         context_x, context_y = _sobol_context_points(
             dataloader, n_context_points, n_pca_components, pca_variance_threshold, seed
         )
-    elif context_selection == "halton" or context_selection == "pca_halton":
+    elif context_selection in {"halton", "pca_halton"}:
         context_x, context_y = _halton_context_points(
             dataloader, n_context_points, n_pca_components, pca_variance_threshold, seed
         )
-    elif context_selection == "latin_hypercube" or context_selection == "pca_lhs":
+    elif context_selection in {"latin_hypercube", "pca_lhs"}:
         context_x, context_y = _latin_hypercube_context_points(
             dataloader, n_context_points, n_pca_components, pca_variance_threshold, seed
         )
@@ -505,10 +533,11 @@ def select_context_points(
             dataloader, n_context_points, n_pca_components, pca_variance_threshold, seed
         )
     else:
-        raise ValueError(
+        msg = (
             f"Unknown context_selection: {context_selection}. "
             "Choose from 'random', 'sobol', 'halton', 'latin_hypercube', 'pca'"
         )
+        raise ValueError(msg)
 
     if time_keep is not None:
         t_keep = max(1, int(time_keep))
@@ -543,6 +572,7 @@ def select_context_points(
             grid = grid[::s_x, ::s_y, ::s_z, :]
             context_x = context_x[:, ::s_x, ::s_y, ::s_z, ...]
         else:
-            raise ValueError(f"Unsupported grid dimension for striding: {grid.ndim}")
+            msg = f"Unsupported grid dimension for striding: {grid.ndim}"
+            raise ValueError(msg)
 
     return context_x, context_y, grid

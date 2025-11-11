@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset
 
 from laplax.extra.fsp.context_points import (
     _flatten_spatial_dims,
@@ -20,6 +20,121 @@ from laplax.extra.fsp.context_points import (
 )
 
 
+class TensorDataset(Dataset):
+    """A simple Dataset wrapping tensors."""
+
+    def __init__(self, *tensors):
+        self.tensors = tensors
+
+    def __len__(self):
+        return self.tensors[0].shape[0]
+
+    def __getitem__(self, index):
+        return tuple(tensor[index] for tensor in self.tensors)
+
+
+class DummyWaveDataset(Dataset):
+    """Minimal dummy dataset mimicking wave/heat trajectories.
+
+    Generates synthetic spatiotemporal data in 1D or 2D with an explicit
+    time axis and a channel axis, keeping shapes simple and deterministic.
+
+    X shape per-sample:
+    - 1D: (S, T, Cx)
+    - 2D: (Sx, Sy, T, Cx)
+
+    Y shape per-sample (single-channel target matching spatial/time layout):
+    - 1D: (S, T, 1)
+    - 2D: (Sx, Sy, T, 1)
+    """
+
+    def __init__(
+        self,
+        n_samples: int = 100,
+        spatial_size: int | tuple[int, int] = 32,
+        n_timesteps: int = 10,
+        channels_in: int = 2,
+        is_2d: bool | None = None,
+        seed: int = 42,
+    ) -> None:
+        rng = np.random.default_rng(seed)
+
+        # Determine 1D vs 2D and spatial shape
+        if isinstance(spatial_size, tuple):
+            sx, sy = spatial_size
+            self.is_2d = True
+            spatial_shape = (int(sx), int(sy))
+        else:
+            self.is_2d = bool(is_2d) if is_2d is not None else False
+            spatial_shape = (
+                (int(spatial_size),)
+                if not self.is_2d
+                else (int(spatial_size), int(spatial_size))
+            )
+
+        t = int(max(1, n_timesteps))
+        c_in = int(max(1, channels_in))
+        c_out = 1
+
+        # Build full sample shapes
+        if self.is_2d:
+            self.x = rng.standard_normal((
+                n_samples,
+                spatial_shape[0],
+                spatial_shape[1],
+                t,
+                c_in,
+            )).astype(np.float32)
+            # Simple target derived from inputs to keep relation but avoid heavy logic
+            self.y = (
+                self.x[..., :1]
+                + 0.1
+                * rng.standard_normal((
+                    n_samples,
+                    spatial_shape[0],
+                    spatial_shape[1],
+                    t,
+                    c_out,
+                ))
+            ).astype(np.float32)
+        else:
+            self.x = rng.standard_normal((n_samples, spatial_shape[0], t, c_in)).astype(
+                np.float32
+            )
+            self.y = (
+                self.x[..., :1]
+                + 0.1 * rng.standard_normal((n_samples, spatial_shape[0], t, c_out))
+            ).astype(np.float32)
+
+        self.n_samples = int(n_samples)
+
+    def __len__(self):
+        return self.n_samples
+
+    def __getitem__(self, idx):
+        return self.x[idx], self.y[idx]
+
+
+def _create_dummy_wave_dataloader(
+    n_samples: int = 100,
+    spatial_size: int | tuple[int, int] = 32,
+    n_timesteps: int = 10,
+    channels_in: int = 2,
+    is_2d: bool | None = None,
+    batch_size: int = 16,
+    seed: int = 42,
+) -> DataLoader:
+    dataset = DummyWaveDataset(
+        n_samples=n_samples,
+        spatial_size=spatial_size,
+        n_timesteps=n_timesteps,
+        channels_in=channels_in,
+        is_2d=is_2d,
+        seed=seed,
+    )
+    return DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+
 def _create_dummy_dataloader(
     n_samples: int = 100,
     input_shape: tuple = (32,),
@@ -27,26 +142,23 @@ def _create_dummy_dataloader(
     batch_size: int = 16,
 ) -> DataLoader:
     """Create a dummy DataLoader for testing."""
-    key = jax.random.PRNGKey(42)
-    key_x, key_y = jax.random.split(key)
+    rng = np.random.default_rng(42)
+    x = rng.standard_normal((n_samples,) + input_shape).astype(np.float32)
+    y = rng.standard_normal((n_samples,) + output_shape).astype(np.float32)
 
-    x = jax.random.normal(key_x, (n_samples,) + input_shape)
-    y = jax.random.normal(key_y, (n_samples,) + output_shape)
-
-    dataset = TensorDataset(
-        jnp.array(x),
-        jnp.array(y),
-    )
+    dataset = TensorDataset(x, y)
     return DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
 
 def test_load_all_data_from_dataloader():
     """Test loading all data from a DataLoader."""
-    dataloader = _create_dummy_dataloader(n_samples=50, batch_size=10)
+    dataloader = _create_dummy_wave_dataloader(
+        n_samples=50, spatial_size=32, n_timesteps=10, channels_in=2, batch_size=10
+    )
     all_x, all_y = _load_all_data_from_dataloader(dataloader)
 
-    assert all_x.shape == (50, 32)
-    assert all_y.shape == (50, 10)
+    assert all_x.shape == (50, 32, 10, 2)
+    assert all_y.shape == (50, 32, 10, 1)
     assert isinstance(all_x, jax.Array)
     assert isinstance(all_y, jax.Array)
 
@@ -168,7 +280,9 @@ def test_random_context_points_all_data():
     """Test random selection when requesting all or more points."""
     dataloader = _create_dummy_dataloader(n_samples=50)
 
-    context_x, context_y = _random_context_points(dataloader, n_context_points=60, seed=42)
+    context_x, context_y = _random_context_points(
+        dataloader, n_context_points=60, seed=42
+    )
 
     assert context_x.shape == (50, 32)
     assert context_y.shape == (50, 10)
