@@ -1,9 +1,10 @@
 from laplax.extra.fsp.curv import compute_curvature_fn
 
+from .context_points import select_context_points
 from .fsp import compute_matrix_jacobian_product, fsp_laplace
 from .ggn import create_fsp_ggn_mv
 from .lanczos_isqrt import lanczos_invert_sqrt, lanczos_jacobian_initialization
-from .objective import create_fsp_objective, select_context_points
+from .objective import create_fsp_objective
 
 __all__ = [
     "compute_curvature_fn",
