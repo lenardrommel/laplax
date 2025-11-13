@@ -383,24 +383,24 @@ def create_ggn_pytree_mv(
 
     def _jacobian_matrix_product(u):
         """Calculates the product of the Jacobian and matrix u (pytree).
-
-        Parameters
+        Parameters.
         ----------
         u : pytree
             Parameter pytree with same structure as params
 
-        Returns
+        Returns:
         -------
         Array with shape (B,) + output_shape + (R,)
             Batch of Jacobian-matrix products
-        """
-        return jax.vmap(
+        """  # noqa: D205
+        return jax.lax.map(
             lambda x_c: jax.vmap(
                 lambda u_c: jax.jvp(lambda p: model_fn(x_c, p), (params,), (u_c,))[1],
                 in_axes=-1,
                 out_axes=-1,
-            )(u)
-        )(x_context)
+            )(u),
+            x_context,
+        )
 
     def ggn_vector_product(u):
         """Compute u^T @ GGN @ u.
