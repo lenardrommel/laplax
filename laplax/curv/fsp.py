@@ -1,9 +1,10 @@
+# fsp.py
+
 """FSP (Function-Space Prior) inference module with support for different kernel structures."""
 
 import functools
 import operator
 import time
-from enum import StrEnum
 from functools import partial
 
 import jax
@@ -12,10 +13,12 @@ from loguru import logger
 
 from laplax.curv.cov import Posterior, PosteriorState
 from laplax.curv.utils import LowRankTerms
+from laplax.enums import CovarianceStructure
 from laplax.types import (
     Callable,
     InputArray,
     Kernel,
+    Kwargs,
     ModelFn,
     Params,
     PredArray,
@@ -26,12 +29,7 @@ from laplax.util.flatten import (
 )
 from laplax.util.lanczos import lanczos_invert_sqrt
 
-
-class KernelStructure(StrEnum):
-    """Kernel structure types for FSP inference."""
-
-    KRONECKER = "kronecker"
-    NONE = "none"
+KernelStructure = CovarianceStructure
 
 
 # ==============================================================================
@@ -40,31 +38,49 @@ class KernelStructure(StrEnum):
 
 
 @partial(jax.jit, static_argnames=("model_fn",))
-def _model_vjp(
-    model_fn: ModelFn, params: Params, xs: InputArray, vs: PredArray
-) -> jax.Array:
-    """Compute multiple vector-Jacobian products of the model at the mode.
+def _model_jvp(
+    model_fn: ModelFn, params: Params, xs: InputArray, vs: Params
+) -> PredArray:
+    """Compute multiple Jacobian-vector products of the model.
 
-    ```
-    res[b] == vjp(f(xs[b], :), vs[b])
-    ```
+    res[b] == jvp(f(xs[b], :), vs)
 
     Parameters
     ----------
+    model_fn : ModelFn
+        Model function
+    params : Params
+        Model parameters
     xs : jnp.array with shape `(B,) + input_shape`
         Primals
-    vs : jnp.array with shape `(B,) + output_shape`
-        Tangents
+    vs : Params
+        Tangent vectors (pytree matching params structure)
 
     Returns
     -------
-    jnp.array with shape `(B,) + param_shape`
-        Batch of vector-Jacobian products.
+    jnp.array with shape `(B,) + output_shape`
+        Batch of Jacobian-vector products
     """
     return jax.vmap(
-        lambda x, v: jax.vjp(lambda w: model_fn(x, w), params)[1](v),
-        in_axes=(0, 0),
+        lambda x: jax.jvp(lambda w: model_fn(x, w), (params,), (vs,))[1],
+        in_axes=0,
         out_axes=0,
+    )(xs)
+
+
+def _model_vjp(
+    model_fn: ModelFn,
+    params: Params,
+    xs: InputArray,
+    vs: PredArray,
+    *,
+    batch_axis: int = 0,
+    output_batch_axis: int = 0,
+) -> jax.Array:
+    return jax.vmap(
+        lambda x, v: jax.vjp(lambda w: model_fn(x, w), params)[1](v)[0],
+        in_axes=(batch_axis, output_batch_axis),
+        out_axes=output_batch_axis,
     )(xs, vs)
 
 
@@ -88,14 +104,15 @@ def _M_batch(model_fn: ModelFn, params: Params, xs: InputArray, L: PredArray):
     Pytree
         Batched matrix-Jacobian product
     """
-    return jax.vmap(
-        lambda vs: jax.tree.map(
-            lambda param: jnp.sum(param, axis=0),
-            _model_vjp(model_fn, params, xs, vs),
-        ),
-        in_axes=-1,
-        out_axes=-1,
-    )(L)
+
+    def process_single_vs(vs):
+        vjp_result = _model_vjp(model_fn, params, xs, vs)
+        return jax.tree.map(lambda param: jnp.sum(param, axis=0), vjp_result)
+
+    L_transposed = jnp.moveaxis(L, -1, 0)
+    result = jax.lax.map(process_single_vs, L_transposed)
+
+    return jax.tree.map(lambda x: jnp.moveaxis(x, 0, -1), result)
 
 
 @partial(jax.jit, static_argnums=(0,), static_argnames=("num_chunks",))
@@ -117,12 +134,12 @@ def _lanczos_init(model_fn: ModelFn, params: Params, xs, num_chunks):
     -------
     tuple
         (initial_vectors_function, initial_vectors_spatial)
-    """
+    """  # noqa: DOC501
     if xs.ndim < 4:
         msg = f"Input must have shape (B, S1, S2, ..., C), but got {xs.shape}"
         raise ValueError(msg)
 
-    ones_pytree = jax.tree.map(lambda x: jnp.ones_like(x), params)
+    ones_pytree = jax.tree.map(jnp.ones_like, params)
 
     model_jvp = jax.vmap(
         lambda x: jax.jvp(
@@ -187,6 +204,13 @@ def create_ggn_pytree_mv(
         Function that computes GGN @ u for pytree u
     """
 
+    def _unwrap(u_like):
+        return (
+            u_like[0]
+            if isinstance(u_like, (tuple, list)) and len(u_like) == 1
+            else u_like
+        )
+
     def _jacobian_matrix_product(u):
         """Calculates the product of the Jacobian and matrix u (pytree).
 
@@ -200,9 +224,13 @@ def create_ggn_pytree_mv(
         Array with shape (B,) + output_shape + (R,)
             Batch of Jacobian-matrix products
         """
+        u = _unwrap(u)
+
         return jax.vmap(
             lambda x_c: jax.vmap(
-                lambda u_c: jax.jvp(lambda p: model_fn(x_c, p), (params,), (u_c,))[1],
+                lambda u_c: jax.jvp(
+                    lambda p: model_fn(x_c, p), (params,), (_unwrap(u_c),)
+                )[1],
                 in_axes=-1,
                 out_axes=-1,
             )(u)
@@ -448,6 +476,7 @@ def create_fsp_posterior_kronecker(
             for x_c, k_c in zip(
                 jnp.split(x_context, n_chunks_eff, axis=0),
                 jnp.split(k_inv_sqrt_dense, n_chunks_eff, axis=0),
+                strict=False,
             )
         ),
     )
@@ -458,7 +487,7 @@ def create_fsp_posterior_kronecker(
 
     # Calculate the SVD of M
     _u, _s, _ = jnp.linalg.svd(M_flat, full_matrices=False)
-    tol = jnp.finfo(M_flat.dtype).eps**2
+    tol = jnp.finfo(M_flat.dtype).eps ** 2
     s = _s[_s > tol]
     _u = _u[:, : s.size]
 
@@ -621,7 +650,7 @@ def create_fsp_posterior_none(
 
     # Calculate the SVD of M
     _u, _s, _ = jnp.linalg.svd(M_flat, full_matrices=False)
-    tol = jnp.finfo(M_flat.dtype).eps**2
+    tol = jnp.finfo(M_flat.dtype).eps ** 2
     s = _s[_s > tol]
     _u = _u[:, : s.size]
 
@@ -704,7 +733,7 @@ def create_fsp_posterior(
     model_fn: ModelFn,
     params: Params,
     x_context: InputArray,
-    kernel_structure: KernelStructure,
+    kernel_structure: CovarianceStructure | str,
     n_chunks: int,
     *,
     kernel: Callable | None = None,
@@ -752,7 +781,10 @@ def create_fsp_posterior(
     ValueError
         If required arguments for the specified kernel structure are missing
     """
-    if kernel_structure == KernelStructure.KRONECKER:
+    if (
+        kernel_structure == CovarianceStructure.KRONECKER
+        or str(kernel_structure) == "kronecker"
+    ):
         if spatial_kernels is None or function_kernels is None:
             msg = (
                 "spatial_kernels and function_kernels must be provided "
@@ -772,7 +804,9 @@ def create_fsp_posterior(
             **kwargs,
         )
 
-    elif kernel_structure == KernelStructure.NONE:
+    elif (
+        kernel_structure == CovarianceStructure.NONE or str(kernel_structure) == "none"
+    ):
         if kernel is None:
             msg = "kernel must be provided for None structure"
             raise ValueError(msg)
@@ -791,3 +825,10 @@ def create_fsp_posterior(
     else:
         msg = f"Unknown kernel structure: {kernel_structure}"
         raise ValueError(msg)
+
+
+# Public mapping similar to CURVATURE_PRECISION_METHODS
+COVARIANCE_STRUCTURE_METHODS: dict[CovarianceStructure | str, Callable] = {
+    CovarianceStructure.KRONECKER: create_fsp_posterior_kronecker,
+    CovarianceStructure.NONE: create_fsp_posterior_none,
+}

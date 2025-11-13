@@ -47,7 +47,7 @@ def _flatten_spatial_dims(data: Array) -> tuple[Array, tuple]:
 
     This matches tests expecting e.g. (4, 8, 8, 3) -> (4, 64) and
     (10, 32, 2) -> (10, 32).
-    """
+    """  # noqa: DOC201
     original_shape = data.shape
     if data.ndim <= 2:
         # Shapes like (B, D)
@@ -116,7 +116,7 @@ def _generate_low_discrepancy_sequence(
 
     Returns:
         Array of shape (n_points, n_dims) with values in [0, 1]
-    """
+    """  # noqa: DOC501
     if sequence_type.lower() == "sobol":
         sampler = qmc.Sobol(d=n_dims, scramble=True, seed=seed)
         # Use generic random(n) to avoid 2**m explosion in tests
@@ -360,13 +360,7 @@ def _make_grid_from_data_shape(
 
     Returns:
         Tuple of (grid, dx) where dx is the grid spacing
-    """
-    # Treat last axis as channels if available and > 1
-    # Expected shapes:
-    #  - 1D: (B, S, C)
-    #  - 2D: (B, Sx, Sy, C)
-    #  - 3D: (B, Sx, Sy, Sz, C)
-    #  Optionally with time: (B, S, T, C) or (B, Sx, Sy, T, C)
+    """  # noqa: DOC501
     tail = data_shape[1:]
     if len(tail) == 0:
         msg = f"Data shape must include at least one non-batch dimension: {data_shape}"
@@ -423,7 +417,7 @@ def _make_grid_from_loader(
 
     Uses the input tensor shape to infer spatial dimensions, as the grid
     should correspond to the spatial layout of inputs (not targets).
-    """
+    """  # noqa: DOC201
     x, _ = next(iter(dataloader))
     data_shape = x.shape
     return _make_grid_from_data_shape(

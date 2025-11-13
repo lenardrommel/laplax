@@ -5,7 +5,9 @@ from .cov import (
     estimate_curvature,
     set_posterior_fn,
 )
+from laplax.enums import CovarianceStructure
 from .fsp import (
+    COVARIANCE_STRUCTURE_METHODS,
     KernelStructure,
     create_fsp_posterior,
     create_fsp_posterior_kronecker,
@@ -13,14 +15,4 @@ from .fsp import (
 )
 from .ggn import create_ggn_mv, create_ggn_pytree_mv
 
-__all__ = [
-    "KernelStructure",
-    "create_fsp_posterior",
-    "create_fsp_posterior_kronecker",
-    "create_fsp_posterior_none",
-    "create_ggn_mv",
-    "create_ggn_pytree_mv",
-    "create_posterior_fn",
-    "estimate_curvature",
-    "set_posterior_fn",
-]
+__all__ = ["COVARIANCE_STRUCTURE_METHODS", "CovarianceStructure", "KernelStructure", "create_fsp_posterior", "create_fsp_posterior_kronecker", "create_fsp_posterior_none", "create_ggn_mv", "create_ggn_pytree_mv", "create_posterior_fn", "estimate_curvature", "set_posterior_fn"]
