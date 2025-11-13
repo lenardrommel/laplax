@@ -11,10 +11,12 @@ from laplax.types import (
     Array,
     Float,
     InputArray,
+    Kwargs,
     Layout,
     ModelFn,
     Num,
     Params,
+    PredArray,
     TargetArray,
 )
 from laplax.util.flatten import create_pytree_flattener, wrap_function
@@ -197,3 +199,48 @@ def concatenate_model_and_loss_fn(
 
     msg = f"unknown loss function: {loss_fn}"
     raise ValueError(msg)
+
+
+def create_model_jvp(
+    params: Params, v: Params, model_fn: ModelFn, in_axes=0, out_axes=0
+) -> Callable[[InputArray], PredArray]:
+    """Compute the Jacobian-vector product of the model function.
+
+    Args:
+        params: Model parameters.
+        v: Vector to multiply with the Jacobian.
+        model_fn: The model function.
+    Returns:
+        The Jacobian-vector product.
+    """
+    return jax.vmap(
+        lambda x: jax.jvp(
+            lambda w: model_fn(x, w),
+            (params,),
+            (v,),
+        )[1],
+        in_axes=in_axes,
+        out_axes=out_axes,
+    )
+
+
+def create_model_vjp(
+    params: Params, v: Num[Array, "..."], model_fn: ModelFn, in_axes=0, out_axes=0
+) -> Callable[[InputArray], Params]:
+    """Compute the vector-Jacobian product of the model function.
+
+    Args:
+        params: Model parameters.
+        v: Vector to multiply with the Jacobian.
+        model_fn: The model function.
+    Returns:
+        The vector-Jacobian product.
+    """
+    return jax.vmap(
+        lambda x: jax.vjp(
+            lambda w: model_fn(x, w),
+            params,
+        )[1](v)[0],
+        in_axes=in_axes,
+        out_axes=out_axes,
+    )

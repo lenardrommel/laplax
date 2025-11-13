@@ -364,6 +364,8 @@ def create_ggn_pytree_mv(
     params: Params,
     x_context: Num[Array, "..."],
     hessian_diag: bool = True,
+    *,
+    vmap_over_data: bool = True,
 ) -> Callable[[Params], Array]:
     """Create a GGN matrix-vector product function that works with pytrees.
 
@@ -381,18 +383,16 @@ def create_ggn_pytree_mv(
         Function that computes GGN @ u for pytree u
     """
 
-    def _jacobian_matrix_product(u):
-        """Calculates the product of the Jacobian and matrix u (pytree).
-        Parameters.
-        ----------
-        u : pytree
-            Parameter pytree with same structure as params
+    def _jmp_vmap(u):
+        return jax.vmap(
+            lambda x_c: jax.vmap(
+                lambda u_c: jax.jvp(lambda p: model_fn(x_c, p), (params,), (u_c,))[1],
+                in_axes=-1,
+                out_axes=-1,
+            )(u)
+        )(x_context)
 
-        Returns:
-        -------
-        Array with shape (B,) + output_shape + (R,)
-            Batch of Jacobian-matrix products
-        """  # noqa: D205
+    def _jmp_laxmap(u):
         return jax.lax.map(
             lambda x_c: jax.vmap(
                 lambda u_c: jax.jvp(lambda p: model_fn(x_c, p), (params,), (u_c,))[1],
@@ -411,14 +411,21 @@ def create_ggn_pytree_mv(
         Returns:
             GGN matrix-vector product
         """
-        if hessian_diag:
-            ju = _jacobian_matrix_product(u)
+        if hessian_diag and vmap_over_data:
+            ju = _jmp_vmap(u)
             batch_size = ju.shape[0]
             rank = ju.shape[-1]
             ju_flat = ju.reshape(batch_size, -1, rank)
             return jax.numpy.einsum("bji,bjk->ik", ju_flat, ju_flat)
-        else:
-            msg = "Full Hessian not implemented yet."
-            raise NotImplementedError(msg)
+
+        if hessian_diag and not vmap_over_data:
+            ju = _jmp_laxmap(u)
+            batch_size = ju.shape[0]
+            rank = ju.shape[-1]
+            ju_flat = ju.reshape(batch_size, -1, rank)
+            return jax.numpy.einsum("bji,bjk->ik", ju_flat, ju_flat)
+
+        msg = "Full Hessian not implemented yet."
+        raise NotImplementedError(msg)
 
     return ggn_vector_product

@@ -12,7 +12,8 @@ import jax.numpy as jnp
 from loguru import logger
 
 from laplax.curv.cov import Posterior, PosteriorState
-from laplax.curv.utils import LowRankTerms
+from laplax.curv.ggn import create_ggn_pytree_mv
+from laplax.curv.utils import LowRankTerms, create_model_jvp
 from laplax.enums import CovarianceStructure
 from laplax.types import (
     Callable,
@@ -180,82 +181,6 @@ def _lanczos_init(model_fn: ModelFn, params: Params, xs, num_chunks):
     initial_vectors_spatial = initial_vectors[1:]
 
     return initial_vectors_function, initial_vectors_spatial
-
-
-def create_ggn_pytree_mv(
-    model_fn: ModelFn,
-    params: Params,
-    x_context: InputArray,
-    hessian_diag: bool = True,
-) -> Callable[[Params], jnp.ndarray]:
-    """Create a GGN matrix-vector product function that works with pytrees.
-
-    This function creates a Generalized Gauss-Newton (GGN) matrix-vector product
-    operator that works directly with pytree parameters without requiring linear
-    operators or dense matrices.
-
-    Args:
-        model_fn: Model function taking input and params
-        params: Model parameters as pytree
-        x_context: Context points for GGN computation
-        hessian_diag: If True, assumes diagonal Hessian (identity for regression)
-
-    Returns:
-        Function that computes GGN @ u for pytree u
-    """
-
-    def _unwrap(u_like):
-        return (
-            u_like[0]
-            if isinstance(u_like, (tuple, list)) and len(u_like) == 1
-            else u_like
-        )
-
-    def _jacobian_matrix_product(u):
-        """Calculates the product of the Jacobian and matrix u (pytree).
-
-        Parameters
-        ----------
-        u : pytree
-            Parameter pytree with same structure as params
-
-        Returns
-        -------
-        Array with shape (B,) + output_shape + (R,)
-            Batch of Jacobian-matrix products
-        """
-        u = _unwrap(u)
-
-        return jax.vmap(
-            lambda x_c: jax.vmap(
-                lambda u_c: jax.jvp(
-                    lambda p: model_fn(x_c, p), (params,), (_unwrap(u_c),)
-                )[1],
-                in_axes=-1,
-                out_axes=-1,
-            )(u)
-        )(x_context)
-
-    def ggn_vector_product(u):
-        """Compute u^T @ GGN @ u.
-
-        Args:
-            u: pytree with same structure as params
-
-        Returns:
-            GGN matrix-vector product
-        """
-        if hessian_diag:
-            ju = _jacobian_matrix_product(u)
-            batch_size = ju.shape[0]
-            rank = ju.shape[-1]
-            ju_flat = ju.reshape(batch_size, -1, rank)
-            return jnp.einsum("bji,bjk->ik", ju_flat, ju_flat)
-        else:
-            msg = "Full Hessian not implemented yet."
-            raise NotImplementedError(msg)
-
-    return ggn_vector_product
 
 
 # ==============================================================================
@@ -441,7 +366,7 @@ def create_fsp_posterior_kronecker(
         model_fn, params, x_context, num_chunks=n_chunks_eff
     )
 
-    # Lanczos inverse sqrt factors for spatial dimensions
+    # TODO: Remove hard coded [8] and make configurable
     if spatial_max_iters is None:
         spatial_max_iters = [8] * len(spatial_kernels)
 
@@ -513,6 +438,7 @@ def create_fsp_posterior_kronecker(
 
     _, unravel_fn = jax.flatten_util.ravel_pytree(params)
 
+    # TODO: write own function and then use it globally for jvp in this script
     def jvp(x, v):
         return jax.jvp(lambda p: model_fn(x, p), (params,), (v,))[1]
 
@@ -614,15 +540,7 @@ def create_fsp_posterior_none(
 
     # Initialize with ones (simple initialization for unstructured case)
     ones_pytree = jax.tree.map(lambda x: jnp.ones_like(x), params)
-    model_jvp = jax.vmap(
-        lambda x: jax.jvp(
-            lambda w: model_fn(x, w),
-            (params,),
-            (ones_pytree,),
-        )[1],
-        in_axes=0,
-        out_axes=0,
-    )
+    model_jvp = create_model_jvp(params, ones_pytree, model_fn, in_axes=0, out_axes=0)
     b = model_jvp(x_context)
     initial_vector = b.flatten() / jnp.linalg.norm(b.flatten())
 
@@ -640,6 +558,7 @@ def create_fsp_posterior_none(
             for x_c, k_c in zip(
                 jnp.split(x_context, n_chunks_eff, axis=0),
                 jnp.split(k_inv_sqrt_dense, n_chunks_eff, axis=0),
+                strict=False,
             )
         ),
     )
@@ -780,7 +699,7 @@ def create_fsp_posterior(
     ------
     ValueError
         If required arguments for the specified kernel structure are missing
-    """
+    """  # noqa: DOC501
     if (
         kernel_structure == CovarianceStructure.KRONECKER
         or str(kernel_structure) == "kronecker"
