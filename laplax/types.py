@@ -24,6 +24,7 @@ FlatParams = Num[Array, "P"]
 Params = PyTree[Num[Array, "..."]]
 ModelFn = Callable[..., Params]  # [InputArray, Params]
 CurvatureMV = Callable[[Params], Params]
+Kernel = Callable  # Kernel function (e.g., RBF kernel)
 
 # Data structures
 Data = Mapping[str, Num[Array, "..."]]  # {"input": ..., "target": ...}
@@ -63,6 +64,7 @@ __all__ = [
     "InputArray",
     "Int",
     "Iterable",
+    "Kernel",
     "KeyType",
     "Kwargs",
     "Layout",

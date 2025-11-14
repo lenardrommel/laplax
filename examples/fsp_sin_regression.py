@@ -128,7 +128,7 @@ def train_mlp(model, x_train, y_train, num_epochs=1000, learning_rate=0.01):
     def train_step(model, optimizer, x_batch, y_batch):
         """Single training step."""
         loss, grads = nnx.value_and_grad(mse_loss)(model, x_batch, y_batch)
-        optimizer.update(model, grads)
+        optimizer.update(model, grads)  # Requires Flax >= 0.11.0
         return loss
 
     for epoch in range(num_epochs):

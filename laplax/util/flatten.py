@@ -139,10 +139,13 @@ def create_partial_pytree_flattener(
         flat_vector_split = jnp.split(
             arr, cumsum(math.prod(sh[:-1]) for sh in all_shapes)[:-1], axis=0
         )  # Ignore column indices in shape.
+        # Use actual column dimension from input array, not original shapes
+        # This handles cases where SVD truncation reduces the rank
+        actual_cols = arr.shape[-1] if arr.ndim > 1 else 1
         return jax.tree_util.tree_unflatten(
             tree_def,
             [
-                flat_vector_split[i].reshape(all_shapes[i])
+                flat_vector_split[i].reshape(*all_shapes[i][:-1], actual_cols)
                 for i in range(len(flat_vector_split))
             ],
         )
