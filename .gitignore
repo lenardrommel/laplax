@@ -6,6 +6,7 @@ wandb/*
 data/*
 examples/pipeline/*
 examples/fsplaplace/*
+!fsp/*
 
 
 # Temporary files (documentation)
