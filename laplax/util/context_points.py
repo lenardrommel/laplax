@@ -5,9 +5,14 @@ from loguru import logger
 from scipy.stats import qmc
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
-from torch.utils.data import DataLoader
 
 from laplax.types import Array
+
+# Optional dependency for PyTorch DataLoader
+try:
+    from torch.utils.data import DataLoader
+except ImportError:
+    DataLoader = None
 
 
 def _load_all_data_from_dataloader(

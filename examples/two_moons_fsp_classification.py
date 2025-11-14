@@ -48,9 +48,9 @@ def mlp_forward(x, params):
 def binary_cross_entropy_loss(params, x_batch, y_batch):
     """Binary cross-entropy loss."""
     logits = jax.vmap(lambda x: mlp_forward(x, params))(x_batch)
-    # BCE with logits
-    return jnp.mean(jax.nn.log_sigmoid(logits) * y_batch +
-                    jax.nn.log_sigmoid(-logits) * (1 - y_batch))
+    # BCE with logits (negative log likelihood to minimize)
+    return -jnp.mean(jax.nn.log_sigmoid(logits) * y_batch +
+                     jax.nn.log_sigmoid(-logits) * (1 - y_batch))
 
 
 def train_mlp(params, x_train, y_train, num_epochs=100, learning_rate=0.01):
@@ -62,7 +62,7 @@ def train_mlp(params, x_train, y_train, num_epochs=100, learning_rate=0.01):
             params, x_batch, y_batch
         )
         # Gradient descent update
-        params = jax.tree_map(
+        params = jax.tree.map(
             lambda p, g: p - learning_rate * g, params, grads
         )
         return params, loss
@@ -70,7 +70,7 @@ def train_mlp(params, x_train, y_train, num_epochs=100, learning_rate=0.01):
     for epoch in range(num_epochs):
         params, loss = update(params, x_train, y_train)
         if (epoch + 1) % 20 == 0:
-            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {-loss:.4f}")
+            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss:.4f}")
 
     return params
 
@@ -193,7 +193,7 @@ def main():
         # Sample from posterior
         z = jax.random.normal(subkey, (posterior.rank,))
         delta_params = posterior.scale_mv(posterior.state)(z)
-        sample_params = jax.tree_map(lambda p, dp: p + dp, trained_params, delta_params)
+        sample_params = jax.tree.map(lambda p, dp: p + dp, trained_params, delta_params)
 
         # Predict with sampled params
         sample_logits = jax.vmap(lambda x: mlp_forward(x, sample_params))(grid_jax)

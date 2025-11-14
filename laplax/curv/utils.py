@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
+from jax import flatten_util
 
 from laplax.enums import LossFn
 from laplax.types import (
@@ -273,7 +274,7 @@ def compute_posterior_truncation_index(
     prior_var_sum = jnp.sum(prior_variance)
 
     # Unravel columns of cov_sqrt back into the params pytree shape
-    _, unravel_fn = jax.flatten_util.ravel_pytree(params)
+    _, unravel_fn = flatten_util.ravel_pytree(params)
 
     def jvp_fn(x, v):
         return jax.jvp(lambda p: model_fn(x, p), (params,), (v,))[1]

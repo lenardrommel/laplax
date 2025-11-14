@@ -15,13 +15,15 @@ def lanczos_invert_sqrt(
     """Conjugate gradient method to solve the linear system Ax = b.
 
     params:
-    - A (callable): linear operator.
+    - A (callable or array): linear operator (function) or matrix.
     - b (array): right-hand side.
     - x0 (array): initial guess.
     - atol (float): absolut tolerance.
     - tol (float): relative tolerance.
     - max_iter (int): maximum number of iterations.
     """
+    # Check if A is callable (function) or a matrix
+    is_callable = callable(A)
 
     @jax.jit
     def _step(values):
@@ -32,7 +34,7 @@ def lanczos_invert_sqrt(
         p = jax.lax.cond(k > 0, true_fn, false_fn, p)
 
         # Compute modified Lanzcos vector
-        w = A @ p  # A(p) or A @ p
+        w = A(p) if is_callable else A @ p
         eta = p @ w
         ds = ds.at[:, k].set(p / jnp.sqrt(eta))
 
