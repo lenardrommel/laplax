@@ -33,6 +33,12 @@ local_*
 !examples/0001_laplax_for_regression.ipynb
 !examples/0002_laplax_on_mnist.ipynb
 
+# Generated output files from examples
+*.png
+*.pdf
+*.pkl
+*.npz
+
 # Directories
 .tox
 
