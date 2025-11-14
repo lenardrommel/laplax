@@ -4,6 +4,7 @@
 
 import functools
 import operator
+import os
 import time
 from functools import partial
 
@@ -11,12 +12,13 @@ import jax
 import jax.numpy as jnp
 from loguru import logger
 
+import laplax
 from laplax.curv.cov import Posterior, PosteriorState
 from laplax.curv.ggn import create_ggn_pytree_mv
 from laplax.curv.utils import (
     LowRankTerms,
-    create_model_jvp,
     compute_posterior_truncation_index,
+    create_model_jvp,
 )
 from laplax.enums import CovarianceStructure
 from laplax.types import (
@@ -40,6 +42,76 @@ KernelStructure = CovarianceStructure
 # ==============================================================================
 # Helper functions
 # ==============================================================================
+
+
+PROFILE_FSP = os.getenv("PROFILE_FSP", "0") == "1"
+
+
+def _time_block(name: str, func, *args, **kwargs):
+    """Run func(*args, **kwargs), block on JAX, and log runtime via loguru."""
+    start = time.perf_counter()
+    out = func(*args, **kwargs)
+
+    def _block(x):
+        return x.block_until_ready() if hasattr(x, "block_until_ready") else x
+
+    _ = jax.tree.map(_block, out)
+    elapsed = time.perf_counter() - start
+    logger.info(f"{name} took {elapsed:.3f} s")
+    return out
+
+
+def _accumulate_M_over_chunks(
+    model_fn: ModelFn,
+    params: Params,
+    x_context: InputArray,
+    k_inv_sqrt_dense: jnp.ndarray,
+    n_chunks: int,
+    *,
+    mode: str = "scan",
+):
+    """Accumulate _M_batch over context chunks using a chosen reduction mode.
+
+    Modes:
+    - "vmap": vectorized map over stacked chunks, then sum the results
+    - "map": lax.map over chunk pairs, then sum the results
+    - "scan": lax.scan accumulating the sum (default, typically fastest/memory‑lean)
+    """
+    x_chunks = jnp.split(x_context, n_chunks, axis=0)
+    k_chunks = jnp.split(k_inv_sqrt_dense, n_chunks, axis=0)
+
+    if mode == "vmap":
+        x_stacked = jnp.stack(x_chunks)
+        k_stacked = jnp.stack(k_chunks)
+        M_chunks = jax.vmap(partial(_M_batch, model_fn, params), in_axes=(0, 0))(
+            x_stacked, k_stacked
+        )
+        return jax.tree.map(lambda x: x.sum(axis=0), M_chunks)
+
+    if mode == "map":
+        x_stacked = jnp.stack(x_chunks)
+        k_stacked = jnp.stack(k_chunks)
+        pairs = (x_stacked, k_stacked)
+        M_chunks = jax.lax.map(
+            lambda pair: _M_batch(model_fn, params, pair[0], pair[1]), pairs
+        )
+        return jax.tree.map(lambda x: x.sum(axis=0), M_chunks)
+
+    if mode == "scan":
+        x_stacked = jnp.stack(x_chunks)
+        k_stacked = jnp.stack(k_chunks)
+        init_M = _M_batch(model_fn, params, x_stacked[0], k_stacked[0])
+
+        def scan_fn(carry, pair):
+            x_c, k_c = pair
+            M_chunk = _M_batch(model_fn, params, x_c, k_c)
+            return laplax.util.tree.add(carry, M_chunk), None
+
+        M, _ = jax.lax.scan(scan_fn, init_M, (x_stacked[1:], k_stacked[1:]))
+        return M
+
+    msg = f"Unknown chunk accumulation mode: {mode}"
+    raise ValueError(msg)
 
 
 @partial(jax.jit, static_argnames=("model_fn",))
@@ -167,20 +239,14 @@ def _lanczos_init(model_fn: ModelFn, params: Params, xs, num_chunks):
 
     initial_vectors = []
 
-    # HOSVD: compute SVD along each mode
     for mode in range(len(b.shape)):
-        # Unfold along mode
         n_mode = b.shape[mode]
         b_unfolded = jnp.moveaxis(b, mode, 0).reshape(n_mode, -1)
 
-        # SVD
         u, _s, _v = jnp.linalg.svd(b_unfolded, full_matrices=False)
-
-        # Take dominant singular vector
         vec = u[:, 0] / jnp.linalg.norm(u[:, 0])
         initial_vectors.append(vec)
 
-    # Split into function and spatial
     initial_vectors_function = [initial_vectors[0]]
     initial_vectors_spatial = initial_vectors[1:]
 
@@ -327,6 +393,7 @@ def create_fsp_posterior_kronecker(
     n_chunks: int,
     *,
     spatial_max_iters: list[int] | None = None,
+    chunk_mode: str = "scan",
     **kwargs,
 ) -> Posterior:
     """Create FSP posterior with Kronecker structured prior.
@@ -366,21 +433,49 @@ def create_fsp_posterior_kronecker(
 
     dim = sum(x.size for x in jax.tree_util.tree_leaves(params))
 
-    initial_vectors_function, initial_vectors_spatial = _lanczos_init(
-        model_fn, params, x_context, num_chunks=n_chunks_eff
-    )
+    if PROFILE_FSP:
+        initial_vectors_function, initial_vectors_spatial = _time_block(
+            "lanczos_init (HOSVD)",
+            _lanczos_init,
+            model_fn,
+            params,
+            x_context,
+            num_chunks=n_chunks_eff,
+        )
+    else:
+        initial_vectors_function, initial_vectors_spatial = _lanczos_init(
+            model_fn, params, x_context, num_chunks=n_chunks_eff
+        )
 
     # TODO: Remove hard coded [8] and make configurable
     if spatial_max_iters is None:
         spatial_max_iters = [8] * len(spatial_kernels)
 
-    spatial_lanczos_results = _lanczos_kronecker_structure(
-        spatial_kernels, initial_vectors_spatial, spatial_max_iters
-    )
+    if PROFILE_FSP:
+        spatial_lanczos_results = _time_block(
+            "lanczos_kronecker (spatial)",
+            _lanczos_kronecker_structure,
+            spatial_kernels,
+            initial_vectors_spatial,
+            spatial_max_iters,
+        )
+    else:
+        spatial_lanczos_results = _lanczos_kronecker_structure(
+            spatial_kernels, initial_vectors_spatial, spatial_max_iters
+        )
 
-    function_lanczos_results = _lanczos_kronecker_structure(
-        function_kernels, initial_vectors_function, max_iters=None
-    )
+    if PROFILE_FSP:
+        function_lanczos_results = _time_block(
+            "lanczos_kronecker (function)",
+            _lanczos_kronecker_structure,
+            function_kernels,
+            initial_vectors_function,
+            None,
+        )
+    else:
+        function_lanczos_results = _lanczos_kronecker_structure(
+            function_kernels, initial_vectors_function, max_iters=None
+        )
 
     # Combine Lanczos results using Kronecker product
     k_spatial_inv_sqrt = _kronecker_product(spatial_lanczos_results)
@@ -397,25 +492,38 @@ def create_fsp_posterior_kronecker(
         rank,
     )
 
-    start = time.time()
-    M = functools.reduce(
-        lambda params1, params2: jax.tree.map(operator.add, params1, params2),
-        (
-            _M_batch(model_fn, params, x_c, k_c)
-            for x_c, k_c in zip(
-                jnp.split(x_context, n_chunks_eff, axis=0),
-                jnp.split(k_inv_sqrt_dense, n_chunks_eff, axis=0),
-                strict=False,
-            )
-        ),
-    )
-    logger.info(f"Time for M_batch: {time.time() - start:.2f} seconds")
+    if PROFILE_FSP:
+        M = _time_block(
+            "M_batch (accumulate over chunks)",
+            _accumulate_M_over_chunks,
+            model_fn,
+            params,
+            x_context,
+            k_inv_sqrt_dense,
+            n_chunks_eff,
+            mode="scan",
+        )
+    else:
+        M = _accumulate_M_over_chunks(
+            model_fn,
+            params,
+            x_context,
+            k_inv_sqrt_dense,
+            n_chunks_eff,
+            mode="scan",
+        )
 
     flatten, unflatten = create_partial_pytree_flattener(M)
     M_flat = flatten(M)
 
+    # TODO: make reusable function
     # Calculate the SVD of M
-    _u, _s, _ = jnp.linalg.svd(M_flat, full_matrices=False)
+    if PROFILE_FSP:
+        _u, _s, _ = _time_block(
+            "svd(M_flat)", jnp.linalg.svd, M_flat, full_matrices=False
+        )
+    else:
+        _u, _s, _ = jnp.linalg.svd(M_flat, full_matrices=False)
     tol = jnp.finfo(M_flat.dtype).eps ** 2
     s = _s[_s > tol]
     _u = _u[:, : s.size]
@@ -431,7 +539,11 @@ def create_fsp_posterior_kronecker(
     uTggnu = ggn_mv(u)
 
     # Compute U_A, D_A
-    eigvals, eigvecs = jnp.linalg.eigh(jnp.diag(s**2) + uTggnu)
+    A_eigh = jnp.diag(s**2) + uTggnu
+    if PROFILE_FSP:
+        eigvals, eigvecs = _time_block("eigh(S^2 + U^T GGN U)", jnp.linalg.eigh, A_eigh)
+    else:
+        eigvals, eigvecs = jnp.linalg.eigh(A_eigh)
     eigvals = jnp.flip(eigvals, axis=0)
     eigvecs = jnp.flip(eigvecs, axis=1)
 
@@ -456,7 +568,7 @@ def create_fsp_posterior_kronecker(
     posterior = Posterior(
         state=posterior_state,
         cov_mv=lambda state: lambda x: unflatten_params(
-            (state["scale_sqrt"] @ (state["scale_sqrt"].T @ flatten_params(x)))
+            state["scale_sqrt"] @ (state["scale_sqrt"].T @ flatten_params(x))
         ),
         scale_mv=lambda state: lambda x: unflatten_params(state["scale_sqrt"] @ x),
         rank=cov_sqrt.shape[-1],
@@ -523,30 +635,51 @@ def create_fsp_posterior_none(
     initial_vector = b.flatten() / jnp.linalg.norm(b.flatten())
 
     # Compute Lanczos inverse sqrt for full covariance
-    k_inv_sqrt = _lanczos_none_structure(kernel, initial_vector, max_iter)
+    if PROFILE_FSP:
+        k_inv_sqrt = _time_block(
+            "lanczos_none (full)",
+            _lanczos_none_structure,
+            kernel,
+            initial_vector,
+            max_iter,
+        )
+    else:
+        k_inv_sqrt = _lanczos_none_structure(kernel, initial_vector, max_iter)
 
     rank = k_inv_sqrt.shape[-1]
     k_inv_sqrt_dense = k_inv_sqrt.reshape(*output_shape, rank)
 
-    start = time.time()
-    M = functools.reduce(
-        lambda params1, params2: jax.tree.map(operator.add, params1, params2),
-        (
-            _M_batch(model_fn, params, x_c, k_c)
-            for x_c, k_c in zip(
-                jnp.split(x_context, n_chunks_eff, axis=0),
-                jnp.split(k_inv_sqrt_dense, n_chunks_eff, axis=0),
-                strict=False,
-            )
-        ),
-    )
-    logger.info(f"Time for M_batch: {time.time() - start:.2f} seconds")
+    if PROFILE_FSP:
+        M = _time_block(
+            "M_batch (accumulate over chunks)",
+            _accumulate_M_over_chunks,
+            model_fn,
+            params,
+            x_context,
+            k_inv_sqrt_dense,
+            n_chunks_eff,
+            mode="scan",
+        )
+    else:
+        M = _accumulate_M_over_chunks(
+            model_fn,
+            params,
+            x_context,
+            k_inv_sqrt_dense,
+            n_chunks_eff,
+            mode="scan",
+        )
 
     flatten, unflatten = create_partial_pytree_flattener(M)
     M_flat = flatten(M)
 
     # Calculate the SVD of M
-    _u, _s, _ = jnp.linalg.svd(M_flat, full_matrices=False)
+    if PROFILE_FSP:
+        _u, _s, _ = _time_block(
+            "svd(M_flat)", jnp.linalg.svd, M_flat, full_matrices=False
+        )
+    else:
+        _u, _s, _ = jnp.linalg.svd(M_flat, full_matrices=False)
     tol = jnp.finfo(M_flat.dtype).eps ** 2
     s = _s[_s > tol]
     _u = _u[:, : s.size]
@@ -562,7 +695,11 @@ def create_fsp_posterior_none(
     uTggnu = ggn_mv(u)
 
     # Compute U_A, D_A
-    eigvals, eigvecs = jnp.linalg.eigh(jnp.diag(s**2) + uTggnu)
+    A_eigh = jnp.diag(s**2) + uTggnu
+    if PROFILE_FSP:
+        eigvals, eigvecs = _time_block("eigh(S^2 + U^T GGN U)", jnp.linalg.eigh, A_eigh)
+    else:
+        eigvals, eigvecs = jnp.linalg.eigh(A_eigh)
     eigvals = jnp.flip(eigvals, axis=0)
     eigvecs = jnp.flip(eigvecs, axis=1)
 
