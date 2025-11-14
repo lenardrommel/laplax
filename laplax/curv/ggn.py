@@ -4,6 +4,7 @@ import math
 from collections.abc import Callable
 
 import jax
+from jax import numpy as jnp
 
 from laplax.curv.hessian import hvp
 from laplax.enums import LossFn
@@ -11,6 +12,7 @@ from laplax.types import (
     Array,
     Data,
     Float,
+    InputArray,
     Int,
     Kwargs,
     ModelFn,
@@ -19,6 +21,7 @@ from laplax.types import (
     PredArray,
     TargetArray,
 )
+from laplax.util.flatten import create_pytree_flattener
 from laplax.util.tree import mul
 
 
@@ -463,3 +466,49 @@ def create_ggn_pytree_mv(
         return term_diag - term_outer
 
     return ggn_vector_product
+
+
+def compute_ggn_quadratic_form(
+    model_fn: ModelFn,
+    params: Params,
+    x_context: InputArray,
+    U: Params,  # pytree with multiple "columns"
+    is_classification: bool = False,
+) -> Array:
+    """Compute U^T @ GGN @ U where U contains multiple vectors.
+
+    Returns:
+        Array of shape (rank, rank) representing the quadratic form.
+    """
+    # Create dummy targets - shape depends on classification vs regression
+    if is_classification:
+        # For classification, we need integer targets
+        dummy_targets = jnp.zeros(x_context.shape[0], dtype=jnp.int32)
+        loss_fn = LossFn.CROSS_ENTROPY
+    else:
+        # For regression, targets match output shape
+        y0 = jax.vmap(lambda x: model_fn(x, params))(x_context)
+        dummy_targets = jnp.zeros_like(y0)
+        loss_fn = LossFn.MSE
+
+    data = {"input": x_context, "target": dummy_targets}
+
+    ggn_mv = create_ggn_mv(
+        model_fn=model_fn,
+        params=params,
+        data=data,
+        loss_fn=loss_fn,
+        vmap_over_data=True,
+    )
+
+    flatten, unflatten = create_pytree_flattener(params)
+    U_flat = flatten(U)
+
+    def compute_ggn_column(u_col):
+        u_i = unflatten(u_col)
+        ggn_u_i = ggn_mv(u_i)
+        return flatten(ggn_u_i)
+
+    GGN_U = jax.vmap(compute_ggn_column, in_axes=1, out_axes=1)(U_flat)
+
+    return U_flat.T @ GGN_U

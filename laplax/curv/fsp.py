@@ -10,7 +10,7 @@ from loguru import logger
 
 import laplax
 from laplax.curv.cov import Posterior, PosteriorState
-from laplax.curv.ggn import create_ggn_mv
+from laplax.curv.ggn import compute_ggn_quadratic_form
 from laplax.curv.lanczos import lanczos_invert_sqrt
 from laplax.curv.utils import (
     LowRankTerms,
@@ -502,7 +502,7 @@ def create_fsp_posterior_kronecker(
     _u, s = _truncated_left_svd(M_flat)
 
     u = unflatten(_u)
-    ggn_mv = create_ggn_mv(
+    ggn_mv = compute_ggn_quadratic_form(
         model_fn=model_fn,
         params=params,
         x_context=x_context,
@@ -659,14 +659,13 @@ def create_fsp_posterior_none(
 
     u = unflatten(_u)
 
-    ggn_mv = create_ggn_mv(
+    uTggnu = compute_ggn_quadratic_form(
         model_fn=model_fn,
         params=params,
         x_context=x_context,
-        hessian_diag=not is_classification,
+        U=u,  # Pass U here!
+        is_classification=is_classification,
     )
-
-    uTggnu = ggn_mv(u)
 
     # Compute U_A, D_A
     A_eigh = jnp.diag(s**2) + uTggnu
