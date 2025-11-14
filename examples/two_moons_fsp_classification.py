@@ -8,12 +8,9 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 from sklearn.datasets import make_moons
-from torch.utils.data import DataLoader, TensorDataset
 
 from laplax.curv import KernelStructure, create_fsp_posterior
-from laplax.util.context_points import select_context_points
 
 jax.config.update("jax_enable_x64", True)
 
@@ -120,14 +117,6 @@ def main():
     X_jax = jnp.array(X)
     y_jax = jnp.array(y)
 
-    # Create DataLoader for context point selection
-    # Convert numpy arrays to torch tensors
-    dataset = TensorDataset(
-        torch.from_numpy(X),
-        torch.from_numpy(y)
-    )
-    dataloader = DataLoader(dataset, batch_size=len(X), shuffle=False)
-
     # Initialize and train model
     print("\n2. Training MLP...")
     key = jax.random.PRNGKey(0)
@@ -142,25 +131,12 @@ def main():
     train_acc = jnp.mean(predictions == y_jax)
     print(f"   Training accuracy: {train_acc:.2%}")
 
-    # Select context points
+    # Select context points - for classification, just randomly sample from training data
     print("\n3. Selecting context points...")
-    # Add dummy dimensions for spatial structure (required by select_context_points)
-    X_reshaped = X_jax[:, :, None, None]  # (N, 2, 1, 1)
-    # Convert to numpy then to torch tensors
-    dataset_reshaped = TensorDataset(
-        torch.from_numpy(np.array(X_reshaped)),
-        torch.from_numpy(np.array(y_jax[:, None]))
-    )
-    dataloader_reshaped = DataLoader(dataset_reshaped, batch_size=len(X), shuffle=False)
-
-    x_context, _, _ = select_context_points(
-        dataloader=dataloader_reshaped,
-        context_selection="random",
-        n_context_points=50,
-        seed=42,
-    )
-    # Remove dummy dimensions
-    x_context = x_context.squeeze()  # Back to (50, 2)
+    n_context = 50
+    np.random.seed(42)
+    context_indices = np.random.choice(len(X), size=n_context, replace=False)
+    x_context = X_jax[context_indices]
     print(f"   Selected {x_context.shape[0]} context points")
 
     # Create FSP posterior
