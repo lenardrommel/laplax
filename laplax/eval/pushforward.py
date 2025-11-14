@@ -1,3 +1,5 @@
+# pushforward.py
+
 """Pushforward Functions for Weight Space Uncertainty.
 
 This module provides functions to propagate uncertainty in weight space to
@@ -70,7 +72,7 @@ def set_get_weight_sample(key, mean_params, scale_mv, num_samples, **kwargs):
             keys[idx],
             mean=mean_params,
             scale_mv=scale_mv,
-            rank=kwargs.get("rank", None),  # If scale_mv assumes lower rank.
+            rank=kwargs.get("rank"),  # If scale_mv assumes lower rank.
         )
 
     return precompute_list(
@@ -186,8 +188,13 @@ def get_dist_state(
             )
             return vjp_fun(vector.reshape(out.shape))
 
-        dist_state["vjp"] = pf_vjp
-        dist_state["jvp"] = pf_jvp
+        batched_computation = kwargs.get("batched_computation", False)
+        if not batched_computation:
+            dist_state["vjp"] = pf_vjp
+            dist_state["jvp"] = pf_jvp
+        else:
+            dist_state["vjp"] = jax.vmap(pf_vjp, in_axes=(0, 0), out_axes=0)
+            dist_state["jvp"] = jax.vmap(pf_jvp, in_axes=(0, None), out_axes=0)
 
     if num_samples > 0:
         weight_sample_mean = (
@@ -472,6 +479,7 @@ def set_output_mv(
         dict: A dictionary with:
             - `cov_mv`: Function for the output covariance matrix-vector product.
             - `jac_mv`: Function for the JVP with a fixed input.
+            - `low_rank_terms`: Low-rank terms from the posterior state.
     """
     cov_mv = posterior_state.cov_mv(posterior_state.state)
 
@@ -481,7 +489,13 @@ def set_output_mv(
     def output_jac_mv(vec: PredArray) -> PredArray:
         return jvp(input, vec)
 
-    return {"cov_mv": output_cov_mv, "jac_mv": output_jac_mv}
+    low_rank_terms = posterior_state.low_rank_terms
+
+    return {
+        "cov_mv": output_cov_mv,
+        "jac_mv": output_jac_mv,
+        "low_rank_terms": low_rank_terms,
+    }
 
 
 def lin_setup(
@@ -508,14 +522,13 @@ def lin_setup(
 
     Returns:
         tuple: Updated `results` and `aux`.
-    """
+    """  # noqa: DOC501
     del kwargs
 
     jvp = dist_state["jvp"]
     vjp = dist_state["vjp"]
     posterior_state = dist_state["posterior_state"]
 
-    # Check types (mainly needed for type checker)
     if not isinstance(posterior_state, Posterior):
         msg = "posterior state is not a Posterior type"
         raise TypeError(msg)
@@ -531,6 +544,7 @@ def lin_setup(
     mv = set_output_mv(posterior_state, input, jvp, vjp)
     aux["cov_mv"] = mv["cov_mv"]
     aux["jac_mv"] = mv["jac_mv"]
+    results["low_rank_terms"] = mv["low_rank_terms"]
 
     return results, aux
 
@@ -581,18 +595,20 @@ def lin_pred_var(
         tuple: Updated `results` and `aux`.
     """
     cov = results.get("pred_cov", aux["cov_mv"])
-    low_rank = kwargs.get("low_rank", False)
-    print("Using low_rank:", low_rank)
 
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
 
     pred_mean = results["pred_mean"]
 
-    # Compute diagonal as variance
-    results["pred_var"] = util.mv.diagonal(
-        cov, layout=math.prod(pred_mean.shape), low_rank=low_rank
+    pred_var = util.mv.diagonal(
+        cov,
+        layout=math.prod(pred_mean.shape),
+        mv_jittable=kwargs.get("mv_jittable", True),
+        low_rank=False,
     )
+    results["pred_var"] = pred_var.reshape(pred_mean.shape)
+
     return results, aux
 
 
@@ -618,7 +634,7 @@ def lin_pred_std(
         results, aux = lin_pred_var(results, aux, **kwargs)
 
     var = results["pred_var"]
-    results["pred_std"] = util.tree.sqrt(var)
+    results["pred_std"] = util.tree.sqrt(jnp.abs(var))  # abs to avoid numerical issues
     return results, aux
 
 
@@ -642,7 +658,7 @@ def lin_pred_cov(
 
     Raises:
         TypeError: If the covariance matrix-vector product function is invalid.
-    """
+    """  # noqa: DOC502
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
 
@@ -650,6 +666,33 @@ def lin_pred_cov(
     cov_mv = aux["cov_mv"]
 
     results["pred_cov"] = util.mv.to_dense(cov_mv, layout=pred_mean)
+    return results, aux
+
+
+def lin_pred_lsqrt_low_rank_cov(
+    results: dict[str, Array],
+    aux: dict[str, Any],
+    **kwargs,
+) -> tuple[dict[str, Array], dict[str, Any]]:
+    """Attach low-rank predictive info and cheap diagonal.
+
+    - Keeps `low_rank_terms` (computed in lin_setup when low_rank=True).
+    - Computes `pred_var` from the low-rank factors without densifying.
+      For Σ = U diag(S²) Uᵀ + σ² I with U ∈ R^{D×k},
+      diag(Σ) = σ² 1 + Σ_j (S_j U[:, j])².
+    """  # noqa: DOC201
+    if "pred_mean" not in results:
+        results, aux = lin_pred_mean(results, aux, **kwargs)
+
+    if "low_rank_terms" in results and "observation_noise" in results:
+        lr = results["low_rank_terms"]
+        sigma = jnp.exp(results["observation_noise"])
+        # sum over columns: (S * U)^2 for low-rank diag
+        U_scaled = lr.U * lr.S
+        pred_var = jnp.sum(U_scaled * U_scaled, axis=1) + sigma**2
+        pred_mean = results["pred_mean"]
+        results["pred_var"] = pred_var.reshape(pred_mean.shape)
+
     return results, aux
 
 
@@ -676,7 +719,7 @@ def lin_samples(
 
     Raises:
         TypeError: If the scale matrix or sampling functions are invalid.
-    """
+    """  # noqa: DOC502
     if "pred_mean" not in results:
         results, aux = lin_pred_mean(results, aux, **kwargs)
 
@@ -753,9 +796,72 @@ DEFAULT_LIN_FINALIZE_FNS = [
     lin_setup,
     lin_pred_mean,
     lin_pred_cov,
+    lin_pred_lsqrt_low_rank_cov,
     lin_pred_var,
     lin_pred_std,
     lin_samples,
+]
+
+# A leaner finalize chain for FSP-style metrics that avoids dense covariance.
+DEFAULT_LIN_FSP_FINALIZE_FNS = [
+    lin_setup,
+    lin_pred_mean,
+    lin_pred_lsqrt_low_rank_cov,
+    lin_pred_std,
+]
+
+
+# -------------------------------------------------------------------------
+# Regression-specific helpers (FSP)
+# -------------------------------------------------------------------------
+
+
+def attach_observation_noise(
+    results: dict[str, Array],
+    aux: dict[str, Any],
+    **kwargs,
+) -> tuple[dict[str, Array], dict[str, Any]]:
+    """Attach log observation noise to results for regression metrics.
+
+    Looks for one of the following (in this order):
+    - `observation_noise` in kwargs (already log-scale)
+    - `prior_arguments["sigma"]` (std) -> takes log
+    - `prior_arguments["sigma_squared"]` (variance) -> takes 0.5 * log
+
+    If none is provided, defaults to 0.0 (i.e., sigma=1.0).
+    """
+    del aux
+
+    if "observation_noise" in kwargs and kwargs["observation_noise"] is not None:
+        results["observation_noise"] = kwargs["observation_noise"]
+        return results, aux
+
+    prior_arguments = kwargs.get("prior_arguments", {}) or {}
+
+    if "sigma" in prior_arguments and prior_arguments["sigma"] is not None:
+        results["observation_noise"] = jnp.log(jnp.asarray(prior_arguments["sigma"]))
+    elif (
+        "sigma_squared" in prior_arguments and prior_arguments["sigma_squared"] is not None
+    ):
+        results["observation_noise"] = 0.5 * jnp.log(
+            jnp.asarray(prior_arguments["sigma_squared"])  # variance -> log std
+        )
+    else:
+        # Reasonable default if user doesn't provide sigma; matches tests in metrics
+        results["observation_noise"] = jnp.asarray(0.0)
+
+    return results, aux
+
+
+# A default linear finalize chain tailored for FSP-style regression metrics.
+# This avoids forming dense covariances and uses low-rank predictive info,
+# while also adding observation noise needed by the metrics utilities.
+DEFAULT_LIN_FSP_REGRESSION_FNS = [
+    lin_setup,
+    attach_observation_noise,
+    lin_pred_mean,
+    lin_pred_lsqrt_low_rank_cov,
+    lin_pred_std,
 ]
 
 
@@ -793,12 +899,11 @@ def set_prob_predictive(
     """
 
     def prob_predictive(input: InputArray) -> dict[str, Array]:
-        # MAP prediction
         pred_map = model_fn(input=input, params=mean_params)
         aux = {"model_fn": model_fn, "mean_params": mean_params}
+
         results = {"map": pred_map}
 
-        # Compute prediction
         return finalize_fns(
             fns=pushforward_fns,
             results=results,
@@ -867,6 +972,7 @@ def set_nonlin_pushforward(
         mean_params=mean_params,
         dist_state=dist_state,
         pushforward_fns=pushforward_fns,
+        prior_arguments=prior_arguments,
         **kwargs,
     )
 
@@ -900,16 +1006,15 @@ def set_lin_pushforward(
             (default: `DEFAULT_LIN_FINALIZE`).
         **kwargs: Additional arguments passed to the pushforward functions, including:
             - `n_samples`: Number of samples for approximating uncertainty metrics.
+            - `batched_computation`: Whether to use batched computation.
             - `key`: PRNG key for generating random samples.
 
     Returns:
         Callable: A probabilistic predictive function that computes predictions
         and uncertainty metrics using a linearized approximation.
     """
-    # Create posterior state
     posterior_state = posterior_fn(prior_arguments, loss_scaling_factor)
 
-    # Posterior state to dist_state
     dist_state = get_dist_state(
         mean_params,
         model_fn,
@@ -918,12 +1023,12 @@ def set_lin_pushforward(
         **kwargs,
     )
 
-    # Set prob predictive
     prob_predictive = set_prob_predictive(
         model_fn=model_fn,
         mean_params=mean_params,
         dist_state=dist_state,
         pushforward_fns=pushforward_fns,
+        prior_arguments=prior_arguments,
         **kwargs,
     )
 
@@ -965,10 +1070,8 @@ def set_posterior_gp_kernel(
     Raises:
         ValueError: If `dense` is True but `output_layout` is not specified.
     """
-    # Create posterior state
     posterior_state = posterior_fn(prior_arguments, loss_scaling_factor)
 
-    # Posterior state to dist_state
     dist_state = get_dist_state(
         mean,
         model_fn,
@@ -978,7 +1081,6 @@ def set_posterior_gp_kernel(
         **kwargs,
     )
 
-    # Kernel mv
     def kernel_mv(
         vec: PredArray, x1: InputArray, x2: InputArray, dist_state: dict[str, Any]
     ) -> PredArray:

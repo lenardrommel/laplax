@@ -6,7 +6,8 @@ wandb/*
 data/*
 examples/pipeline/*
 examples/fsplaplace/*
-
+benchmarks/*
+fsplap/*
 
 # Temporary files (documentation)
 *.tmp
@@ -159,6 +160,9 @@ __pypackages__/
 # Celery stuff
 celerybeat-schedule
 celerybeat.pid
+
+# Local files
+laplax/extra/fsp/pushforward.py
 
 # SageMath parsed files
 *.sage.py

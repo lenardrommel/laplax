@@ -24,6 +24,7 @@ FlatParams = Num[Array, "P"]
 Params = PyTree[Num[Array, "..."]]
 ModelFn = Callable[..., Params]  # [InputArray, Params]
 CurvatureMV = Callable[[Params], Params]
+Kernel = Callable[[Array], Array] | Array  # Kernel function or matrix
 
 # Data structures
 Data = Mapping[str, Num[Array, "..."]]  # {"input": ..., "target": ...}
@@ -46,3 +47,37 @@ CurvatureKeyType = CurvApprox | str | None
 
 # Utility types
 Kwargs = Any
+
+# Declare all types as api
+__all__ = [
+    "Any",
+    "Array",
+    "Callable",
+    "CurvApprox",
+    "CurvatureKeyType",
+    "CurvatureMV",
+    "DType",
+    "Data",
+    "DistState",
+    "FlatParams",
+    "Float",
+    "InputArray",
+    "Int",
+    "Iterable",
+    "Kernel",
+    "KeyType",
+    "Kwargs",
+    "Layout",
+    "Mapping",
+    "ModelFn",
+    "Num",
+    "PRNGKeyArray",
+    "Params",
+    "PosteriorState",
+    "PredArray",
+    "PriorArguments",
+    "PyTree",
+    "PyTreeDef",
+    "ShapeType",
+    "TargetArray",
+]

@@ -1,10 +1,12 @@
+# mv.py
+
 """Matrix-free array operations for matrix-vector products."""
 
 from collections.abc import Callable
 from functools import singledispatch
 
 import jax
-import jax.numpy as jnp
+from jax import numpy as jnp
 
 from laplax import util
 from laplax.types import Array, Kwargs, Layout, PyTree
@@ -54,13 +56,13 @@ def diagonal(
         msg = "either size or tree needs to be present"
         raise TypeError(msg)
 
-    if isinstance(mv, jax.Array) and low_rank:
-        """
-        Implements diag(VV^T) = Σⱼ V[:,j]².
-        When mv is a low-rank matrix V, the diagonal of VV^T
-        can be computed as the row-wise sum of squared elements.
-        """
-        return jnp.sum(mv**2, axis=1)
+    if low_rank:
+        if isinstance(mv, jax.Array):
+            """diag(V V^T) = sum_j V[:, j]^2"""
+            return jnp.sum(jnp.square(mv), axis=1)
+        if isinstance(mv, Callable):
+            dense = util.mv.to_dense(mv, layout=layout, **kwargs)
+            return jnp.sum(jnp.square(dense), axis=1)
 
     if isinstance(mv, jax.Array):
         return jnp.diag(mv)
