@@ -17,13 +17,13 @@ class CurvApprox(StrEnum):
     LOBPCG = "lobpcg"
 
 
-
-
 class CovarianceStructure(StrEnum):
     """Structure of the prior covariance used for FSP inference."""
 
     NONE = "none"
     KRONECKER = "kronecker"
+
+
 class LowRankMethod(StrEnum):
     LANCZOS = "lanczos"
     LOBPCG = "lobpcg"

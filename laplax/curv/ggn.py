@@ -434,13 +434,8 @@ def create_ggn_pytree_mv(
             ju = _jmp_laxmap(u)
             logits = jax.lax.map(lambda x_c: model_fn(x_c, params), x_context)
 
-        # Handle binary (scalar logit) vs multi-class (vector logits)
-        # Binary: use sigmoid p and weight J by sqrt(p(1-p)) and sum gram matrices
-        # Multi-class: use softmax probabilities and compute diag - outer term
         if logits.ndim <= 1 or ju.ndim < 3:
-            # Binary logistic regression case
             prob = jax.nn.sigmoid(logits)  # shape (B,) or leading dims collapsed
-            # Flatten leading dims (except rank) for uniform handling
             leading_shape = ju.shape[:-1]
             m = math.prod(leading_shape) if leading_shape else 1
             ju_mr = ju.reshape(m, ju.shape[-1])  # (M, R)

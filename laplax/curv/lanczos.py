@@ -2,7 +2,19 @@ import jax
 import jax.numpy as jnp
 
 from laplax.curv.utils import LowRankTerms, get_matvec
-from laplax.types import Array, Callable, DType, Float, KeyType, Kwargs, Layout
+from laplax.types import (
+    Array,
+    Callable,
+    DType,
+    Float,
+    InputArray,
+    KeyType,
+    Kwargs,
+    ModelFn,
+    Params,
+    Layout,
+)
+from laplax.util import tree
 from laplax.util.flatten import wrap_function
 
 
@@ -242,3 +254,98 @@ def lanczos_lowrank(
     # Restore the original configuration dtype
     jax.config.update("jax_enable_x64", original_float64_enabled)
     return low_rank_result
+
+
+def lanczos_invert_sqrt(
+    A: Callable | Array,
+    b: Array,
+    *,
+    tol: float = 1e-3,
+    min_eta: float = 1e-20,
+    max_iter: int = 500,
+    overwrite_b: bool = False,
+):
+    """Compute inverse square-root factor via Lanczos iterations.
+
+    Args:
+        A: Linear operator (callable) or matrix.
+        b: Initial vector.
+        tol: Relative tolerance for residual norm.
+        min_eta: Minimum curvature along search direction to continue.
+        max_iter: Maximum number of Lanczos iterations.
+        overwrite_b: If True, reuse memory of `b` as search vector.
+
+    Returns:
+        2D array whose columns form the scaled Lanczos directions D such that
+        D.T @ (A @ D) is tridiagonal. Shape is (dim, k).
+    """
+    is_callable = callable(A)
+
+    @jax.jit
+    def _step(values):
+        ds, rs, rs_norm_sq, p, eta, k = values
+
+        # p_k = r_k + (||r_k||^2 / ||r_{k-1}||^2) * p_{k-1}
+        def upd(_p):
+            return rs[:, k] + rs_norm_sq[k] / rs_norm_sq[k - 1] * _p
+
+        p = jax.lax.cond(k > 0, upd, lambda _p: _p, p)
+
+        # w_k = A p_k
+        w = A(p) if is_callable else A @ p
+        eta = p @ w
+        ds = ds.at[:, k].set(p / jnp.sqrt(eta))
+
+        # r_{k+1} = r_k - (||r_k||^2 / eta) w_k
+        mu = rs_norm_sq[k] / eta
+        rs_prev_k = rs
+        r_next = rs[:, k] - mu * w
+
+        # Full reorthogonalization (double GS)
+        proj = (rs_prev_k.T @ r_next) / rs_norm_sq
+        r_next = r_next - rs_prev_k @ proj
+        proj = (rs_prev_k.T @ r_next) / rs_norm_sq
+        r_next = r_next - rs_prev_k @ proj
+
+        rs = rs.at[:, k + 1].set(r_next)
+        rs_norm_sq = rs_norm_sq.at[k + 1].set(r_next.T @ r_next)
+
+        return ds, rs, rs_norm_sq, p, eta, k + 1
+
+    def _cond_fun(values):
+        _, rs, rs_norm_sq, _, eta, k = values
+        return (rs_norm_sq[k] > tol**2) & (k < max_iter) & (eta > min_eta)
+
+    # Normalize starting vector and initialize storage
+    b = b / jnp.linalg.norm(b, 2)
+    ds = jnp.zeros((b.size, max_iter))
+    rs = jnp.zeros((b.size, max_iter + 1))
+    rs_norm_sq = jnp.ones((max_iter + 1,))
+
+    rs = rs.at[:, 0].set(b)
+    p = b if overwrite_b else b.copy()
+    eta = jnp.inf
+
+    ds, _, _, _, _, k = jax.lax.while_loop(
+        _cond_fun, _step, (ds, rs, rs_norm_sq, p, eta, 0)
+    )
+
+    return ds[:, :k]
+
+
+def lanczos_jacobian_initialization(
+    model_fn: ModelFn,
+    params: Params,
+    data: InputArray,
+    *,
+    lanczos_initialization_batch_size: int = 20,
+):
+    """Build a normalized initial vector via a single JVP through the model."""
+    del lanczos_initialization_batch_size
+    init_vec = jax.jvp(
+        lambda w: model_fn(data, params=w),
+        (params,),
+        (tree.ones_like(params),),
+    )[1]
+    init_vec = init_vec / jnp.linalg.norm(init_vec, 2)
+    return init_vec.squeeze(-1)

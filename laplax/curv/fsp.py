@@ -20,6 +20,7 @@ from laplax.enums import CovarianceStructure
 from laplax.types import (
     Callable,
     InputArray,
+    Int,
     Kernel,
     Kwargs,
     ModelFn,
@@ -30,7 +31,7 @@ from laplax.util.flatten import (
     create_partial_pytree_flattener,
     create_pytree_flattener,
 )
-from laplax.util.lanczos import lanczos_invert_sqrt
+from laplax.curv.lanczos import lanczos_invert_sqrt
 
 KernelStructure = CovarianceStructure
 
@@ -217,7 +218,7 @@ def _M_batch(model_fn: ModelFn, params: Params, xs: InputArray, L: PredArray):
 
 
 @partial(jax.jit, static_argnums=(0,), static_argnames=("num_chunks",))
-def _lanczos_init(model_fn: ModelFn, params: Params, xs, num_chunks):
+def _lanczos_init(model_fn: ModelFn, params: Params, xs: InputArray, num_chunks: Int):
     """Initialize Lanczos vectors using HOSVD.
 
     Parameters
@@ -283,7 +284,7 @@ def _lanczos_init(model_fn: ModelFn, params: Params, xs, num_chunks):
 
 
 def _lanczos_kronecker_structure(
-    kernels_list: list[Callable],
+    kernels_list: list[Kernel],
     initial_vectors: list[jnp.ndarray],
     max_iters: list[int] | None = None,
 ):
