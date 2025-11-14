@@ -10,7 +10,8 @@ from loguru import logger
 
 import laplax
 from laplax.curv.cov import Posterior, PosteriorState
-from laplax.curv.ggn import create_ggn_pytree_mv
+from laplax.curv.ggn import create_ggn_mv
+from laplax.curv.lanczos import lanczos_invert_sqrt
 from laplax.curv.utils import (
     LowRankTerms,
     compute_posterior_truncation_index,
@@ -21,7 +22,6 @@ from laplax.types import (
     Callable,
     InputArray,
     Int,
-    Kernel,
     Kwargs,
     ModelFn,
     Params,
@@ -31,7 +31,6 @@ from laplax.util.flatten import (
     create_partial_pytree_flattener,
     create_pytree_flattener,
 )
-from laplax.curv.lanczos import lanczos_invert_sqrt
 
 KernelStructure = CovarianceStructure
 
@@ -284,7 +283,7 @@ def _lanczos_init(model_fn: ModelFn, params: Params, xs: InputArray, num_chunks:
 
 
 def _lanczos_kronecker_structure(
-    kernels_list: list[Kernel],
+    kernels_list: list[Callable],
     initial_vectors: list[jnp.ndarray],
     max_iters: list[int] | None = None,
 ):
@@ -503,7 +502,7 @@ def create_fsp_posterior_kronecker(
     _u, s = _truncated_left_svd(M_flat)
 
     u = unflatten(_u)
-    ggn_mv = create_ggn_pytree_mv(
+    ggn_mv = create_ggn_mv(
         model_fn=model_fn,
         params=params,
         x_context=x_context,
@@ -660,7 +659,7 @@ def create_fsp_posterior_none(
 
     u = unflatten(_u)
 
-    ggn_mv = create_ggn_pytree_mv(
+    ggn_mv = create_ggn_mv(
         model_fn=model_fn,
         params=params,
         x_context=x_context,

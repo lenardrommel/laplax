@@ -10,9 +10,9 @@ from laplax.types import (
     InputArray,
     KeyType,
     Kwargs,
+    Layout,
     ModelFn,
     Params,
-    Layout,
 )
 from laplax.util import tree
 from laplax.util.flatten import wrap_function
