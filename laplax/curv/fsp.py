@@ -463,10 +463,6 @@ def create_fsp_posterior_kronecker(
         model_fn, params, x_context, num_chunks=n_chunks_eff
     )
 
-    # TODO: Remove hard coded [8] and make configurable
-    if spatial_max_iters is None:
-        spatial_max_iters = [8] * len(spatial_kernels)
-
     spatial_lanczos_results = _lanczos_kronecker_structure(
         spatial_kernels, initial_vectors_spatial, spatial_max_iters
     )
@@ -506,14 +502,11 @@ def create_fsp_posterior_kronecker(
     _u, s = _truncated_left_svd(M_flat)
 
     u = unflatten(_u)
-    if is_classification:
-        msg = "FSP posterior with full (classification) Hessian is not implemented."
-        raise NotImplementedError(msg)
     ggn_mv = create_ggn_pytree_mv(
         model_fn=model_fn,
         params=params,
         x_context=x_context,
-        hessian_diag=True,
+        hessian_diag=not is_classification,
     )
 
     uTggnu = ggn_mv(u)
@@ -548,7 +541,7 @@ def create_fsp_posterior_kronecker(
             state["scale_sqrt"] @ (state["scale_sqrt"].T @ flatten_params(x))
         ),
         scale_mv=lambda state: lambda x: unflatten_params(state["scale_sqrt"] @ x),
-        rank=cov_sqrt.shape[-1],
+        rank=posterior_state["scale_sqrt"].shape[-1],
         low_rank_terms=low_rank_terms,
     )
 
@@ -666,15 +659,11 @@ def create_fsp_posterior_none(
 
     u = unflatten(_u)
 
-    if is_classification:
-        msg = "FSP posterior with full (classification) Hessian is not implemented."
-        raise NotImplementedError(msg)
-
     ggn_mv = create_ggn_pytree_mv(
         model_fn=model_fn,
         params=params,
         x_context=x_context,
-        hessian_diag=True,
+        hessian_diag=not is_classification,
     )
 
     uTggnu = ggn_mv(u)
@@ -709,7 +698,7 @@ def create_fsp_posterior_none(
             (state["scale_sqrt"] @ (state["scale_sqrt"].T @ flatten_params(x)))
         ),
         scale_mv=lambda state: lambda x: unflatten_params(state["scale_sqrt"] @ x),
-        rank=cov_sqrt.shape[-1],
+        rank=posterior_state["scale_sqrt"].shape[-1],
         low_rank_terms=low_rank_terms,
     )
 
