@@ -1,0 +1,175 @@
+# Experiment selection
+experiment:
+  name: "mona_loa_experiments" # toy_data_experiments, uci_regression, image_regression, ood_detection_regression, bandits, hpo_regression
+  # hpo_classification, ood_detection_classification, experiments_classification
+  sweep_id: ""
+
+# Model selection
+model:
+  name: "FSPLaplace" # FSPLaplace, SNGP, GP, GWI, SamplingLaplace, Laplace
+
+# Model configuration 
+fsplaplace:
+  neural_net:
+    type: "MLP" # MLP, CNN1, CNN2
+    architecture: [50, 50]
+    activation_fn: "tanh"
+    validation_freq: 100
+    periodic_features: 0.09891345377 #0.1153741415 
+
+  inference:
+    n_chunks: 1 # needs to divide the number of context points
+    max_rank: 500
+    cov_type: "low_rank_lanczos" # low_rank, diag, low_rank_sketch, low_rank_lanczos
+    cov_context_selection: "grid" # grid, latin_hypercube, train_val_latin, song, halton
+    n_context_points: 100 #  # needs to divide 50
+    max_posterior_precision: 1.e-15 #0.1 # tuned by cross-validation
+    save_covariance: false
+    covariance_path: ""
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 1. 
+    n_classes: 2
+
+  training:
+    mc_samples: 10
+    nb_epochs: 50000
+    lr: 0.0002 
+    patience: 500 
+    n_context_points: 100
+    context_selection: "random" # random, grid
+    save_weights: false
+    pretrained_weights_path: ""
+
+  prior:
+    kernel: "MonaLoaKernel" # RBF, Matern12, Matern32, Matern52, Linear, Periodic, RationalQuadratic, Cauchy
+    parameter_tuning: false
+    nb_epochs: 500
+    batch_size: 100
+    alpha_eps: 0.001 # recommended
+    lr: 0.1
+    parameters: {"lengthscale": 0.25, "variance": 0.5, "alpha": 4.3} 
+
+
+fvi:
+  neural_net:
+    type: "MLP" 
+    architecture: [50, 50]
+    last_layer_vi: false
+    activation_fn: "tanh"
+    validation_freq: 100
+    periodic_features: 0.09891345377
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 1.0
+    n_classes: 2
+
+  # Training configuration
+  training:
+    mc_samples: 10
+    nb_epochs: 50000
+    lr: 0.0007
+    n_context_points: 100  
+    context_selection: "random" # random, grid
+    patience: 500
+    pretrained_weights_path: ""
+    
+  # Prior 
+  prior:
+    kernel: "MonaLoaKernel" 
+    parameter_tuning: false
+    nb_epochs: 500
+    batch_size: 500
+    lr: 0.1
+    alpha_eps: 0.001 # recommended
+    parameters: {"lengthscale": 0.25, "variance": 0.5, "alpha": 4.3} 
+
+laplace:
+  neural_net:
+    type: "MLP" # MLP, CNN
+    architecture: [50, 50]
+    activation_fn: "tanh"
+    periodic_features: 0.09891345377 # 0.1153741415
+
+  likelihood: 
+    model: "Gaussian" # Gaussian, Categorical
+    scale_init: 1.0 #0.001
+    n_classes: 2
+
+  prior:
+    scale_init: 1
+    structure: "global" # parameterwise, layerwise, global
+
+  training:
+    mc_samples: 10
+    nb_epochs: 50000
+    lr: 0.0002
+    patience: 500
+    pretrained_weights_path: ""
+    save_weights: false
+    validation_freq: 100
+
+    mll:
+      lr: 0.01
+      n_iter: 0 # 100
+      update_freq: 500
+      n_epochs_burnin: 50000
+      cov_type: "full" # full, diag, map, last_layer, kfac
+
+  inference:
+    cov_type: "full" # full, diag, map, last_layer, kfac
+    save_covariance: false
+    covariance_path: ""
+    pruning_covariance_path: "" # "checkpoints/two_moons/skerch_laplace_diag_none_cov_sq_root_1.pkl"    
+    
+# Model configuration 
+gp:
+  n_inducing_pts: 100 # use a max of 1000 inducing points for the GP model
+
+  posterior:
+    type: "GP" # GP, SVGP
+    n_inducing_pts: 10
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 1.
+    n_classes: 2
+
+  # Prior 
+  prior:
+    kernel: "MonaLoaKernel" # RBF, Matern12, Matern32, Matern52, Linear, RationalQuadratic, PoweredExponential
+    params: {lengthscale: 1., variance: 1., alpha: 1.}
+
+  # Training configuration
+  training:
+    nb_epochs: 100 #
+    lr: 0.1
+    validation_freq: 50
+    early_stopping_patience: 1000
+    save_model: false
+    model_path: 
+
+
+    
+
+# Dataset configuration 
+data:
+  name: "truncated_sine" 
+  # ToyData: truncated_sine, two_moons
+  # UCI: boston, concrete, energy, kin8nm, naval, power, protein, wine, yacht, wave
+  # Image: mnist, fashion_mnist, cifar10, svhn
+  feature_dim: 1
+  n_samples: 300
+  batch_size: 1000
+  k_folds: 5
+
+
+bandits:
+  name: "financial" # financial, mushroom, statlog, jester
+  n_bandit_simulations: 5
+  simulation_batch_size: 500 
+  training_batch_size: 1000
+
+

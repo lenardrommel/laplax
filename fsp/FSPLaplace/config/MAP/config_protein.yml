@@ -1,0 +1,70 @@
+# Experiment selection
+experiment:
+  name: "hpo_regression" # toy_data_experiments, uci_regression, image_regression, ood_detection_regression, bandits, hpo_regression
+  # hpo_classification, ood_detection_classification, experiments_classification
+  sweep_id: ""
+  
+
+# Model selection
+model:
+  name: "Laplace" # FSPLaplace, SNGP, GP, GWI, SamplingLaplace, Laplace
+
+
+# Model configuration 
+laplace:
+  neural_net:
+    type: "MLP" # MLP, CNN
+    architecture: [50, 50]
+    activation_fn: "tanh"
+    periodic_features:
+
+  likelihood: 
+    model: "Gaussian" # Gaussian, Categorical
+    scale_init: 1.
+    n_classes: 2
+
+  prior:
+    scale_init: 1.0
+    structure: "global" # parameterwise, layerwise, global
+
+  training:
+    mc_samples: 10
+    nb_epochs: 30000
+    lr: 0.0001
+    patience: 2000
+    pretrained_weights_path: ""
+    save_weights: false
+    validation_freq: 100
+
+    mll: # same params as in Immer et al.
+      lr: 0.1
+      n_iter: 0
+      update_freq: 10
+      n_epochs_burnin: 0
+      cov_type: "map" # full, diag, map, last_layer
+
+  inference:
+    cov_type: "map" # full, diag, map, last_layer
+    save_covariance: false
+    covariance_path: ""
+    pruning_covariance_path: "" 
+
+
+# Dataset configuration 
+data:
+  name: "protein" 
+  # ToyData: truncated_sine, two_moons
+  # UCI: boston, concrete, energy, kin8nm, naval, power, protein, wine, yacht, wave
+  # Image: mnist, fashion_mnist, cifar10, svhn
+  feature_dim: 1
+  n_samples: 300
+  batch_size: 1000
+  k_folds: 5
+
+
+bandits:
+  name: "financial" # financial, mushroom, statlog, jester
+  n_bandit_simulations: 5
+  simulation_batch_size: 500 
+  training_batch_size: 1000
+

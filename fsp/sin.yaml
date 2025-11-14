@@ -1,0 +1,60 @@
+# config_sin_toy.yaml
+experiment:
+  name: "toy_data_experiments"
+
+model:
+  name: "FSPLaplace"
+
+fsplaplace:
+  neural_net:
+    type: "MLP"
+    architecture: [50, 50]
+    activation_fn: "tanh"
+    validation_freq: 100
+    periodic_features: []
+
+  inference:
+    n_chunks: 1
+    max_rank: 100
+    cov_type: "low_rank_lanczos"
+    cov_context_selection: "grid"
+    n_context_points: 1000
+    max_posterior_precision: 1e-15
+    save_covariance: false
+    covariance_path: ""
+
+  likelihood:
+    model: "Gaussian"
+    scale: 0.1
+    n_classes: 1
+
+  training:
+    mc_samples: 100
+    nb_epochs: 1000
+    lr: 0.01
+    patience: 500
+    n_context_points: 100
+    context_selection: "grid"
+    save_weights: false
+    pretrained_weights_path: ""
+
+  prior:
+    kernel: "Periodic"
+    parameter_tuning: false
+    nb_epochs: 0
+    batch_size: 20
+    alpha_eps: 1e-3
+    lr: 0.01
+    parameters:
+      lengthscale: 0.1
+      variance: 0.25
+      alpha: 4.3
+
+# Override the toy‐data driver to use 1D sine
+data:
+  name: "truncated_sine"
+  feature_dim: 1
+  n_samples: 300
+  batch_size: 100
+  k_folds: 1
+

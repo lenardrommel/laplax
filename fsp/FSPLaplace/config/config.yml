@@ -1,0 +1,300 @@
+# Experiment selection
+experiment:
+  name: "toy_data_experiments" # toy_data_experiments, uci_regression, image_regression, ood_detection_regression, bandits, hpo_regression
+  # hpo_classification, ood_detection_classification, experiments_classification
+  sweep_id: ""
+
+# Model selection
+model:
+  name: "FSPLaplace" # FSPLaplace, SNGP, GP, GWI, SamplingLaplace, Laplace
+
+# Model configuration 
+fsplaplace:
+  neural_net:
+    type: "MLP" # MLP, CNN1, CNN2
+    architecture: [50,50]
+    activation_fn: "tanh"
+    validation_freq: 100
+    periodic_features: # 0.11547016
+
+  inference:
+    n_chunks: 1 # needs to divide the number of context points
+    max_rank: 100
+    cov_type: "low_rank_lanczos" # low_rank, diag, low_rank_sketch, low_rank_lanczos
+    cov_context_selection: "grid" # grid, latin_hypercube, train_val_latin, song, halton
+    n_context_points: 1000  # needs to divide 50
+    max_posterior_precision: 1.e-15 #0.1 # tuned by cross-validation
+    save_covariance: false
+    covariance_path: ""
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 0.1 # 0.08369234068720988
+    n_classes: 2
+
+  training:
+    mc_samples: 10
+    nb_epochs: 5000
+    lr: 0.01
+    patience: 1000
+    n_context_points: 100
+    context_selection: "random" # random, grid
+    save_weights: false
+    pretrained_weights_path: ""
+
+  prior:
+    kernel: "Periodic" # RBF, Matern12, Matern32, Matern52, Linear, Periodic, RationalQuadratic, Cauchy
+    parameter_tuning: true
+    nb_epochs: 500
+    batch_size: 100
+    alpha_eps: 0.001 # recommended
+    lr: 0.01
+    parameters: {"lengthscale": 0.1, "variance": 0.25, "alpha": 4.3}  # 0.32
+
+fvi:
+  neural_net:
+    type: "MLP" # MLP, CNN1, CNN2 
+    architecture: [100, 100]
+    last_layer_vi: false
+    activation_fn: "tanh"
+    validation_freq: 10
+    periodic_features:
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 1.
+    n_classes: 2
+
+  # Training configuration
+  training:
+    mc_samples: 10
+    nb_epochs: 10000 # 0
+    lr: 0.01
+    n_context_points: 100
+    context_selection: "random" # random, grid
+    patience: 2000
+    pretrained_weights_path: ""
+    
+  # Prior 
+  prior:
+    kernel: "Matern12" # RBF, Matern12, Matern32, Matern52, Polynomial_d2, Polynomial_d4, Empirical, Linear, Periodic, RationalQuadratic
+    parameter_tuning: true
+    nb_epochs: 1000
+    batch_size: 500
+    lr: 0.01
+    parameters: {"lengthscale": 0.1, "variance": 0.25, "alpha": 4.3}  # 0.32
+    alpha_eps: 0.001 # recommended
+
+laplace:
+  neural_net:
+    type: "MLP" # MLP, CNN
+    architecture: [10, 10]
+    activation_fn: "tanh"
+    periodic_features: #0.11547016
+
+  likelihood: 
+    model: "Gaussian" # Gaussian, Categorical
+    scale_init: 0.1
+    n_classes: 2
+
+  prior:
+    scale_init: 1.
+    structure: "global" # parameterwise, layerwise, global
+
+  training:
+    mc_samples: 10
+    nb_epochs: 5000
+    lr: 0.001
+    patience: 2000
+    pretrained_weights_path: ""
+    save_weights: false
+    validation_freq: 100
+
+    mll:
+      lr: 0.1
+      n_iter: 0
+      update_freq: 1000
+      n_epochs_burnin: 10000
+      cov_type: "kfac" # full, diag, map, last_layer, kfac
+
+  inference:
+    cov_type: "kfac" # full, diag, map, last_layer, kfac
+    save_covariance: false
+    covariance_path: ""
+    pruning_covariance_path: ""    
+    
+# Model configuration 
+gp:
+  n_inducing_pts: 100 # use a max of 1000 inducing points for the GP model
+
+  posterior:
+    type: "SVGP" # GP, SVGP
+    n_inducing_pts: 100
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 0.1
+    n_classes: 2
+
+  # Prior 
+  prior:
+    kernel: "Matern12" # RBF, Matern12, Matern32, Matern52, Linear, RationalQuadratic, PoweredExponential
+    params: {lengthscale: 1., variance: 1., alpha: 1.}
+
+  # Training configuration
+  training:
+    nb_epochs: 0
+    lr: 0.01
+    validation_freq: 100
+    early_stopping_patience: 1000
+    save_model: true
+    model_path: #"checkpoints/truncated_sine/SVGP_Matern12_1.pkl"
+
+
+ensemble:
+  neural_net:
+    type: "MLP" # MLP, CNN
+    architecture: [10, 10]
+    activation_fn: "tanh"
+
+  likelihood: 
+    model: "Gaussian" # Gaussian, Categorical
+    scale_init: 1.
+    n_classes: 2
+
+  prior:
+    scale: 3.
+
+  training:
+    mc_samples: 10
+    nb_epochs: 1000
+    lr: 0.01
+    patience: 2000
+    pretrained_weights_path: ""
+    save_weights: false
+    validation_freq: 10
+    n_neural_nets: 10
+    
+
+# Model configuration 
+sngp:
+  neural_net:
+    type: "MLP" # MLP, CNN1, CNN2
+    architecture: [10, 10]
+    activation_fn: "tanh"
+    validation_freq: 100
+
+  inference:
+    n_rff: 1024 # 1024 or 2048 - cross val
+    rff_scale: 1 # cross val
+    kernel: "Gaussian" # Gaussian, Laplacian, Cauchy
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 1
+    n_classes: 2
+
+  training:
+    mc_samples: 10
+    nb_epochs: 5000
+    lr: 0.01
+    patience: 2000
+    save_weights: false
+    pretrained_weights_path: ""
+    
+
+
+# Model configuration 
+gwi:
+  neural_net:
+    type: "MLP" # MLP, CNN1, CNN2
+    architecture: [50, 50] 
+    activation_fn: "tanh" # tanh, relu, elu
+    validation_freq: 100
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 1.0
+    n_classes: 2
+
+  inference:
+    n_inducing_points: 100
+    n_xs: 100 # Found in implementation
+
+  # Training configurations
+  training:
+    mc_samples: 10
+    nb_epochs: 30000
+    lr: 0.01
+    patience: 2000
+    pretrained_weights_path: ""
+
+  # Prior 
+  prior:
+    kernel: "RBF" # RBF, Matern12, Matern32, Matern52, Linear, Periodic, RationalQuadratic, Cauchy
+    parameter_tuning: true
+    nb_epochs: 1000
+    batch_size: 500
+    alpha_eps: 0.001 # recommended
+    lr: 0.1
+    parameters: {"lengthscale": 0.25, "variance": 0.5, "alpha": 4.3} 
+  
+
+sampling_laplace:
+  neural_net:
+    type: "MLP" # MLP, CNN
+    architecture: [10, 10]
+    activation_fn: "tanh"
+
+  likelihood: 
+    model: "Gaussian" # Gaussian, Categorical
+    scale_init: 1.0
+    n_classes: 2
+
+  prior:
+    scale_init: 1.
+    structure: "global" # parameterwise, layerwise, global
+
+  training:
+    mc_samples: 10
+    nb_epochs: 30000
+    lr: 0.01
+    patience: 1000
+    pretrained_weights_path: ""
+    save_weights: false
+    validation_freq: 100
+
+  inference:
+    n_em_steps: 5
+    n_iter: 1000
+    lr: 0.1
+
+# Dataset configuration 
+data:
+  name: "two_moons" 
+  # ToyData: truncated_sine, two_moons
+  # UCI: boston, concrete, energy, kin8nm, naval, power, protein, wine, yacht, wave
+  # Image: mnist, fashion_mnist, cifar10, svhn
+  feature_dim: 2
+  n_samples: 300
+  batch_size: 100
+  k_folds: 5
+
+
+bandits:
+  name: "financial" # financial, mushroom, statlog, jester
+  n_bandit_simulations: 5
+  simulation_batch_size: 500 
+  training_batch_size: 1000
+
+
+era5:
+  ds_path: "/Users/tristancinquin/Downloads/era5_t2m.nc"
+  #"/home/bamler/bdz913/workspaces/functional_laplace/src/Data/era5_t2m.nc"
+  #"/Users/tristancinquin/Downloads/era5_t2m.nc"
+  t_start: 3600 # 150*24
+  t_idcs_max: 4320 # 3600 + 15*24 #  8750
+  subsample_rate: {"longitude": 1440, "latitude": 720, "time": 1}  
+  patch_shape: {"longitude": 1, "latitude": 2, "time": 10}
+  offset: "random" # random, none
+  n_test_time_steps: 360 #720

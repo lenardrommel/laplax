@@ -1,0 +1,62 @@
+# Experiment selection
+experiment:
+  name: "bayesian_optimization" # toy_data_experiments, uci_regression, image_regression, ood_detection_regression, bandits, hpo_regression
+  # hpo_classification, ood_detection_classification, experiments_classification
+  sweep_id: ""
+
+# Model selection
+model:
+  name: "FVI" # FSPLaplace, SNGP, GP, GWI, SamplingLaplace, Laplace
+
+fvi:
+  neural_net:
+    type: "MLP" # MLP, CNN1, CNN2 ------------------------------------------------------- Make sure this is the NN we want to use
+    architecture: [50, 50]
+    last_layer_vi: false
+    activation_fn: "tanh"
+    validation_freq: 10
+    periodic_features: 
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 0.3
+    n_classes: 10
+
+  # Training configuration
+  training:
+    mc_samples: 10
+    nb_epochs: 10000
+    lr: 0.005
+    n_context_points: 400 # 100 for mnist, fmnist, cifar10 and svhn - 10 for full
+    context_selection: "random" # random, grid
+    patience: 50
+    pretrained_weights_path: ""
+    
+  # Prior 
+  prior:
+    kernel: "Matern52" 
+    parameter_tuning: true
+    nb_epochs: 1000
+    batch_size: 500
+    lr: 0.05
+    alpha_eps: 0.001 # recommended
+    parameters: {"lengthscale": 0.25, "variance": 0.5, "alpha": 4.3} 
+
+bayes_opt:
+  name: "hartmann" #  pde, lunar, pest, optics, kd, bnn, poly
+  n_trials: 5
+  n_init_points: 10
+  n_BO_iters: 19
+  batch_size: 10
+  start_trial: 0
+
+# Dataset configuration 
+data:
+  name: "" 
+  # ToyData: truncated_sine, two_moons
+  # UCI: boston, concrete, energy, kin8nm, naval, power, protein, wine, yacht, wave
+  # Image: mnist, fashion_mnist, cifar10, svhn
+  feature_dim: 1
+  n_samples: 300
+  batch_size: 1000
+  k_folds: 4

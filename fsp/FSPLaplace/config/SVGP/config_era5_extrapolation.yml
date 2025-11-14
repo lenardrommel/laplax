@@ -1,0 +1,59 @@
+# Experiment selection
+experiment:
+  name: "era5_extrapolation" # toy_data_experiments, uci_regression, image_regression, ood_detection_regression, bandits, hpo_regression
+  # hpo_classification, ood_detection_classification, experiments_classification
+  sweep_id: ""
+  
+# Model selection
+model:
+  name: "GP" # FSPLaplace, SNGP, GP, GWI, SamplingLaplace, Laplace
+
+
+# Model configuration 
+gp:
+  posterior:
+    type: "SVGP" # GP, SVGP
+    n_inducing_pts: 500
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 0.01
+    n_classes: 10
+
+  # Prior 
+  prior:
+    kernel: "ERA5Kernel" # RBF, Matern12, Matern32, Matern52, Linear, RationalQuadratic, PoweredExponential
+    params: {lengthscale: 1., variance: 1., alpha: 1.}
+
+  # Training configuration
+  training:
+    nb_epochs: 1500
+    lr: 0.007649
+    validation_freq: 1
+    early_stopping_patience: 50
+    save_model: true
+    model_path: 
+
+# Dataset configuration 
+data:
+  name: "era5_summer" 
+  # ToyData: truncated_sine, two_moons
+  # UCI: boston, concrete, energy, kin8nm, naval, power, protein, wine, yacht, wave
+  # Image: mnist, fashion_mnist, cifar10, svhn
+  feature_dim: 1
+  n_samples: 300
+  batch_size: 1000
+  k_folds: 5
+
+era5:
+  ds_path: "/home/bamler/bdz913/workspaces/functional_laplace/src/Data/era5_t2m.nc"
+  #"/home/bamler/bdz913/workspaces/functional_laplace/src/Data/era5_t2m.nc"
+  #"/Users/tristancinquin/Downloads/era5_t2m.nc"
+  t_start: 3600 # 150*24
+  t_idcs_max: 4320 # 3600 + 15*24 #  8750
+  subsample_rate: {"longitude": 20, "latitude": 20, "time": 1}  
+  patch_shape: {"longitude": 6, "latitude": 6, "time": 10}
+  offset: "random" # random, none
+  n_test_time_steps: 360 #720
+
+  

@@ -1,0 +1,139 @@
+# Experiment selection
+experiment:
+  name: "ocean_current_modeling" # toy_data_experiments, uci_regression, image_regression, ood_detection_regression, bandits, hpo_regression
+  # hpo_classification, ood_detection_classification, experiments_classification
+  sweep_id: ""
+
+# Model selection
+model:
+  name: "FSPLaplace" # FSPLaplace, SNGP, GP, GWI, SamplingLaplace, Laplace
+
+# Model configuration 
+fsplaplace:
+  neural_net:
+    type: "HelmholtzMLP" # MLP, CNN1, CNN2
+    architecture: [100, 100]
+    activation_fn: "tanh" #"tanh"
+    validation_freq: 500
+    periodic_features:
+
+  inference:
+    n_chunks: 1 #80 # needs to divide the number of context points
+    max_rank: 500
+    cov_type: "low_rank_lanczos" # low_rank, diag, low_rank_sketch, low_rank_lanczos
+    cov_context_selection: "ocean_current_modeling" #"ocean_current_modeling" # grid, latin_hypercube, train_val_latin, song, halton
+    n_context_points: 1088  # needs to divide 50
+    max_posterior_precision: 1.e-15 #0.1 # tuned by cross-validation
+    save_covariance: false
+    covariance_path: ""
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 0.02164059399 #  0.004137262442875851
+    n_classes: 10
+
+  training:
+    mc_samples: 10
+    nb_epochs: 100000
+    lr: 0.00005
+    patience: 20000
+    n_context_points: 100
+    context_selection: "ocean_current_modeling" # random, grid
+    save_weights: false
+    pretrained_weights_path: ""
+
+  prior:
+    kernel: "Helmholtz" # RBF, Helmholtz  Matern12, Matern32, Matern52, Linear, Periodic, RationalQuadratic, Cauchy
+    parameter_tuning: false
+    nb_epochs: 1000
+    batch_size: 1000
+    alpha_eps: 0.001 # recommended
+    lr: 0.1
+    parameters: {"lengthscale": 0.25, "variance": 0.5, "alpha": 4.3} 
+
+
+fvi:
+  neural_net:
+    type: "HelmholtzMLP" 
+    architecture: [100, 100]
+    last_layer_vi: false
+    activation_fn: "tanh"
+    validation_freq: 100
+    periodic_features: 
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 0.02164059399
+    n_classes: 10
+
+  # Training configuration
+  training:
+    mc_samples: 10
+    nb_epochs: 100000
+    lr: 0.00005
+    n_context_points: 100 # 100 for mnist, fmnist, cifar10 and svhn - 10 for full
+    context_selection: "ocean_current_modeling" # random, grid
+    patience: 20000
+    pretrained_weights_path: ""
+    
+  # Prior 
+  prior:
+    kernel: "Helmholtz" 
+    parameter_tuning: false
+    nb_epochs: 1000
+    batch_size: 500
+    lr: 0.01
+    alpha_eps: 0.001 # recommended
+    parameters: {"lengthscale": 0.25, "variance": 0.5, "alpha": 4.3} 
+
+laplace:
+  neural_net:
+    type: "HelmholtzMLP" # MLP, CNN1, CNN2
+    architecture: [100, 100]
+    activation_fn: "tanh"
+    periodic_features:
+
+  likelihood: 
+    model: "Gaussian" # Gaussian, Categorical
+    scale_init: 0.02164059399 #  0.004137262442875851
+    n_classes: 2
+
+  prior:
+    scale_init: 0.1 #0.70 # 1
+    structure: "global" # parameterwise, layerwise, global
+
+  training:
+    mc_samples: 10
+    nb_epochs: 0 #  100000
+    lr: 0.00005
+    patience: 20000
+    pretrained_weights_path: ""
+    save_weights: false
+    validation_freq: 100
+
+    mll:
+      lr: 0.1
+      n_iter: 0
+      update_freq: 10
+      n_epochs_burnin: 0
+      cov_type: "full" # full, diag, map, last_layer, kfac
+
+  inference:
+    cov_type: "full" # full, diag, map, last_layer, kfac
+    save_covariance: false
+    covariance_path: ""
+    pruning_covariance_path: #"checkpoints/two_moons/skerch_laplace_diag_none_cov_sq_root_1.pkl"    
+    
+
+# Dataset configuration 
+data:
+  name: "ocean_current" 
+  # ToyData: truncated_sine, two_moons
+  # UCI: boston, concrete, energy, kin8nm, naval, power, protein, wine, yacht, wave
+  # Image: mnist, fashion_mnist, cifar10, svhn
+  feature_dim: 1
+  n_samples: 300
+  batch_size: 10000
+  k_folds: 5
+
+

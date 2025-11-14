@@ -1,0 +1,68 @@
+# Experiment selection
+experiment:
+  name: "toy_data_experiments" # toy_data_experiments, uci_regression, image_regression, ood_detection_regression, bandits, hpo_regression
+  # hpo_classification, ood_detection_classification, experiments_classification
+  sweep_id: ""
+
+# Model selection
+model:
+  name: "GP" # FSPLaplace, SNGP, GP, GWI, SamplingLaplace, Laplace
+
+
+# Model configuration 
+gp:
+  n_inducing_pts: 100 # use a max of 1000 inducing points for the GP model
+
+  posterior:
+    type: "GP" # GP, SVGP
+    n_inducing_pts: 100
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 0.1
+    n_classes: 2
+
+  # Prior 
+  prior:
+    kernel: "Periodic" # RBF, Matern12, Matern32, Matern52, Linear, RationalQuadratic, PoweredExponential
+    params: {lengthscale: 1., variance: 1., alpha: 1.}
+
+  # Training configuration
+  training:
+    nb_epochs: 0
+    lr: 0.01
+    validation_freq: 100
+    early_stopping_patience: 1000
+    save_model: true
+    model_path: #"checkpoints/truncated_sine/SVGP_Matern12_1.pkl"
+
+
+# Dataset configuration 
+data:
+  name: "truncated_sine" 
+  # ToyData: truncated_sine, two_moons
+  # UCI: boston, concrete, energy, kin8nm, naval, power, protein, wine, yacht, wave
+  # Image: mnist, fashion_mnist, cifar10, svhn
+  feature_dim: 1
+  n_samples: 300
+  batch_size: 100
+  k_folds: 1
+
+
+bandits:
+  name: "financial" # financial, mushroom, statlog, jester
+  n_bandit_simulations: 5
+  simulation_batch_size: 500 
+  training_batch_size: 1000
+
+
+era5:
+  ds_path: "/Users/tristancinquin/Downloads/era5_t2m.nc"
+  #"/home/bamler/bdz913/workspaces/functional_laplace/src/Data/era5_t2m.nc"
+  #"/Users/tristancinquin/Downloads/era5_t2m.nc"
+  t_start: 3600 # 150*24
+  t_idcs_max: 4320 # 3600 + 15*24 #  8750
+  subsample_rate: {"longitude": 1440, "latitude": 720, "time": 1}  
+  patch_shape: {"longitude": 1, "latitude": 2, "time": 10}
+  offset: "random" # random, none
+  n_test_time_steps: 360 #720

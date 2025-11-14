@@ -1,0 +1,75 @@
+# Experiment selection
+experiment:
+  name: "hpo_era5_interpolation" # toy_data_experiments, uci_regression, image_regression, ood_detection_regression, bandits, hpo_regression
+  # hpo_classification, ood_detection_classification, experiments_classification
+  sweep_id: ""
+  
+
+# Model selection
+model:
+  name: "FSPLaplace" # FSPLaplace, SNGP, GP, GWI, SamplingLaplace
+
+# Model configuration 
+fsplaplace:
+  neural_net:
+    type: "MLP" # MLP, CNN1, CNN2
+    architecture: [100, 100, 100, 100]
+    activation_fn: "tanh"
+    validation_freq: 100
+    periodic_features: 0.11547016
+
+  inference:
+    n_chunks: 37 #225 # needs to divide the number of context points
+    max_rank: 500
+    cov_type: "low_rank_lanczos" # low_rank, diag, low_rank_sketch, low_rank_lanczos
+    cov_context_selection: "latin_hypercube" # grid, latin_hypercube, sobol, train_val, train_val_latin, song, halton
+    n_context_points: 50653 # needs to divide 37 
+    max_posterior_precision: 1.e-15 #0.1 # tuned by cross-validation
+    save_covariance: false
+    covariance_path: ""
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 0.1
+    n_classes: 2
+
+  training:
+    mc_samples: 10
+    nb_epochs: 1000
+    lr: 0.001
+    patience: 10
+    n_context_points: 100
+    context_selection: "random" # random, grid
+    save_weights: false
+    pretrained_weights_path: ""
+
+  prior:
+    kernel: "ERA5Kernel" 
+    # RBF, Matern12, Matern32, Matern52, Linear, RationalQuadratic, Cauchy, HelmholtzKernel, ERA5Kernel
+    parameter_tuning: true
+    nb_epochs: 100
+    batch_size: 500
+    alpha_eps: 0.001 # recommended
+    lr: 0.1
+    parameters: {"lengthscale": 0.25, "variance": 0.5, "alpha": 4.3} 
+
+
+# Dataset configuration 
+data:
+  name: "boston" 
+  # ToyData: truncated_sine, two_moons
+  # UCI: boston, concrete, energy, kin8nm, naval, power, protein, wine, yacht, wave
+  # Image: mnist, fashion_mnist, cifar10, svhn
+  feature_dim: 1
+  n_samples: 300
+  batch_size: 5000
+  k_folds: 5
+
+era5:
+  ds_path: "/home/bamler/bdz913/workspaces/functional_laplace/src/Data/era5_t2m.nc"
+  #"/home/bamler/bdz913/workspaces/functional_laplace/src/Data/era5_t2m.nc"
+  #"/Users/tristancinquin/Downloads/era5_t2m.nc"
+  t_idcs_max: 720 # 8750
+  subsample_rate: {"longitude": 20, "latitude": 20, "time": 1}  
+  patch_shape: {"longitude": 6, "latitude": 6, "time": 10}
+  offset: "random" # random, none

@@ -1,0 +1,68 @@
+# Experiment selection
+experiment:
+  name: "experiments_classification" # toy_data_experiments, uci_regression, image_regression, ood_detection_regression, bandits, hpo_regression
+  # hpo_classification, experiments_classification, image_classification
+  sweep_id: ""
+
+# Model selection
+model:
+  name: "FVI" # GFSVI, MFVI, GP, Laplace, TFSVI, FVI
+
+fvi:
+  neural_net:
+    type: "CNN1" # MLP, CNN1, CNN2 ------------------------------------------------------- Make sure this is the NN we want to use
+    architecture: [10, 10] 
+    last_layer_vi: false
+    activation_fn: "tanh"
+    validation_freq: 10
+    periodic_features: 
+
+  likelihood:
+    model: "Categorical" # Gaussian, Categorical
+    scale: 1.
+    n_classes: 10
+
+  # Training configuration
+  training:
+    mc_samples: 10
+    nb_epochs: 1000
+    lr: 0.0001781
+    n_context_points: 20 # 10 - 25 for mnist and fashion_mnist, 12 for cifar10, 20 for mnist and fashion_mnist with kmnist
+    context_selection: "kmnist" # random, grid, random_monochrome, kmnist
+    patience: 50 # 100
+    pretrained_weights_path: ""
+    
+  # Prior 
+  prior:
+    kernel: "RBF" # RBF, Matern12, Matern32, Matern52, Polynomial_d2, Polynomial_d4, Empirical, Linear, Periodic, RationalQuadratic
+    parameter_tuning: true
+    nb_epochs: 200
+    batch_size: 100
+    lr: 0.01
+    alpha_eps: 0.003369
+    parameters: {"lengthscale": 0.25, "variance": 0.5, "alpha": 4.3} 
+
+# Dataset configuration 
+data:
+  name: "mnist" 
+  # ToyData: truncated_sine, GP_RBF, two_moons
+  # UCI: boston, concrete, energy, kin8nm, naval, power, protein, wine, yacht, wave
+  # Image: mnist, fashion_mnist, cifar10, svhn
+  feature_dim: 2
+  n_samples: 300
+  batch_size: 100
+  k_folds: 5
+
+
+image_regression: 
+  n_img_samples: 10
+  masked_pixels: 84 # out of 784 pixels. 
+  image_idx: 0
+  image_label: 9
+  
+
+bandits:
+  name: "financial" # financial, mushroom, statlog, jester
+  n_bandit_simulations: 5
+  simulation_batch_size: 500 
+  training_batch_size: 1000

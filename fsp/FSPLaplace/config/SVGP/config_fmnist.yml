@@ -1,0 +1,55 @@
+# Experiment selection
+experiment:
+  name: "experiments_classification" # toy_data_experiments, uci_regression, image_regression, ood_detection_regression, bandits, hpo_regression
+  # hpo_classification, ood_detection_classification, experiments_classification
+  sweep_id: ""
+  
+
+# Model selection
+model:
+  name: "GP" # FSPLaplace, SNGP, GP, GWI, SamplingLaplace, Laplace
+
+
+# Model configuration 
+gp:
+  posterior:
+    type: "SVGP" # GP, SVGP
+    n_inducing_pts: 100
+
+  likelihood:
+    model: "Categorical" # Gaussian, Categorical
+    scale: 1.
+    n_classes: 10
+
+  # Prior 
+  prior:
+    kernel: "RationalQuadratic" # RBF, Matern12, Matern32, Matern52, Linear, RationalQuadratic, PoweredExponential
+    params: # {lengthscale: 1., variance: 1., alpha: 1.}
+
+  # Training configuration
+  training:
+    nb_epochs: 1000
+    lr: 0.0237
+    validation_freq: 1
+    early_stopping_patience: 20
+    save_model: false
+    model_path: 
+
+# Dataset configuration 
+data:
+  name: "fashion_mnist" 
+  # ToyData: truncated_sine, two_moons
+  # UCI: boston, concrete, energy, kin8nm, naval, power, protein, wine, yacht, wave
+  # Image: mnist, fashion_mnist, cifar10, svhn
+  feature_dim: 1
+  n_samples: 300
+  batch_size: 100
+  k_folds: 5
+
+
+bandits:
+  name: "financial" # financial, mushroom, statlog, jester
+  n_bandit_simulations: 5
+  simulation_batch_size: 500 
+  training_batch_size: 1000
+

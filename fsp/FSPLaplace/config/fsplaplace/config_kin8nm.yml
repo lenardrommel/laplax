@@ -1,0 +1,76 @@
+# Experiment selection
+experiment:
+  name: "hpo_regression" # toy_data_experiments, uci_regression, image_regression, ood_detection_regression, bandits, hpo_regression
+  # hpo_classification, ood_detection_classification, experiments_classification
+  sweep_id: "f8f0wkq6"
+  
+# Model selection
+model:
+  name: "FSPLaplace" # FSPLaplace, SNGP, GP, GWI, SamplingLaplace
+
+# Model configuration 
+fsplaplace:
+  neural_net:
+    type: "MLP" # MLP, CNN1, CNN2
+    architecture: [50, 50]
+    activation_fn: "tanh"
+    validation_freq: 100
+    periodic_features: 
+
+  inference:
+    n_chunks: 100 # needs to divide the number of context points
+    max_rank: 500
+    cov_type: "low_rank_lanczos" # low_rank, diag, low_rank_sketch, low_rank_lanczos
+    cov_context_selection: "halton" # grid, latin_hypercube, sobol, train_val, train_val_latin, song, halton
+    n_context_points: 50000  # needs to divide 50
+    max_posterior_precision: 1.e-15 #0.1 # tuned by cross-validation
+    save_covariance: false
+    covariance_path: ""
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 1.
+    n_classes: 2
+
+  training:
+    mc_samples: 10
+    nb_epochs: 30000
+    lr: 0.00073561
+    patience: 2000
+    n_context_points: 205 
+    context_selection: "random" # random, grid
+    save_weights: false
+    pretrained_weights_path: ""
+
+  prior:
+    kernel: "Matern12" # RBF, Matern12, Matern32, Matern52, Linear, Periodic, RationalQuadratic, Cauchy
+    parameter_tuning: true
+    nb_epochs: 1000
+    batch_size: 500
+    alpha_eps: 0.001 # recommended
+    lr: 0.1
+    parameters: {"lengthscale": 0.25, "variance": 0.5, "alpha": 4.3} 
+
+
+
+# Dataset configuration 
+data:
+  name: "kin8nm" 
+  # ToyData: truncated_sine, two_moons
+  # UCI: boston, concrete, energy, kin8nm, naval, power, protein, wine, yacht, wave
+  # Image: mnist, fashion_mnist, cifar10, svhn
+  feature_dim: 1
+  n_samples: 300
+  batch_size: 1000
+  k_folds: 5
+
+
+bandits:
+  name: "financial" # financial, mushroom, statlog, jester
+  n_bandit_simulations: 5
+  simulation_batch_size: 500 
+  training_batch_size: 1000
+
+
+
+

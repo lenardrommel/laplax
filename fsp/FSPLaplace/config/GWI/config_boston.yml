@@ -1,0 +1,65 @@
+# Experiment selection
+experiment:
+  name: "hpo_regression" # toy_data_experiments, uci_regression, image_regression, ood_detection_regression, bandits, hpo_regression
+  # hpo_classification, ood_detection_classification, experiments_classification
+  sweep_id: ""
+  
+
+# Model selection
+model:
+  name: "GWI" # FSPLaplace, SNGP, GP, GWI, SamplingLaplace, Laplace
+
+# Model configuration 
+gwi:
+  neural_net:
+    type: "MLP" # MLP, CNN1, CNN2
+    architecture: [50, 50] 
+    activation_fn: "tanh" # tanh, relu, elu
+    validation_freq: 100
+
+  likelihood:
+    model: "Gaussian" # Gaussian, Categorical
+    scale: 1.0
+    n_classes: 2
+
+  inference:
+    n_inducing_points: 100
+    n_xs: 100 # Found in implementation
+
+  # Training configurations
+  training:
+    mc_samples: 10
+    nb_epochs: 30000
+    lr: 0.01
+    patience: 2000
+    pretrained_weights_path: ""
+
+  # Prior 
+  prior:
+    kernel: "RBF" # RBF, Matern12, Matern32, Matern52, Linear, Periodic, RationalQuadratic, Cauchy
+    parameter_tuning: true
+    nb_epochs: 1000
+    batch_size: 500
+    alpha_eps: 0.001 # recommended
+    lr: 0.1
+    parameters: {"lengthscale": 0.25, "variance": 0.5, "alpha": 4.3} 
+    
+
+# Dataset configuration 
+data:
+  name: "boston" 
+  # ToyData: truncated_sine, two_moons
+  # UCI: boston, concrete, energy, kin8nm, naval, power, protein, wine, yacht, wave
+  # Image: mnist, fashion_mnist, cifar10, svhn
+  feature_dim: 1
+  n_samples: 300
+  batch_size: 1000
+  k_folds: 5
+
+
+bandits:
+  name: "financial" # financial, mushroom, statlog, jester
+  n_bandit_simulations: 5
+  simulation_batch_size: 500 
+  training_batch_size: 1000
+

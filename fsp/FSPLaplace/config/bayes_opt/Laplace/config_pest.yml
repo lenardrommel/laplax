@@ -1,0 +1,68 @@
+# Experiment selection
+experiment:
+  name: "bayesian_optimization" # toy_data_experiments, uci_regression, image_regression, ood_detection_regression, bandits, hpo_regression
+  # hpo_classification, ood_detection_classification, experiments_classification
+  sweep_id: ""
+
+# Model selection
+model:
+  name: "Laplace" # FSPLaplace, SNGP, GP, GWI, SamplingLaplace, Laplace
+
+
+laplace:
+  neural_net:
+    type: "MLP" # MLP, CNN
+    architecture: [50, 50]
+    activation_fn: "tanh"
+    periodic_features:
+
+  likelihood: 
+    model: "Gaussian" # Gaussian, Categorical
+    scale_init: 3.16
+    n_classes: 2
+
+  prior:
+    scale_init: 3.16
+    structure: "global" # parameterwise, layerwise, global
+
+  training:
+    mc_samples: 10
+    nb_epochs: 10000
+    lr: 0.005
+    patience: 50
+    pretrained_weights_path: ""
+    save_weights: false
+    validation_freq: 10
+
+    mll:
+      lr: 0.1
+      n_iter: 100
+      update_freq: 100
+      n_epochs_burnin: 0
+      cov_type: "kfac" # full, diag, map, last_layer, kfac
+
+  inference:
+    cov_type: "kfac" # full, diag, map, last_layer, kfac
+    save_covariance: false
+    covariance_path: ""
+    pruning_covariance_path: "" # "checkpoints/two_moons/skerch_laplace_diag_none_cov_sq_root_1.pkl"    
+    
+
+bayes_opt:
+  name: "pest" #  pde, lunar, pest, optics, kd, bnn, poly
+  n_trials: 5
+  n_init_points: 20
+  n_BO_iters: 25
+  batch_size: 4
+  start_trial: 0
+
+# Dataset configuration 
+data:
+  name: "" 
+  # ToyData: truncated_sine, two_moons
+  # UCI: boston, concrete, energy, kin8nm, naval, power, protein, wine, yacht, wave
+  # Image: mnist, fashion_mnist, cifar10, svhn
+  feature_dim: 1
+  n_samples: 300
+  batch_size: 1000
+  k_folds: 1
