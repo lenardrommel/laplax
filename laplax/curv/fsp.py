@@ -2,10 +2,6 @@
 
 """FSP (Function-Space Prior) inference module with support for different kernel structures."""
 
-import functools
-import operator
-import os
-import time
 from functools import partial
 
 import jax
@@ -44,21 +40,49 @@ KernelStructure = CovarianceStructure
 # ==============================================================================
 
 
-PROFILE_FSP = os.getenv("PROFILE_FSP", "0") == "1"
+def _truncated_left_svd(M_flat: jnp.ndarray):
+    """Compute truncated left SVD (U, s) of a matrix efficiently.
 
+    For speed, uses an eigen decomposition of the smaller Gram matrix
+    and reconstructs the left singular vectors when advantageous.
 
-def _time_block(name: str, func, *args, **kwargs):
-    """Run func(*args, **kwargs), block on JAX, and log runtime via loguru."""
-    start = time.perf_counter()
-    out = func(*args, **kwargs)
+    Returns
+    -------
+    tuple (U, s)
+        U: left singular vectors with only columns above tolerance
+        s: corresponding singular values (descending)
+    """
+    d, r = M_flat.shape
+    tol = jnp.finfo(M_flat.dtype).eps ** 2
 
-    def _block(x):
-        return x.block_until_ready() if hasattr(x, "block_until_ready") else x
-
-    _ = jax.tree.map(_block, out)
-    elapsed = time.perf_counter() - start
-    logger.info(f"{name} took {elapsed:.3f} s")
-    return out
+    if d > r:
+        gram = M_flat.T @ M_flat  # (r, r)
+        eigvals, V = jnp.linalg.eigh(gram)
+        order = jnp.argsort(eigvals)[::-1]
+        eigvals = eigvals[order]
+        V = V[:, order]
+        s_all = jnp.sqrt(jnp.clip(eigvals, 0.0))
+        mask = s_all > tol
+        s = s_all[mask]
+        if s.size == 0:
+            return jnp.zeros((d, 0), dtype=M_flat.dtype), s
+        V = V[:, : s.size]
+        U = M_flat @ V
+        U = U / s  # column-wise divide via broadcasting
+        return U, s
+    else:
+        gram = M_flat @ M_flat.T  # (d, d)
+        eigvals, U = jnp.linalg.eigh(gram)
+        order = jnp.argsort(eigvals)[::-1]
+        eigvals = eigvals[order]
+        U = U[:, order]
+        s_all = jnp.sqrt(jnp.clip(eigvals, 0.0))
+        mask = s_all > tol
+        s = s_all[mask]
+        if s.size == 0:
+            return jnp.zeros((d, 0), dtype=M_flat.dtype), s
+        U = U[:, : s.size]
+        return U, s
 
 
 def _accumulate_M_over_chunks(
@@ -393,6 +417,7 @@ def create_fsp_posterior_kronecker(
     n_chunks: int,
     *,
     spatial_max_iters: list[int] | None = None,
+    is_classification: bool = False,
     chunk_mode: str = "scan",
     **kwargs,
 ) -> Posterior:
@@ -428,54 +453,27 @@ def create_fsp_posterior_kronecker(
     # Adjust chunk count to evenly divide number of functions
     n_functions = int(x_context.shape[0])
     n_chunks_eff = int(min(max(1, n_chunks), n_functions))
+    # TODO: improve this
     while n_functions % n_chunks_eff != 0 and n_chunks_eff > 1:
         n_chunks_eff -= 1
 
     dim = sum(x.size for x in jax.tree_util.tree_leaves(params))
 
-    if PROFILE_FSP:
-        initial_vectors_function, initial_vectors_spatial = _time_block(
-            "lanczos_init (HOSVD)",
-            _lanczos_init,
-            model_fn,
-            params,
-            x_context,
-            num_chunks=n_chunks_eff,
-        )
-    else:
-        initial_vectors_function, initial_vectors_spatial = _lanczos_init(
-            model_fn, params, x_context, num_chunks=n_chunks_eff
-        )
+    initial_vectors_function, initial_vectors_spatial = _lanczos_init(
+        model_fn, params, x_context, num_chunks=n_chunks_eff
+    )
 
     # TODO: Remove hard coded [8] and make configurable
     if spatial_max_iters is None:
         spatial_max_iters = [8] * len(spatial_kernels)
 
-    if PROFILE_FSP:
-        spatial_lanczos_results = _time_block(
-            "lanczos_kronecker (spatial)",
-            _lanczos_kronecker_structure,
-            spatial_kernels,
-            initial_vectors_spatial,
-            spatial_max_iters,
-        )
-    else:
-        spatial_lanczos_results = _lanczos_kronecker_structure(
-            spatial_kernels, initial_vectors_spatial, spatial_max_iters
-        )
+    spatial_lanczos_results = _lanczos_kronecker_structure(
+        spatial_kernels, initial_vectors_spatial, spatial_max_iters
+    )
 
-    if PROFILE_FSP:
-        function_lanczos_results = _time_block(
-            "lanczos_kronecker (function)",
-            _lanczos_kronecker_structure,
-            function_kernels,
-            initial_vectors_function,
-            None,
-        )
-    else:
-        function_lanczos_results = _lanczos_kronecker_structure(
-            function_kernels, initial_vectors_function, max_iters=None
-        )
+    function_lanczos_results = _lanczos_kronecker_structure(
+        function_kernels, initial_vectors_function, max_iters=None
+    )
 
     # Combine Lanczos results using Kronecker product
     k_spatial_inv_sqrt = _kronecker_product(spatial_lanczos_results)
@@ -492,43 +490,25 @@ def create_fsp_posterior_kronecker(
         rank,
     )
 
-    if PROFILE_FSP:
-        M = _time_block(
-            "M_batch (accumulate over chunks)",
-            _accumulate_M_over_chunks,
-            model_fn,
-            params,
-            x_context,
-            k_inv_sqrt_dense,
-            n_chunks_eff,
-            mode="scan",
-        )
-    else:
-        M = _accumulate_M_over_chunks(
-            model_fn,
-            params,
-            x_context,
-            k_inv_sqrt_dense,
-            n_chunks_eff,
-            mode="scan",
-        )
+    M = _accumulate_M_over_chunks(
+        model_fn,
+        params,
+        x_context,
+        k_inv_sqrt_dense,
+        n_chunks_eff,
+        mode="scan",
+    )
 
     flatten, unflatten = create_partial_pytree_flattener(M)
     M_flat = flatten(M)
 
-    # TODO: make reusable function
-    # Calculate the SVD of M
-    if PROFILE_FSP:
-        _u, _s, _ = _time_block(
-            "svd(M_flat)", jnp.linalg.svd, M_flat, full_matrices=False
-        )
-    else:
-        _u, _s, _ = jnp.linalg.svd(M_flat, full_matrices=False)
-    tol = jnp.finfo(M_flat.dtype).eps ** 2
-    s = _s[_s > tol]
-    _u = _u[:, : s.size]
+    # Truncated left SVD
+    _u, s = _truncated_left_svd(M_flat)
 
     u = unflatten(_u)
+    if is_classification:
+        msg = "FSP posterior with full (classification) Hessian is not implemented."
+        raise NotImplementedError(msg)
     ggn_mv = create_ggn_pytree_mv(
         model_fn=model_fn,
         params=params,
@@ -540,10 +520,7 @@ def create_fsp_posterior_kronecker(
 
     # Compute U_A, D_A
     A_eigh = jnp.diag(s**2) + uTggnu
-    if PROFILE_FSP:
-        eigvals, eigvecs = _time_block("eigh(S^2 + U^T GGN U)", jnp.linalg.eigh, A_eigh)
-    else:
-        eigvals, eigvecs = jnp.linalg.eigh(A_eigh)
+    eigvals, eigvecs = jnp.linalg.eigh(A_eigh)
     eigvals = jnp.flip(eigvals, axis=0)
     eigvecs = jnp.flip(eigvecs, axis=1)
 
@@ -591,6 +568,9 @@ def create_fsp_posterior_none(
     n_chunks: int,
     *,
     max_iter: int | None = None,
+    is_classification: bool = False,
+    independent_outputs: bool = False,
+    kernels_per_output: list[Callable] | None = None,
     **kwargs,
 ) -> Posterior:
     """Create FSP posterior with unstructured prior (full covariance Lanczos).
@@ -632,59 +612,64 @@ def create_fsp_posterior_none(
     ones_pytree = jax.tree.map(lambda x: jnp.ones_like(x), params)
     model_jvp = create_model_jvp(params, ones_pytree, model_fn, in_axes=0, out_axes=0)
     b = model_jvp(x_context)
-    initial_vector = b.flatten() / jnp.linalg.norm(b.flatten())
 
-    # Compute Lanczos inverse sqrt for full covariance
-    if PROFILE_FSP:
-        k_inv_sqrt = _time_block(
-            "lanczos_none (full)",
-            _lanczos_none_structure,
-            kernel,
-            initial_vector,
-            max_iter,
-        )
+    # Compute Lanczos inverse sqrt for the prior kernel
+    if independent_outputs or kernels_per_output is not None:
+        # Build block-diagonal K^{-1/2} across output channels using per-output kernels
+        output_dim = 1 if b.ndim == 1 else int(b.shape[-1])
+        per_output_cols = []
+        for k in range(output_dim):
+            b_k = b if output_dim == 1 else b[:, k]
+            b_k = b_k.reshape(-1)
+            init_k = b_k / (jnp.linalg.norm(b_k) + 1e-12)
+            kernel_k = (
+                kernels_per_output[k]
+                if kernels_per_output is not None and k < len(kernels_per_output)
+                else kernel
+            )
+            k_inv_sqrt_k = _lanczos_none_structure(kernel_k, init_k, max_iter)
+            per_output_cols.append(k_inv_sqrt_k)
+
+        ranks = [c.shape[-1] for c in per_output_cols]
+        total_rank = int(sum(ranks))
+        B = int(x_context.shape[0])
+        out_dim = 1 if b.ndim == 1 else int(b.shape[-1])
+        k_inv_sqrt_dense = jnp.zeros((B, out_dim, total_rank), dtype=b.dtype)
+        offset = 0
+        for k, cols in enumerate(per_output_cols):
+            r = int(cols.shape[-1])
+            k_inv_sqrt_dense = k_inv_sqrt_dense.at[:, k, offset : offset + r].set(
+                cols.reshape(B, r)
+            )
+            offset += r
     else:
+        initial_vector = b.flatten() / (jnp.linalg.norm(b.flatten()) + 1e-12)
         k_inv_sqrt = _lanczos_none_structure(kernel, initial_vector, max_iter)
 
-    rank = k_inv_sqrt.shape[-1]
-    k_inv_sqrt_dense = k_inv_sqrt.reshape(*output_shape, rank)
+        rank = k_inv_sqrt.shape[-1]
+        k_inv_sqrt_dense = k_inv_sqrt.reshape(*output_shape, rank)
 
-    if PROFILE_FSP:
-        M = _time_block(
-            "M_batch (accumulate over chunks)",
-            _accumulate_M_over_chunks,
-            model_fn,
-            params,
-            x_context,
-            k_inv_sqrt_dense,
-            n_chunks_eff,
-            mode="scan",
-        )
-    else:
-        M = _accumulate_M_over_chunks(
-            model_fn,
-            params,
-            x_context,
-            k_inv_sqrt_dense,
-            n_chunks_eff,
-            mode="scan",
-        )
+    M = _accumulate_M_over_chunks(
+        model_fn,
+        params,
+        x_context,
+        k_inv_sqrt_dense,
+        n_chunks_eff,
+        mode="scan",
+    )
 
     flatten, unflatten = create_partial_pytree_flattener(M)
     M_flat = flatten(M)
 
-    # Calculate the SVD of M
-    if PROFILE_FSP:
-        _u, _s, _ = _time_block(
-            "svd(M_flat)", jnp.linalg.svd, M_flat, full_matrices=False
-        )
-    else:
-        _u, _s, _ = jnp.linalg.svd(M_flat, full_matrices=False)
-    tol = jnp.finfo(M_flat.dtype).eps ** 2
-    s = _s[_s > tol]
-    _u = _u[:, : s.size]
+    # Truncated left SVD
+    _u, s = _truncated_left_svd(M_flat)
 
     u = unflatten(_u)
+
+    if is_classification:
+        msg = "FSP posterior with full (classification) Hessian is not implemented."
+        raise NotImplementedError(msg)
+
     ggn_mv = create_ggn_pytree_mv(
         model_fn=model_fn,
         params=params,
@@ -696,10 +681,7 @@ def create_fsp_posterior_none(
 
     # Compute U_A, D_A
     A_eigh = jnp.diag(s**2) + uTggnu
-    if PROFILE_FSP:
-        eigvals, eigvecs = _time_block("eigh(S^2 + U^T GGN U)", jnp.linalg.eigh, A_eigh)
-    else:
-        eigvals, eigvecs = jnp.linalg.eigh(A_eigh)
+    eigvals, eigvecs = jnp.linalg.eigh(A_eigh)
     eigvals = jnp.flip(eigvals, axis=0)
     eigvecs = jnp.flip(eigvecs, axis=1)
 
@@ -751,6 +733,9 @@ def create_fsp_posterior(
     prior_variance: jnp.ndarray | None = None,
     spatial_max_iters: list[int] | None = None,
     max_iter: int | None = None,
+    is_classification: bool = False,
+    independent_outputs: bool = False,
+    kernels_per_output: list[Callable] | None = None,
     **kwargs,
 ) -> Posterior:
     """Create FSP posterior with specified kernel structure.
@@ -810,6 +795,7 @@ def create_fsp_posterior(
             prior_variance=prior_variance,
             n_chunks=n_chunks,
             spatial_max_iters=spatial_max_iters,
+            is_classification=is_classification,
             **kwargs,
         )
 
@@ -828,6 +814,9 @@ def create_fsp_posterior(
             prior_variance=prior_variance,
             n_chunks=n_chunks,
             max_iter=max_iter,
+            is_classification=is_classification,
+            independent_outputs=independent_outputs,
+            kernels_per_output=kernels_per_output,
             **kwargs,
         )
 

@@ -1,5 +1,6 @@
 """Generalized Gauss-Newton matrix-vector product and loss hessian."""
 
+import math
 from collections.abc import Callable
 
 import jax
@@ -412,7 +413,6 @@ def create_ggn_pytree_mv(
         Returns:
             GGN matrix-vector product
         """
-        # TODO: implement more efficient version for CE hessian
         if hessian_diag and vmap_over_data:
             ju = _jmp_vmap(u)
             batch_size = ju.shape[0]
@@ -427,7 +427,33 @@ def create_ggn_pytree_mv(
             ju_flat = ju.reshape(batch_size, -1, rank)
             return jax.numpy.einsum("bji,bjk->ik", ju_flat, ju_flat)
 
-        msg = "Full Hessian not implemented yet."
-        raise NotImplementedError(msg)
+        if vmap_over_data:
+            ju = _jmp_vmap(u)  # (B, ..., K, R)
+            logits = jax.vmap(lambda x_c: model_fn(x_c, params))(
+                x_context
+            )  # (B, ..., K)
+        else:
+            ju = _jmp_laxmap(u)  # (B, ..., K, R)
+            logits = jax.lax.map(
+                lambda x_c: model_fn(x_c, params), x_context
+            )  # (B, ..., K)
+
+        prob = jax.nn.softmax(logits, axis=-1)
+
+        rank = ju.shape[-1]
+        num_classes = ju.shape[-2]
+        leading_shape = ju.shape[:-2]
+        m = math.prod(leading_shape) if leading_shape else 1
+        ju_mkr = ju.reshape(m, num_classes, rank)
+        p_mk = prob.reshape(m, num_classes)
+
+        sqrt_p = jax.numpy.sqrt(p_mk)[..., None]  # (M, K, 1)
+        a_scaled = ju_mkr * sqrt_p  # (M, K, R)
+        term_diag = jax.numpy.einsum("mkr,mks->rs", a_scaled, a_scaled)
+
+        at_p = jax.numpy.einsum("mkr,mk->mr", ju_mkr, p_mk)  # (M, R)
+        term_outer = jax.numpy.einsum("mr,ms->rs", at_p, at_p)
+
+        return term_diag - term_outer
 
     return ggn_vector_product

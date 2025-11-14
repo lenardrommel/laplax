@@ -812,6 +812,60 @@ DEFAULT_LIN_FSP_FINALIZE_FNS = [
 
 
 # -------------------------------------------------------------------------
+# Regression-specific helpers (FSP)
+# -------------------------------------------------------------------------
+
+
+def attach_observation_noise(
+    results: dict[str, Array],
+    aux: dict[str, Any],
+    **kwargs,
+) -> tuple[dict[str, Array], dict[str, Any]]:
+    """Attach log observation noise to results for regression metrics.
+
+    Looks for one of the following (in this order):
+    - `observation_noise` in kwargs (already log-scale)
+    - `prior_arguments["sigma"]` (std) -> takes log
+    - `prior_arguments["sigma_squared"]` (variance) -> takes 0.5 * log
+
+    If none is provided, defaults to 0.0 (i.e., sigma=1.0).
+    """
+    del aux
+
+    if "observation_noise" in kwargs and kwargs["observation_noise"] is not None:
+        results["observation_noise"] = kwargs["observation_noise"]
+        return results, aux
+
+    prior_arguments = kwargs.get("prior_arguments", {}) or {}
+
+    if "sigma" in prior_arguments and prior_arguments["sigma"] is not None:
+        results["observation_noise"] = jnp.log(jnp.asarray(prior_arguments["sigma"]))
+    elif (
+        "sigma_squared" in prior_arguments and prior_arguments["sigma_squared"] is not None
+    ):
+        results["observation_noise"] = 0.5 * jnp.log(
+            jnp.asarray(prior_arguments["sigma_squared"])  # variance -> log std
+        )
+    else:
+        # Reasonable default if user doesn't provide sigma; matches tests in metrics
+        results["observation_noise"] = jnp.asarray(0.0)
+
+    return results, aux
+
+
+# A default linear finalize chain tailored for FSP-style regression metrics.
+# This avoids forming dense covariances and uses low-rank predictive info,
+# while also adding observation noise needed by the metrics utilities.
+DEFAULT_LIN_FSP_REGRESSION_FNS = [
+    lin_setup,
+    attach_observation_noise,
+    lin_pred_mean,
+    lin_pred_lsqrt_low_rank_cov,
+    lin_pred_std,
+]
+
+
+# -------------------------------------------------------------------------
 # Pushforward functions
 # -------------------------------------------------------------------------
 
@@ -918,6 +972,7 @@ def set_nonlin_pushforward(
         mean_params=mean_params,
         dist_state=dist_state,
         pushforward_fns=pushforward_fns,
+        prior_arguments=prior_arguments,
         **kwargs,
     )
 
@@ -973,6 +1028,7 @@ def set_lin_pushforward(
         mean_params=mean_params,
         dist_state=dist_state,
         pushforward_fns=pushforward_fns,
+        prior_arguments=prior_arguments,
         **kwargs,
     )
 

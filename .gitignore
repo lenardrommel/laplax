@@ -7,6 +7,7 @@ data/*
 examples/pipeline/*
 examples/fsplaplace/*
 benchmarks/*
+fsplap/*
 
 # Temporary files (documentation)
 *.tmp
