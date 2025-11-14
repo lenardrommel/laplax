@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from sklearn.datasets import make_moons
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -120,9 +121,10 @@ def main():
     y_jax = jnp.array(y)
 
     # Create DataLoader for context point selection
+    # Convert numpy arrays to torch tensors
     dataset = TensorDataset(
-        jax.dlpack.from_dlpack(jnp.array(X)),
-        jax.dlpack.from_dlpack(jnp.array(y))
+        torch.from_numpy(X),
+        torch.from_numpy(y)
     )
     dataloader = DataLoader(dataset, batch_size=len(X), shuffle=False)
 
@@ -144,9 +146,10 @@ def main():
     print("\n3. Selecting context points...")
     # Add dummy dimensions for spatial structure (required by select_context_points)
     X_reshaped = X_jax[:, :, None, None]  # (N, 2, 1, 1)
+    # Convert to numpy then to torch tensors
     dataset_reshaped = TensorDataset(
-        jax.dlpack.from_dlpack(X_reshaped),
-        jax.dlpack.from_dlpack(y_jax[:, None])
+        torch.from_numpy(np.array(X_reshaped)),
+        torch.from_numpy(np.array(y_jax[:, None]))
     )
     dataloader_reshaped = DataLoader(dataset_reshaped, batch_size=len(X), shuffle=False)
 
