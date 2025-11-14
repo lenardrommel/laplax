@@ -152,14 +152,20 @@ def main():
     print("\n4. Computing FSP posterior...")
 
     # Create a simple kernel function (unstructured)
+    # Use smaller prior variance to make it more informative
+    kernel_lengthscale = 0.5
+    kernel_variance = 0.01  # Reduced from 0.1 to make prior tighter
+
     def kernel_fn(v):
         """Kernel matrix-vector product."""
-        K = create_simple_kernel(x_context, lengthscale=1.0, variance=1.0)
+        K = create_simple_kernel(x_context, lengthscale=kernel_lengthscale, variance=kernel_variance)
         return K @ v
 
     # Compute prior variance
-    prior_cov = create_simple_kernel(x_context, lengthscale=1.0, variance=1.0)
+    prior_cov = create_simple_kernel(x_context, lengthscale=kernel_lengthscale, variance=kernel_variance)
     prior_variance = jnp.diag(prior_cov)
+
+    print(f"   Prior variance range: [{prior_variance.min():.4f}, {prior_variance.max():.4f}]")
 
     # Create FSP posterior with unstructured kernel
     posterior = create_fsp_posterior(
