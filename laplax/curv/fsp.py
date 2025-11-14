@@ -13,7 +13,11 @@ from loguru import logger
 
 from laplax.curv.cov import Posterior, PosteriorState
 from laplax.curv.ggn import create_ggn_pytree_mv
-from laplax.curv.utils import LowRankTerms, create_model_jvp
+from laplax.curv.utils import (
+    LowRankTerms,
+    create_model_jvp,
+    compute_posterior_truncation_index,
+)
 from laplax.enums import CovarianceStructure
 from laplax.types import (
     Callable,
@@ -431,41 +435,15 @@ def create_fsp_posterior_kronecker(
     eigvals = jnp.flip(eigvals, axis=0)
     eigvecs = jnp.flip(eigvecs, axis=1)
 
-    prior_var_sum = jnp.sum(prior_variance)
-
     # Compute S: $S = U_M U_A D_A^\dagger$
     cov_sqrt = _u @ (eigvecs[:, ::-1] / jnp.sqrt(jnp.abs(eigvals[::-1])))
 
-    _, unravel_fn = jax.flatten_util.ravel_pytree(params)
-
-    # TODO: write own function and then use it globally for jvp in this script
-    def jvp(x, v):
-        return jax.jvp(lambda p: model_fn(x, p), (params,), (v,))[1]
-
-    def scan_fn(carry, i):
-        running_sum, truncation_idx = carry
-        lr_fac = unravel_fn(cov_sqrt[:, i])
-        sqrt_jvp = jax.vmap(lambda xc: jvp(xc, lr_fac) ** 2)(x_context)
-        pv = jnp.sum(sqrt_jvp)
-        new_running_sum = running_sum + pv
-        new_truncation_idx = jax.lax.cond(
-            (new_running_sum >= prior_var_sum) & (truncation_idx == -1),
-            lambda _: i + 1,
-            lambda _: truncation_idx,
-            operand=None,
-        )
-
-        return (new_running_sum, new_truncation_idx), sqrt_jvp
-
-    init_carry = (0.0, -1)
-    indices = jnp.arange(eigvals.shape[0])
-    (_, truncation_idx), _post_var = jax.lax.scan(scan_fn, init_carry, indices)
-
-    truncation_idx = jax.lax.cond(
-        truncation_idx == -1,
-        lambda _: eigvals.shape[0],
-        lambda _: truncation_idx,
-        operand=None,
+    truncation_idx = compute_posterior_truncation_index(
+        model_fn=model_fn,
+        params=params,
+        x_context=x_context,
+        cov_sqrt=cov_sqrt,
+        prior_variance=prior_variance,
     )
 
     posterior_state: PosteriorState = {"scale_sqrt": cov_sqrt[:, :truncation_idx]}
@@ -588,40 +566,15 @@ def create_fsp_posterior_none(
     eigvals = jnp.flip(eigvals, axis=0)
     eigvecs = jnp.flip(eigvecs, axis=1)
 
-    prior_var_sum = jnp.sum(prior_variance)
-
     # Compute S
     cov_sqrt = _u @ (eigvecs[:, ::-1] / jnp.sqrt(jnp.abs(eigvals[::-1])))
 
-    _, unravel_fn = jax.flatten_util.ravel_pytree(params)
-
-    def jvp(x, v):
-        return jax.jvp(lambda p: model_fn(x, p), (params,), (v,))[1]
-
-    def scan_fn(carry, i):
-        running_sum, truncation_idx = carry
-        lr_fac = unravel_fn(cov_sqrt[:, i])
-        sqrt_jvp = jax.vmap(lambda xc: jvp(xc, lr_fac) ** 2)(x_context)
-        pv = jnp.sum(sqrt_jvp)
-        new_running_sum = running_sum + pv
-        new_truncation_idx = jax.lax.cond(
-            (new_running_sum >= prior_var_sum) & (truncation_idx == -1),
-            lambda _: i + 1,
-            lambda _: truncation_idx,
-            operand=None,
-        )
-
-        return (new_running_sum, new_truncation_idx), sqrt_jvp
-
-    init_carry = (0.0, -1)
-    indices = jnp.arange(eigvals.shape[0])
-    (_, truncation_idx), _post_var = jax.lax.scan(scan_fn, init_carry, indices)
-
-    truncation_idx = jax.lax.cond(
-        truncation_idx == -1,
-        lambda _: eigvals.shape[0],
-        lambda _: truncation_idx,
-        operand=None,
+    truncation_idx = compute_posterior_truncation_index(
+        model_fn=model_fn,
+        params=params,
+        x_context=x_context,
+        cov_sqrt=cov_sqrt,
+        prior_variance=prior_variance,
     )
 
     posterior_state: PosteriorState = {"scale_sqrt": cov_sqrt[:, :truncation_idx]}

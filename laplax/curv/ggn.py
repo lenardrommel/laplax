@@ -402,6 +402,7 @@ def create_ggn_pytree_mv(
             x_context,
         )
 
+    # TODO: move this to hessian?
     def ggn_vector_product(u):
         """Compute u^T @ GGN @ u.
 
@@ -411,6 +412,7 @@ def create_ggn_pytree_mv(
         Returns:
             GGN matrix-vector product
         """
+        # TODO: implement more efficient version for CE hessian
         if hessian_diag and vmap_over_data:
             ju = _jmp_vmap(u)
             batch_size = ju.shape[0]

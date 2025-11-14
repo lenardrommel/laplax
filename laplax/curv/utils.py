@@ -244,3 +244,66 @@ def create_model_vjp(
         in_axes=in_axes,
         out_axes=out_axes,
     )
+
+
+def compute_posterior_truncation_index(
+    model_fn: ModelFn,
+    params: Params,
+    x_context: InputArray,
+    cov_sqrt: Num[Array, "P R"],
+    prior_variance: Num[Array, "..."],
+):
+    """Compute truncation index for posterior components.
+
+    Accumulates the contribution of each low-rank component (columns of `cov_sqrt`)
+    to the posterior variance via squared JVPs over the context points until the
+    cumulative sum matches or exceeds the total prior variance. Returns the
+    smallest number of components required (the truncation index).
+
+    Args:
+        model_fn: Model function f(x, params).
+        params: Model parameters (pytree).
+        x_context: Context inputs over which to evaluate JVPs.
+        cov_sqrt: Matrix whose columns are low-rank factors in parameter space.
+        prior_variance: Prior variance per context element; summed to set the budget.
+
+    Returns:
+        truncation_idx: Number of components to keep (JAX scalar integer).
+    """
+    prior_var_sum = jnp.sum(prior_variance)
+
+    # Unravel columns of cov_sqrt back into the params pytree shape
+    _, unravel_fn = jax.flatten_util.ravel_pytree(params)
+
+    def jvp_fn(x, v):
+        return jax.jvp(lambda p: model_fn(x, p), (params,), (v,))[1]
+
+    def scan_fn(carry, i):
+        running_sum, truncation_idx = carry
+        lr_fac = unravel_fn(cov_sqrt[:, i])
+        # Sum of squared sensitivity over all context points and outputs
+        sqrt_jvp = jax.vmap(lambda xc: jvp_fn(xc, lr_fac) ** 2)(x_context)
+        pv = jnp.sum(sqrt_jvp)
+        new_running_sum = running_sum + pv
+        new_truncation_idx = jax.lax.cond(
+            (new_running_sum >= prior_var_sum) & (truncation_idx == -1),
+            lambda _: i + 1,
+            lambda _: truncation_idx,
+            operand=None,
+        )
+
+        return (new_running_sum, new_truncation_idx), sqrt_jvp
+
+    init_carry = (0.0, -1)
+    indices = jnp.arange(cov_sqrt.shape[1])
+    (_, truncation_idx), _ = jax.lax.scan(scan_fn, init_carry, indices)
+
+    # If budget not reached, keep all components
+    truncation_idx = jax.lax.cond(
+        truncation_idx == -1,
+        lambda _: cov_sqrt.shape[1],
+        lambda _: truncation_idx,
+        operand=None,
+    )
+
+    return truncation_idx
