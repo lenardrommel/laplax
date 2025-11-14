@@ -58,8 +58,10 @@ def binary_cross_entropy_loss(params, x_batch, y_batch):
     """Binary cross-entropy loss."""
     logits = jax.vmap(lambda x: mlp_forward(x, params))(x_batch)
     # BCE with logits (negative log likelihood to minimize)
-    return -jnp.mean(jax.nn.log_sigmoid(logits) * y_batch +
-                     jax.nn.log_sigmoid(-logits) * (1 - y_batch))
+    return -jnp.mean(
+        jax.nn.log_sigmoid(logits) * y_batch
+        + jax.nn.log_sigmoid(-logits) * (1 - y_batch)
+    )
 
 
 def train_mlp(params, x_train, y_train, num_epochs=100, learning_rate=0.01):
@@ -71,9 +73,7 @@ def train_mlp(params, x_train, y_train, num_epochs=100, learning_rate=0.01):
             params, x_batch, y_batch
         )
         # Gradient descent update
-        params = jax.tree.map(
-            lambda p, g: p - learning_rate * g, params, grads
-        )
+        params = jax.tree.map(lambda p, g: p - learning_rate * g, params, grads)
         return params, loss
 
     for epoch in range(num_epochs):
@@ -158,14 +158,20 @@ def main():
 
     def kernel_fn(v):
         """Kernel matrix-vector product."""
-        K = create_simple_kernel(x_context, lengthscale=kernel_lengthscale, variance=kernel_variance)
+        K = create_simple_kernel(
+            x_context, lengthscale=kernel_lengthscale, variance=kernel_variance
+        )
         return K @ v
 
     # Compute prior variance
-    prior_cov = create_simple_kernel(x_context, lengthscale=kernel_lengthscale, variance=kernel_variance)
+    prior_cov = create_simple_kernel(
+        x_context, lengthscale=kernel_lengthscale, variance=kernel_variance
+    )
     prior_variance = jnp.diag(prior_cov)
 
-    print(f"   Prior variance range: [{prior_variance.min():.4f}, {prior_variance.max():.4f}]")
+    print(
+        f"   Prior variance range: [{prior_variance.min():.4f}, {prior_variance.max():.4f}]"
+    )
 
     # Create FSP posterior with unstructured kernel
     posterior = create_fsp_posterior(
@@ -188,21 +194,19 @@ def main():
     flatten_fn, unflatten_fn = create_pytree_flattener(trained_params)
 
     def model_fn_flat(input, params):
-        """Model function with flattened parameters (GGN expects keyword args)."""
+        """Model function with flattened parameters (binary logistic output)."""
         params_pytree = unflatten_fn(params)
-        # For binary classification, return 2 logits (class 0, class 1)
-        logit = mlp_forward(input, params_pytree)
-        # Convert single logit to 2-class logits: [logit_class0, logit_class1]
-        return jnp.stack([jnp.zeros_like(logit), logit], axis=-1)
+        # For binary classification, return single logit
+        return mlp_forward(input, params_pytree)
 
     # Create GGN on full dataset - needs to be dict with 'input' and 'target' keys
-    # Convert targets to integers for cross-entropy
-    data = {"input": X_jax, "target": y_jax.astype(jnp.int32)}
+    # Use float targets {0,1} for binary cross-entropy
+    data = {"input": X_jax, "target": y_jax}
     ggn_mv = GGN(
         model_fn_flat,
         flatten_fn(trained_params),
         data,
-        loss_fn=LossFn.CROSS_ENTROPY,
+        loss_fn=LossFn.BINARY_CROSS_ENTROPY,
         vmap_over_data=True,
     )
 
@@ -236,10 +240,7 @@ def main():
     # Create a grid for visualization
     x_min, x_max = X[:, 0].min() - 0.5, X[:, 0].max() + 0.5
     y_min, y_max = X[:, 1].min() - 0.5, X[:, 1].max() + 0.5
-    xx, yy = np.meshgrid(
-        np.linspace(x_min, x_max, 100),
-        np.linspace(y_min, y_max, 100)
-    )
+    xx, yy = np.meshgrid(np.linspace(x_min, x_max, 100), np.linspace(y_min, y_max, 100))
     grid_points = np.c_[xx.ravel(), yy.ravel()]
     grid_jax = jnp.array(grid_points)
 
@@ -291,7 +292,9 @@ def main():
     standard_std = jnp.std(standard_samples, axis=0)
 
     print(f"   FSP uncertainty - Std range: [{fsp_std.min():.3f}, {fsp_std.max():.3f}]")
-    print(f"   Standard uncertainty - Std range: [{standard_std.min():.3f}, {standard_std.max():.3f}]")
+    print(
+        f"   Standard uncertainty - Std range: [{standard_std.min():.3f}, {standard_std.max():.3f}]"
+    )
 
     # Visualize results
     print("\n7. Creating comparison visualizations...")
@@ -301,12 +304,18 @@ def main():
     # Plot 1: Mean predictions
     ax = axes[0, 0]
     contour = ax.contourf(
-        xx, yy, mean_probs.reshape(xx.shape),
-        levels=20, cmap="RdBu_r", alpha=0.8
+        xx, yy, mean_probs.reshape(xx.shape), levels=20, cmap="RdBu_r", alpha=0.8
     )
     ax.scatter(X[:, 0], X[:, 1], c=y, cmap="RdBu_r", edgecolor="k", s=30, alpha=0.6)
-    ax.scatter(x_context[:, 0], x_context[:, 1], c="green", marker="x", s=100,
-               label="Context points", linewidths=2)
+    ax.scatter(
+        x_context[:, 0],
+        x_context[:, 1],
+        c="green",
+        marker="x",
+        s=100,
+        label="Context points",
+        linewidths=2,
+    )
     ax.set_title("Mean Predictions (Both Methods)", fontsize=12, fontweight="bold")
     ax.set_xlabel("x₁")
     ax.set_ylabel("x₂")
@@ -316,11 +325,14 @@ def main():
     # Plot 2: FSP uncertainty
     ax = axes[0, 1]
     contour = ax.contourf(
-        xx, yy, fsp_std.reshape(xx.shape),
-        levels=20, cmap="viridis", alpha=0.8
+        xx, yy, fsp_std.reshape(xx.shape), levels=20, cmap="viridis", alpha=0.8
     )
     ax.scatter(X[:, 0], X[:, 1], c=y, cmap="RdBu_r", edgecolor="k", s=30, alpha=0.6)
-    ax.set_title(f"FSP Laplace Uncertainty (rank={posterior.rank})", fontsize=12, fontweight="bold")
+    ax.set_title(
+        f"FSP Laplace Uncertainty (rank={posterior.rank})",
+        fontsize=12,
+        fontweight="bold",
+    )
     ax.set_xlabel("x₁")
     ax.set_ylabel("x₂")
     plt.colorbar(contour, ax=ax, label="Std")
@@ -329,8 +341,7 @@ def main():
     ax = axes[0, 2]
     fsp_confidence = 1 - 2 * fsp_std
     contour = ax.contourf(
-        xx, yy, fsp_confidence.reshape(xx.shape),
-        levels=20, cmap="plasma", alpha=0.8
+        xx, yy, fsp_confidence.reshape(xx.shape), levels=20, cmap="plasma", alpha=0.8
     )
     ax.scatter(X[:, 0], X[:, 1], c=y, cmap="RdBu_r", edgecolor="k", s=30, alpha=0.6)
     ax.set_title("FSP Laplace Confidence", fontsize=12, fontweight="bold")
@@ -342,8 +353,7 @@ def main():
     # Plot 4: Placeholder (using mean predictions again)
     ax = axes[1, 0]
     contour = ax.contourf(
-        xx, yy, mean_probs.reshape(xx.shape),
-        levels=20, cmap="RdBu_r", alpha=0.8
+        xx, yy, mean_probs.reshape(xx.shape), levels=20, cmap="RdBu_r", alpha=0.8
     )
     ax.scatter(X[:, 0], X[:, 1], c=y, cmap="RdBu_r", edgecolor="k", s=30, alpha=0.6)
     ax.set_title("Mean Predictions (Both Methods)", fontsize=12, fontweight="bold")
@@ -354,11 +364,14 @@ def main():
     # Plot 5: Standard Laplace uncertainty
     ax = axes[1, 1]
     contour = ax.contourf(
-        xx, yy, standard_std.reshape(xx.shape),
-        levels=20, cmap="viridis", alpha=0.8
+        xx, yy, standard_std.reshape(xx.shape), levels=20, cmap="viridis", alpha=0.8
     )
     ax.scatter(X[:, 0], X[:, 1], c=y, cmap="RdBu_r", edgecolor="k", s=30, alpha=0.6)
-    ax.set_title(f"Standard Laplace Uncertainty (rank={curv_estimate.U.shape[1]})", fontsize=12, fontweight="bold")
+    ax.set_title(
+        f"Standard Laplace Uncertainty (rank={curv_estimate.U.shape[1]})",
+        fontsize=12,
+        fontweight="bold",
+    )
     ax.set_xlabel("x₁")
     ax.set_ylabel("x₂")
     plt.colorbar(contour, ax=ax, label="Std")
@@ -367,8 +380,12 @@ def main():
     ax = axes[1, 2]
     standard_confidence = 1 - 2 * standard_std
     contour = ax.contourf(
-        xx, yy, standard_confidence.reshape(xx.shape),
-        levels=20, cmap="plasma", alpha=0.8
+        xx,
+        yy,
+        standard_confidence.reshape(xx.shape),
+        levels=20,
+        cmap="plasma",
+        alpha=0.8,
     )
     ax.scatter(X[:, 0], X[:, 1], c=y, cmap="RdBu_r", edgecolor="k", s=30, alpha=0.6)
     ax.set_title("Standard Laplace Confidence", fontsize=12, fontweight="bold")
@@ -377,7 +394,8 @@ def main():
     plt.colorbar(contour, ax=ax, label="Confidence")
 
     plt.tight_layout()
-    plt.savefig("two_moons_comparison.png", dpi=150, bbox_inches="tight")
+    # plt.savefig("two_moons_comparison.png", dpi=150, bbox_inches="tight")
+    plt.show()
     print("   Saved comparison to 'two_moons_comparison.png'")
 
     # Compute and display quantitative comparison
