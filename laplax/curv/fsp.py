@@ -349,46 +349,6 @@ def _lanczos_none_structure(
     return lanczos_invert_sqrt(kernel, initial_vector, **kwargs)
 
 
-def _kronecker_product(factors: list) -> jnp.ndarray:
-    """Compute Kronecker product of a list of matrices.
-
-    Parameters
-    ----------
-    factors : list
-        List of matrices to compute Kronecker product
-
-    Returns
-    -------
-    jnp.ndarray
-        Kronecker product of all factors
-    """
-    result = factors[0]
-    for factor in factors[1:]:
-        result = jnp.kron(result, factor)
-    return result
-
-
-def _compute_kronecker_diagonal(factors: list[jnp.ndarray]) -> jnp.ndarray:
-    """Compute diagonal of Kronecker product efficiently.
-
-    Parameters
-    ----------
-    factors : list[jnp.ndarray]
-        List of matrices in Kronecker product
-
-    Returns
-    -------
-    jnp.ndarray
-        Diagonal of Kronecker product
-    """
-    # For Kronecker product A ⊗ B, diag(A ⊗ B) = diag(A) ⊗ diag(B)
-    diagonals = [jnp.diag(factor) for factor in factors]
-    result = diagonals[0]
-    for diag in diagonals[1:]:
-        result = jnp.kron(result, diag)
-    return result
-
-
 def _compute_none_diagonal(matrix: jnp.ndarray) -> jnp.ndarray:
     """Compute diagonal of unstructured matrix.
 
@@ -483,7 +443,8 @@ def create_fsp_posterior_kronecker(
     # Combine all Kronecker factors (spatial + function)
     all_factors = spatial_lanczos_results + function_lanczos_results
     all_mvs = [make_mv(factor) for factor in all_factors]
-    all_layouts = [factor.shape[0] for factor in all_factors]
+    # Use column dimension (shape[1]) since MVP input size = number of columns
+    all_layouts = [factor.shape[1] for factor in all_factors]
 
     # Create efficient Kronecker MVP (lazy, no intermediate densification)
     k_inv_sqrt_mv = util_mv.kronecker_product_factors(all_mvs, all_layouts)
