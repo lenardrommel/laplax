@@ -134,81 +134,76 @@ def train_mlp_fsp(
     x_train,
     y_train,
     x_context,
+    prior_mean,
     prior_cov_kernel,
     num_epochs=1000,
     learning_rate=0.01,
 ):
-    """Train MLP with FSP objective (NLL + regularization)."""
-    # Create separate optimizers for model and noise scale
-    model_optimizer = nnx.Optimizer(model, optax.adam(learning_rate), wrt=nnx.Param)
-    noise_optimizer = nnx.Optimizer(
-        noise_scale, optax.adam(learning_rate), wrt=nnx.Param
+    """Train MLP with FSP objective using create_fsp_objective."""
+    # Split model for laplax
+    model_fn, params = split_model(model)
+
+    # Create FSP objective using laplax.util.objective
+    dataset_size = x_train.shape[0]
+    fsp_objective = create_fsp_objective(
+        model_fn=model_fn,
+        dataset_size=dataset_size,
+        prior_mean=prior_mean,
+        prior_cov_kernel=prior_cov_kernel,
     )
 
-    update_sig = inspect.signature(model_optimizer.update)
-    needs_model_arg = len(update_sig.parameters) > 1
+    # Prepare data in expected format
+    data = {"input": x_train, "target": y_train}
+    context_points = {"context": x_context, "grid": x_context}
 
-    # Compute prior covariance matrix once with jitter for stability
-    K_c_c = prior_cov_kernel(x_context, x_context)
-    K_c_c = K_c_c + 1e-5 * jnp.eye(K_c_c.shape[0])  # Add jitter for numerical stability
-    prior_mean = jnp.zeros(x_context.shape[0])
-    dataset_size = x_train.shape[0]
+    # Create optimizers for params and noise
+    optimizer = optax.adam(learning_rate)
+    params_opt_state = optimizer.init(params)
+    noise_opt_state = optimizer.init(noise_scale.log_scale.value)
 
-    def fsp_loss_fn(model, noise_scale):
-        """FSP objective: NLL + RKHS regularization."""
-        # NLL term: -log p(y | f(x), sigma)
-        preds = jax.vmap(model)(x_train)
-        if preds.ndim > 1:
-            preds = preds.squeeze(-1)
-        scale = noise_scale.scale
-        nll = -jax.scipy.stats.norm.logpdf(
-            y_train.squeeze(), loc=preds, scale=scale
-        ).mean()
-        nll = nll * dataset_size
+    @jax.jit
+    def train_step(params, noise_log_scale, params_opt_state, noise_opt_state):
+        """Single training step - JIT compiled for speed."""
 
-        # Regularization term: 1/2 (f(c) - m)^T K^{-1} (f(c) - m)
-        f_c_raw = jax.vmap(model)(x_context)
-        if f_c_raw.ndim > 1:
-            f_c_raw = f_c_raw.squeeze(-1)
-        f_c = f_c_raw - prior_mean
-        left = jax.scipy.linalg.solve(K_c_c, f_c, assume_a="sym")
-        reg = 0.5 * jnp.dot(f_c, left)
+        def loss_fn(params, noise_log_scale):
+            noise_val = jnp.exp(noise_log_scale)
+            return fsp_objective(data, context_points, params, scale=noise_val)
 
-        return nll + reg
+        # Compute gradients w.r.t. both params and noise
+        loss, grads = jax.value_and_grad(loss_fn, argnums=(0, 1))(
+            params, noise_log_scale
+        )
+        params_grads, noise_grads = grads
 
-    if needs_model_arg:
+        # Update params
+        params_updates, params_opt_state = optimizer.update(
+            params_grads, params_opt_state
+        )
+        params = optax.apply_updates(params, params_updates)
 
-        @nnx.jit
-        def train_step(model, noise_scale, model_opt, noise_opt):
-            """Single training step."""
-            loss, grads = nnx.value_and_grad(fsp_loss_fn, argnums=(0, 1))(
-                model, noise_scale
-            )
-            model_grads, noise_grads = grads
-            model_opt.update(model, model_grads)
-            noise_opt.update(noise_scale, noise_grads)
-            return loss
+        # Update noise
+        noise_updates, noise_opt_state = optimizer.update(noise_grads, noise_opt_state)
+        noise_log_scale = optax.apply_updates(noise_log_scale, noise_updates)
 
-    else:
+        return params, noise_log_scale, params_opt_state, noise_opt_state, loss
 
-        @nnx.jit
-        def train_step(model, noise_scale, model_opt, noise_opt):
-            """Single training step."""
-            loss, grads = nnx.value_and_grad(fsp_loss_fn, argnums=(0, 1))(
-                model, noise_scale
-            )
-            model_grads, noise_grads = grads
-            model_opt.update(model_grads)
-            noise_opt.update(noise_grads)
-            return loss
-
+    # Training loop
+    noise_log_scale = noise_scale.log_scale.value
     for epoch in range(num_epochs):
-        loss = train_step(model, noise_scale, model_optimizer, noise_optimizer)
+        params, noise_log_scale, params_opt_state, noise_opt_state, loss = train_step(
+            params, noise_log_scale, params_opt_state, noise_opt_state
+        )
+
         if (epoch + 1) % 200 == 0:
-            noise_val = noise_scale.scale
+            noise_val = jnp.exp(noise_log_scale)
             print(
                 f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss:.4f}, Noise: {noise_val:.4f}"
             )
+
+    # Update model and noise_scale with trained values
+    graphdef, _ = nnx.split(model, nnx.Param)
+    model = nnx.merge(graphdef, params)
+    noise_scale.log_scale.value = noise_log_scale
 
     return model, noise_scale
 
@@ -265,9 +260,13 @@ def main():
 
     def prior_cov_kernel(x1, x2):
         """Prior covariance kernel for FSP objective."""
-        return periodic_kernel(
+        K = periodic_kernel(
             x1, x2, lengthscale=lengthscale, variance=variance, period=period
         )
+        # Add jitter for numerical stability when computing K(context, context)
+        # The objective function will handle this internally
+        K = K + 1e-5 * jnp.eye(K.shape[0])
+        return K
 
     # Train model with FSP objective
     print("\n2. Training MLP with FSP objective...")
@@ -275,12 +274,16 @@ def main():
     model = MLP(hidden_dims=[50, 50], rngs=nnx.Rngs(int(model_key[0])))
     noise_scale = NoiseScale(initial_value=0.1)
 
+    # Prior mean for FSP (zero for now)
+    prior_mean = jnp.zeros(x_context.shape[0])
+
     model, noise_scale = train_mlp_fsp(
         model,
         noise_scale,
         X_train,
         y_train,
         x_context,
+        prior_mean,
         prior_cov_kernel,
         num_epochs=1000,
         learning_rate=0.01,
