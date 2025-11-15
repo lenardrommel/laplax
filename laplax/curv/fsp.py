@@ -31,7 +31,7 @@ from laplax.util.flatten import (
     create_partial_pytree_flattener,
     create_pytree_flattener,
 )
-from laplax.util.mv import LazyKronecker
+from laplax.util import mv as util_mv
 
 KernelStructure = CovarianceStructure
 
@@ -475,16 +475,22 @@ def create_fsp_posterior_kronecker(
         function_kernels, initial_vectors_function, max_iters=None
     )
 
-    # Use LazyKronecker to avoid creating intermediate dense matrices
-    # Combine spatial and function factors
-    k_spatial_lazy = LazyKronecker(*spatial_lanczos_results)
-    k_function_lazy = LazyKronecker(*function_lanczos_results)
+    # Use kronecker_product_factors to avoid creating intermediate dense matrices
+    # Convert Lanczos results (dense matrices) to MVP functions
+    def make_mv(matrix):
+        return lambda v: matrix @ v
 
-    # Combine into full Kronecker product (still lazy)
-    k_inv_sqrt_lazy = k_spatial_lazy @ k_function_lazy
+    # Combine all Kronecker factors (spatial + function)
+    all_factors = spatial_lanczos_results + function_lanczos_results
+    all_mvs = [make_mv(factor) for factor in all_factors]
+    all_layouts = [factor.shape[0] for factor in all_factors]
 
-    # Only densify when absolutely needed for column iteration
-    k_inv_sqrt = k_inv_sqrt_lazy.todense()
+    # Create efficient Kronecker MVP (lazy, no intermediate densification)
+    k_inv_sqrt_mv = util_mv.kronecker_product_factors(all_mvs, all_layouts)
+
+    # Materialize to dense only when needed (using efficient to_dense)
+    total_size = int(jnp.prod(jnp.array(all_layouts)))
+    k_inv_sqrt = util_mv.to_dense(k_inv_sqrt_mv, layout=total_size)
 
     n_function = x_context.shape[0]
     rank = k_inv_sqrt.shape[-1]
