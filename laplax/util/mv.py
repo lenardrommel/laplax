@@ -7,7 +7,6 @@ from functools import singledispatch
 
 import jax
 from jax import numpy as jnp
-from torch import layout
 
 from laplax import util
 from laplax.types import Array, Kwargs, Layout, PyTree
@@ -140,10 +139,15 @@ def kronecker(
     mv_b: Callable,
     layout_a: Layout,
     layout_b: Layout,
+    *,
+    mode: str = "vmap",
+    batch_size: int | None = None,
 ) -> Callable:
-    """Create a memory-efficient Kronecker product matrix-vector product function.
+    """Create a Kronecker product MVP with selectable mapping mode.
 
-    Uses the identity: (A ⊗ B) vec(X) = vec(B X A^T)
+    Uses (A ⊗ B) vec(X) = vec(B X A^T).
+    - mode="vmap": vectorized mapping (fast, higher memory).
+    - mode="map": sequential mapping via lax.map (lower memory).
     """
     if isinstance(layout_a, int) and isinstance(layout_b, int):
         size_a = layout_a
@@ -152,19 +156,31 @@ def kronecker(
         size_a = get_size(layout_a)
         size_b = get_size(layout_b)
 
-    def kronecker_mv(v):
-        # Reshape: vec(X) -> X with shape (size_b, size_a)
-        X = v.reshape(size_a, size_b).T
+    if mode not in {"vmap", "map"}:
+        msg = "mode must be 'vmap' or 'map'"
+        raise ValueError(msg)
 
-        # Y = B @ X: apply mv_b to each column
-        mv_b_vmap = jax.vmap(mv_b, in_axes=1, out_axes=1)
-        Y = mv_b_vmap(X)
+    if mode == "vmap":
+        def kronecker_mv(v):
+            X = v.reshape(size_a, size_b).T
+            mv_b_vmap = jax.vmap(mv_b, in_axes=1, out_axes=1)
+            Y = mv_b_vmap(X)
+            mv_a_vmap = jax.vmap(mv_a, in_axes=0, out_axes=0)
+            Z = mv_a_vmap(Y)
+            return Z.T.reshape(-1)
+    else:  # mode == "map"
+        def kronecker_mv(v):
+            X = v.reshape(size_a, size_b).T
 
-        # Z = Y @ A^T: apply mv_a to each row of Y
-        mv_a_vmap = jax.vmap(mv_a, in_axes=0, out_axes=0)
-        Z = mv_a_vmap(Y)
+            def apply_b_to_column(col):
+                return mv_b(col)
 
-        # Vectorize: Z -> vec(Z)
-        return Z.T.reshape(-1)
+            Y = jax.lax.map(apply_b_to_column, X.T, batch_size=batch_size).T
+
+            def apply_a_to_row(row):
+                return mv_a(row)
+
+            Z = jax.lax.map(apply_a_to_row, Y, batch_size=batch_size)
+            return Z.T.reshape(-1)
 
     return kronecker_mv

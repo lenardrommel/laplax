@@ -116,7 +116,8 @@ def test_diagonal_and_to_dense_pytree_mvp(n1, n2):
 
 
 @pytest.mark.parametrize(("na", "nb"), [(2, 3), (3, 2), (1, 4)])
-def test_kronecker_dense_equivalence(na, nb):
+@pytest.mark.parametrize("mode", ["vmap", "map"])
+def test_kronecker_dense_equivalence(na, nb, mode):
     key = jax.random.PRNGKey(2025)
     kA, kB = jax.random.split(key)
 
@@ -129,7 +130,7 @@ def test_kronecker_dense_equivalence(na, nb):
     def mv_b(x):
         return B @ x
 
-    mv_kron = kronecker(mv_a, mv_b, layout_a=na, layout_b=nb)
+    mv_kron = kronecker(mv_a, mv_b, layout_a=na, layout_b=nb, mode=mode)
 
     dense_kron_mv = to_dense(mv_kron, layout=na * nb)
     dense_kron_ref = jnp.kron(A, B)
@@ -138,7 +139,8 @@ def test_kronecker_dense_equivalence(na, nb):
 
 
 @pytest.mark.parametrize(("na", "nb"), [(2, 2), (2, 3)])
-def test_kronecker_apply_vector(na, nb):
+@pytest.mark.parametrize("mode", ["vmap", "map"])
+def test_kronecker_apply_vector(na, nb, mode):
     key = jax.random.PRNGKey(7)
     kA, kB, kv = jax.random.split(key, 3)
 
@@ -152,7 +154,7 @@ def test_kronecker_apply_vector(na, nb):
     def mv_b(x):
         return B @ x
 
-    mv_kron = kronecker(mv_a, mv_b, layout_a=na, layout_b=nb)
+    mv_kron = kronecker(mv_a, mv_b, layout_a=na, layout_b=nb, mode=mode)
 
     out_mv = mv_kron(v)
     out_ref = jnp.kron(A, B) @ v
