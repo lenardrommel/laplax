@@ -25,7 +25,7 @@ jax.config.update("jax_enable_x64", True)
 # ==============================================================================
 
 
-def generate_truncated_sine(key, n_samples=100, feature_dim=1, noise_std=0.1):
+def generate_truncated_sine(key, n_samples=100, feature_dim=1, noise_std=0.01):
     """Generate truncated sine data.
 
     Generates data from a sine function on [-1, -0.5] U [0.5, 1],
@@ -213,7 +213,7 @@ def train_mlp_fsp(
 # ==============================================================================
 
 
-def periodic_kernel(x1, x2, lengthscale=1.0, variance=0.10, period=1.0):
+def periodic_kernel(x1, x2, lengthscale=6.0, variance=1.0, period=2.0):
     """Periodic kernel function for periodic data like sine waves.
 
     k(x1, x2) = variance * exp(-2 * sin^2(π |x1 - x2| / period) / lengthscale^2)
@@ -254,9 +254,9 @@ def main():
     # Set up context points and kernel for FSP training
     x_context = X_train  # Use all training data as context
 
-    lengthscale = 0.5
-    variance = 0.10
-    period = 2.0 * jnp.pi  # Match sine wave period
+    lengthscale = 1.0
+    variance = 1.0
+    period = 1.01
 
     def prior_cov_kernel(x1, x2):
         """Prior covariance kernel for FSP objective."""
@@ -324,6 +324,8 @@ def main():
         prior_variance=prior_variance,
         n_chunks=2,
         max_iter=50,
+        # Align GGN scaling with Gaussian NLL using the learned noise.
+        regression_noise_scale=float(noise_scale.scale),
     )
 
     print(f"   FSP posterior rank: {posterior.rank}")
@@ -408,6 +410,7 @@ def main():
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
+    plt.show()
     plt.savefig("fsp_sin_regression.png", dpi=150, bbox_inches="tight")
     print("   Saved visualization to 'fsp_sin_regression.png'")
 
