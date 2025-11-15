@@ -21,6 +21,7 @@ from laplax.api import GGN
 from laplax.curv import KernelStructure, create_fsp_posterior, estimate_curvature, set_posterior_fn
 from laplax.enums import CurvApprox, LossFn
 from laplax.util.flatten import create_pytree_flattener
+from laplax.util.objective import create_loss_reg
 
 
 # ==============================================================================
@@ -46,7 +47,7 @@ class MLP(nnx.Module):
         for i in range(self.n_hidden):
             x = jnp.tanh(getattr(self, f"hidden_{i}")(x))
         x = self.output_layer(x)
-        return x.squeeze()
+        return x  # Keep shape (1,) for FSP compatibility
 
 
 def split_model(model: MLP):
@@ -66,7 +67,7 @@ def split_model(model: MLP):
 
 
 def binary_cross_entropy_loss(model, x_batch, y_batch):
-    logits = jax.vmap(model)(x_batch)
+    logits = jax.vmap(model)(x_batch).squeeze(-1)  # Squeeze to match y_batch shape
     return -jnp.mean(
         jax.nn.log_sigmoid(logits) * y_batch
         + jax.nn.log_sigmoid(-logits) * (1 - y_batch)
@@ -78,65 +79,68 @@ def train_mlp_fsp(
     x_train,
     y_train,
     x_context,
+    prior_mean,
     prior_cov_kernel,
     num_epochs=100,
     learning_rate=0.1,
     reg_weight=1.0,
 ):
-    """Train MLP with FSP objective (cross-entropy + regularization)."""
-    optimizer = nnx.Optimizer(model, optax.adam(learning_rate), wrt=nnx.Param)
+    """Train MLP with FSP objective using laplax.util.objective."""
+    # Split model for laplax
+    model_fn, params = split_model(model)
 
-    # Detect Flax version to use correct optimizer API
-    import inspect
+    # Create regularization loss using laplax.util.objective
+    loss_reg = create_loss_reg(
+        model_fn=model_fn,
+        prior_mean=prior_mean,
+        prior_cov_kernel=prior_cov_kernel,
+        has_batch_dim=True,  # Use dict format for context points
+    )
 
-    update_sig = inspect.signature(optimizer.update)
-    needs_model_arg = len(update_sig.parameters) > 1
-
-    # Compute prior covariance matrix once with jitter for stability
-    K_c_c = prior_cov_kernel(x_context, x_context)
-    K_c_c = K_c_c + 1e-5 * jnp.eye(K_c_c.shape[0])  # Add jitter for numerical stability
-    prior_mean = jnp.zeros(x_context.shape[0])
+    # Prepare context points in expected format
+    context_points = {"context": x_context, "grid": x_context}
     dataset_size = x_train.shape[0]
 
-    def fsp_loss_fn(model):
-        """FSP objective: cross-entropy + RKHS regularization."""
-        # Cross-entropy term
-        logits = jax.vmap(model)(x_train)
-        ce_loss = -jnp.mean(
-            jax.nn.log_sigmoid(logits) * y_train
-            + jax.nn.log_sigmoid(-logits) * (1 - y_train)
-        )
-        ce_loss = ce_loss * dataset_size
+    # Create optimizer
+    optimizer = optax.adam(learning_rate)
+    opt_state = optimizer.init(params)
 
-        # Regularization term: 1/2 (f(c) - m)^T K^{-1} (f(c) - m)
-        # For classification, f(c) are the logits at context points
-        f_c = jax.vmap(model)(x_context) - prior_mean
-        left = jax.scipy.linalg.solve(K_c_c, f_c, assume_a="sym")
-        reg = 0.5 * jnp.dot(f_c, left)
+    @jax.jit
+    def train_step(params, opt_state):
+        """Single training step - JIT compiled for speed."""
 
-        return ce_loss + reg_weight * reg
+        def loss_fn(params):
+            # Cross-entropy term
+            logits = jax.vmap(model_fn, in_axes=(0, None))(x_train, params).squeeze(-1)
+            ce_loss = -jnp.mean(
+                jax.nn.log_sigmoid(logits) * y_train + jax.nn.log_sigmoid(-logits) * (1 - y_train)
+            )
+            ce_loss = ce_loss * dataset_size
 
-    if needs_model_arg:
+            # Regularization term using laplax utility
+            reg = loss_reg(context_points, params)
 
-        @nnx.jit
-        def train_step(model, optimizer):
-            """Single training step."""
-            loss, grads = nnx.value_and_grad(fsp_loss_fn)(model)
-            optimizer.update(model, grads)
-            return loss
-    else:
+            return ce_loss + reg_weight * reg
 
-        @nnx.jit
-        def train_step(model, optimizer):
-            """Single training step."""
-            loss, grads = nnx.value_and_grad(fsp_loss_fn)(model)
-            optimizer.update(grads)
-            return loss
+        # Compute gradients
+        loss, grads = jax.value_and_grad(loss_fn)(params)
 
+        # Update params
+        updates, opt_state = optimizer.update(grads, opt_state)
+        params = optax.apply_updates(params, updates)
+
+        return params, opt_state, loss
+
+    # Training loop
     for epoch in range(num_epochs):
-        loss = train_step(model, optimizer)
+        params, opt_state, loss = train_step(params, opt_state)
+
         if (epoch + 1) % 20 == 0:
             print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss:.4f}")
+
+    # Update model with trained values
+    graphdef, _ = nnx.split(model, nnx.Param)
+    model = nnx.merge(graphdef, params)
 
     return model
 
@@ -196,7 +200,13 @@ def main():
 
     def prior_cov_kernel(x1, x2):
         """Prior covariance kernel for FSP objective."""
-        return rbf_kernel(x1, x2, lengthscale=lengthscale, variance=variance)
+        K = rbf_kernel(x1, x2, lengthscale=lengthscale, variance=variance)
+        # Add jitter for numerical stability
+        K = K + 1e-5 * jnp.eye(K.shape[0])
+        return K
+
+    # Prior mean for FSP (zero for now)
+    prior_mean = jnp.zeros(x_context.shape[0])
 
     # ------------------------------------------------------------------
     # 3) Train model with FSP objective
@@ -208,13 +218,14 @@ def main():
         X_jax,
         y_jax,
         x_context,
+        prior_mean,
         prior_cov_kernel,
         num_epochs=100,
         learning_rate=0.1,
         reg_weight=0.01,
     )
 
-    logits = jax.vmap(model)(X_jax)
+    logits = jax.vmap(model)(X_jax).squeeze(-1)
     predictions = (jax.nn.sigmoid(logits) > 0.5).astype(jnp.float32)
     train_acc = jnp.mean(predictions == y_jax)
     print(f"   Training accuracy: {float(train_acc):.2%}")
@@ -258,7 +269,7 @@ def main():
 
     def model_fn_flat(inp, flat_params):
         params_pytree = unflatten_fn(flat_params)
-        logit = model_fn(inp, params_pytree)
+        logit = model_fn(inp, params_pytree).squeeze()  # Squeeze to scalar
         return jnp.stack([jnp.zeros_like(logit), logit], axis=-1)
 
     data = {"input": X_jax, "target": y_jax.astype(jnp.int32)}
@@ -301,7 +312,7 @@ def main():
     grid_jax = jnp.array(grid_points)
 
     # Mean prediction
-    mean_logits = jax.vmap(model)(grid_jax)
+    mean_logits = jax.vmap(model)(grid_jax).squeeze(-1)
     mean_probs = jax.nn.sigmoid(mean_logits)
 
     # FSP sampling
