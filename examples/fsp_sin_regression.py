@@ -15,8 +15,8 @@ from flax import nnx
 from laplax.curv import KernelStructure, create_fsp_posterior
 from laplax.util.objective import create_fsp_objective
 
-# Note: jax_enable_x64 disabled to avoid dtype mismatches
-# jax.config.update("jax_enable_x64", True)
+# Enable 64-bit precision for better numerical stability
+jax.config.update("jax_enable_x64", True)
 
 
 # ==============================================================================
@@ -65,22 +65,23 @@ def generate_truncated_sine(key, n_samples=100, feature_dim=1, noise_std=0.1):
 class MLP(nnx.Module):
     """Simple MLP for regression using Flax NNX."""
 
-    def __init__(self, hidden_dims: list[int], *, rngs: nnx.Rngs):
+    def __init__(self, hidden_dims: list[int], *, rngs: nnx.Rngs, dtype=jnp.float64):
         """Initialize MLP.
 
         Args:
             hidden_dims: List of hidden layer dimensions
             rngs: Random number generator
+            dtype: Data type for parameters
         """
         in_dim = 1  # 1D input
 
         # Build layers - use attributes to avoid tuple storage issue
         for i, hidden_dim in enumerate(hidden_dims):
-            setattr(self, f"hidden_{i}", nnx.Linear(in_dim, hidden_dim, rngs=rngs))
+            setattr(self, f"hidden_{i}", nnx.Linear(in_dim, hidden_dim, rngs=rngs, dtype=dtype))
             in_dim = hidden_dim
 
         # Output layer (single value for regression)
-        self.output_layer = nnx.Linear(in_dim, 1, rngs=rngs)
+        self.output_layer = nnx.Linear(in_dim, 1, rngs=rngs, dtype=dtype)
         self.n_hidden = len(hidden_dims)
 
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -202,24 +203,23 @@ def train_mlp_fsp(
 
 
 # ==============================================================================
-# FSP Posterior with Periodic Kernel
+# FSP Posterior with RBF Kernel
 # ==============================================================================
 
 
-def periodic_kernel(x1, x2, lengthscale=1.0, variance=1.0, period=1.0):
-    """Periodic kernel function for periodic data like sine waves.
+def rbf_kernel(x1, x2, lengthscale=1.0, variance=1.0):
+    """RBF (Gaussian) kernel function.
 
-    k(x1, x2) = variance * exp(-2 * sin^2(π |x1 - x2| / period) / lengthscale^2)
+    k(x1, x2) = variance * exp(-||x1 - x2||^2 / (2 * lengthscale^2))
     """
-    # Compute pairwise distances, sum over feature dimensions
-    dist = jnp.sqrt(jnp.sum((x1[:, None, :] - x2[None, :, :]) ** 2, axis=-1))
-    sin_term = jnp.sin(jnp.pi * dist / period)
-    return variance * jnp.exp(-2 * sin_term**2 / lengthscale**2)
+    # Compute pairwise squared distances
+    sq_dist = jnp.sum((x1[:, None, :] - x2[None, :, :]) ** 2, axis=-1)
+    return variance * jnp.exp(-sq_dist / (2 * lengthscale**2))
 
 
-def create_kernel_matrix(x_context, lengthscale=1.0, variance=1.0, period=1.0):
-    """Create periodic kernel matrix."""
-    K = periodic_kernel(x_context, x_context, lengthscale, variance, period)
+def create_kernel_matrix(x_context, lengthscale=1.0, variance=1.0):
+    """Create RBF kernel matrix."""
+    K = rbf_kernel(x_context, x_context, lengthscale, variance)
     # Add jitter for numerical stability
     K = K + 1e-6 * jnp.eye(K.shape[0])
     return K
@@ -248,14 +248,14 @@ def main():
     # Set up context points and kernel for FSP training
     x_context = X_train  # Use all training data as context
 
-    # Periodic kernel hyperparameters (for sine wave with period ~2π)
-    lengthscale = 0.5
+    # RBF kernel hyperparameters
+    # For truncated data on [-1, 1], use moderate lengthscale
+    lengthscale = 0.3
     variance = 1.0
-    period = 2.0 * jnp.pi  # Match sine wave period
 
     def prior_cov_kernel(x1, x2):
         """Prior covariance kernel for FSP objective."""
-        K = periodic_kernel(x1, x2, lengthscale=lengthscale, variance=variance, period=period)
+        K = rbf_kernel(x1, x2, lengthscale=lengthscale, variance=variance)
         # Add jitter for numerical stability when computing K(context, context)
         # The objective function will handle this internally
         K = K + 1e-5 * jnp.eye(K.shape[0])
@@ -290,13 +290,13 @@ def main():
     def kernel_fn(v):
         """Kernel matrix-vector product."""
         K = create_kernel_matrix(
-            x_context, lengthscale=lengthscale, variance=variance, period=period
+            x_context, lengthscale=lengthscale, variance=variance
         )
         return K @ v
 
     # Compute prior variance
     prior_cov = create_kernel_matrix(
-        x_context, lengthscale=lengthscale, variance=variance, period=period
+        x_context, lengthscale=lengthscale, variance=variance
     )
     prior_variance = jnp.diag(prior_cov)
 
