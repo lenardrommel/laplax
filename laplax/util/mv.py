@@ -144,7 +144,6 @@ def kronecker(
     batch_size: int | None = None,
 ) -> Callable:
     """Create a Kronecker product MVP with selectable mapping mode.
-
     Uses (A ⊗ B) vec(X) = vec(B X A^T).
     - mode="vmap": vectorized mapping (fast, higher memory).
     - mode="map": sequential mapping via lax.map (lower memory).
@@ -161,6 +160,7 @@ def kronecker(
         raise ValueError(msg)
 
     if mode == "vmap":
+
         def kronecker_mv(v):
             X = v.reshape(size_a, size_b).T
             mv_b_vmap = jax.vmap(mv_b, in_axes=1, out_axes=1)
@@ -168,7 +168,9 @@ def kronecker(
             mv_a_vmap = jax.vmap(mv_a, in_axes=0, out_axes=0)
             Z = mv_a_vmap(Y)
             return Z.T.reshape(-1)
+
     else:  # mode == "map"
+
         def kronecker_mv(v):
             X = v.reshape(size_a, size_b).T
 
