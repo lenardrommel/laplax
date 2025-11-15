@@ -369,6 +369,7 @@ def compute_ggn_quadratic_form(
     x_context: InputArray,
     U: Params,  # pytree with multiple "columns"
     is_classification: bool = False,
+    regression_noise_scale: float | None = None,
 ) -> Array:
     """Compute U^T @ GGN @ U where U contains multiple vectors.
 
@@ -408,5 +409,12 @@ def compute_ggn_quadratic_form(
         return flatten_single(ggn_u_i)
 
     GGN_U = jax.vmap(compute_ggn_column, in_axes=1, out_axes=1)(U_flat)
+
+    # For regression, align curvature scaling with Gaussian NLL if noise scale is known.
+    # MSE Hessian is 2*I, whereas Gaussian NLL Hessian is (1/sigma^2)*I per datum.
+    # Summed over data, the ratio is 1 / (2*sigma^2).
+    if not is_classification and regression_noise_scale is not None:
+        factor = 1.0 / (2.0 * (regression_noise_scale**2))
+        GGN_U = factor * GGN_U
 
     return U_flat.T @ GGN_U

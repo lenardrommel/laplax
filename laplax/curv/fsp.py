@@ -3,6 +3,7 @@
 """FSP (Function-Space Prior) inference module with support for different kernel structures."""
 
 from functools import partial
+import math
 
 import jax
 import jax.numpy as jnp
@@ -419,6 +420,7 @@ def create_fsp_posterior_kronecker(
     spatial_max_iters: list[int] | None = None,
     is_classification: bool = False,
     chunk_mode: str = "scan",
+    regression_noise_scale: float | None = None,
     **kwargs,
 ) -> Posterior:
     """Create FSP posterior with Kronecker structured prior.
@@ -453,9 +455,19 @@ def create_fsp_posterior_kronecker(
     # Adjust chunk count to evenly divide number of functions
     n_functions = int(x_context.shape[0])
     n_chunks_eff = int(min(max(1, n_chunks), n_functions))
-    # TODO: improve this
-    while n_functions % n_chunks_eff != 0 and n_chunks_eff > 1:
-        n_chunks_eff -= 1
+    # Choose the largest divisor of n_functions not exceeding n_chunks_eff
+    if n_functions % n_chunks_eff != 0:
+        k_max = n_chunks_eff
+        best = 1
+        limit = math.isqrt(n_functions)
+        for d in range(1, limit + 1):
+            if n_functions % d == 0:
+                q = n_functions // d
+                if d <= k_max and d > best:
+                    best = d
+                if q <= k_max and q > best:
+                    best = q
+        n_chunks_eff = best
 
     dim = sum(x.size for x in jax.tree_util.tree_leaves(params))
 
@@ -508,6 +520,7 @@ def create_fsp_posterior_kronecker(
         x_context=x_context,
         U=u,
         is_classification=is_classification,
+        regression_noise_scale=regression_noise_scale,
     )
 
     # Compute U_A, D_A
@@ -563,6 +576,7 @@ def create_fsp_posterior_none(
     is_classification: bool = False,
     independent_outputs: bool = False,
     kernels_per_output: list[Callable] | None = None,
+    regression_noise_scale: float | None = None,
     **kwargs,
 ) -> Posterior:
     """Create FSP posterior with unstructured prior (full covariance Lanczos).
@@ -664,6 +678,7 @@ def create_fsp_posterior_none(
         x_context=x_context,
         U=u,  # Pass U here!
         is_classification=is_classification,
+        regression_noise_scale=regression_noise_scale,
     )
 
     # Compute U_A, D_A
@@ -723,6 +738,7 @@ def create_fsp_posterior(
     is_classification: bool = False,
     independent_outputs: bool = False,
     kernels_per_output: list[Callable] | None = None,
+    regression_noise_scale: float | None = None,
     **kwargs,
 ) -> Posterior:
     """Create FSP posterior with specified kernel structure.
@@ -783,6 +799,7 @@ def create_fsp_posterior(
             n_chunks=n_chunks,
             spatial_max_iters=spatial_max_iters,
             is_classification=is_classification,
+            regression_noise_scale=regression_noise_scale,
             **kwargs,
         )
 
@@ -804,6 +821,7 @@ def create_fsp_posterior(
             is_classification=is_classification,
             independent_outputs=independent_outputs,
             kernels_per_output=kernels_per_output,
+            regression_noise_scale=regression_noise_scale,
             **kwargs,
         )
 
