@@ -471,11 +471,15 @@ def create_fsp_posterior_kronecker(
         function_kernels, initial_vectors_function, max_iters=None
     )
 
-    # Combine Lanczos results using Kronecker product
-    k_spatial_inv_sqrt = _kronecker_product(spatial_lanczos_results)
-    k_function_inv_sqrt = _kronecker_product(function_lanczos_results)
+    # Combine ALL Lanczos results into a single Kronecker product
+    # This avoids creating large intermediate dense matrices
+    all_factors = spatial_lanczos_results + function_lanczos_results
 
-    k_inv_sqrt = jnp.kron(k_spatial_inv_sqrt, k_function_inv_sqrt)
+    # Compute the full Kronecker product in one go
+    # This is more memory-efficient than iteratively computing partial products
+    k_inv_sqrt = all_factors[0]
+    for factor in all_factors[1:]:
+        k_inv_sqrt = jnp.kron(k_inv_sqrt, factor)
 
     n_function = x_context.shape[0]
     rank = k_inv_sqrt.shape[-1]

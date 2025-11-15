@@ -131,3 +131,86 @@ def to_dense(mv: Callable, layout: Layout, **kwargs: Kwargs) -> Array:
         jnp.transpose,
         jax.lax.map(mv, identity, batch_size=kwargs.get("to_dense_batch_size")),
     )  # jax.lax.map shares along the first axis (rows instead of columns).
+
+
+@singledispatch
+def kronecker(
+    mv_a: Callable,
+    mv_b: Callable,
+    layout_a: Layout,
+    layout_b: Layout,
+) -> Callable:
+    """Create a memory-efficient Kronecker product matrix-vector product function.
+
+    Uses the identity: (A ⊗ B) vec(X) = vec(B X A^T) to avoid explicitly forming
+    the Kronecker product, which would require O(n^2 * m^2) memory.
+
+    Args:
+        mv_a: Matrix-vector product function for matrix A
+        mv_b: Matrix-vector product function for matrix B
+        layout_a: Layout specification for matrix A (int for size or PyTree)
+        layout_b: Layout specification for matrix B (int for size or PyTree)
+
+    Returns:
+        A callable that computes (A ⊗ B) @ v efficiently
+
+    Example:
+        >>> # For matrices A (n x n) and B (m x m), compute (A ⊗ B) @ v
+        >>> mv_kron = kronecker(mv_a, mv_b, n, m)
+        >>> result = mv_kron(v)  # v has length n*m
+    """
+    size_a = get_size(layout_a)
+    size_b = get_size(layout_b)
+
+    def kronecker_mv(v):
+        # Reshape: vec(X) -> X with shape (size_b, size_a)
+        X = v.reshape(size_a, size_b).T
+
+        # Y = B @ X: apply mv_b to each column
+        mv_b_vmap = jax.vmap(mv_b, in_axes=1, out_axes=1)
+        Y = mv_b_vmap(X)
+
+        # Z = Y @ A^T: apply mv_a to each row of Y
+        mv_a_vmap = jax.vmap(mv_a, in_axes=0, out_axes=0)
+        Z = mv_a_vmap(Y)
+
+        # Vectorize: Z -> vec(Z)
+        return Z.T.reshape(-1)
+
+    return kronecker_mv
+
+
+def kronecker_product_factors(factors_mv: list[Callable], factors_layout: list[Layout]) -> Callable:
+    """Create an efficient Kronecker product from multiple factors.
+
+    Computes (A_1 ⊗ A_2 ⊗ ... ⊗ A_n) @ v efficiently without forming the full product.
+
+    Args:
+        factors_mv: List of matrix-vector product functions, ordered from left to right
+        factors_layout: List of layout specifications for each factor
+
+    Returns:
+        A callable that computes the full Kronecker product matrix-vector product
+
+    Example:
+        >>> # For (A ⊗ B ⊗ C) @ v
+        >>> mv_kron = kronecker_product_factors([mv_a, mv_b, mv_c], [n, m, k])
+        >>> result = mv_kron(v)
+    """
+    if len(factors_mv) == 1:
+        return factors_mv[0]
+
+    if len(factors_mv) == 2:
+        return kronecker(factors_mv[0], factors_mv[1], factors_layout[0], factors_layout[1])
+
+    # For multiple factors, compose pairwise from right to left
+    # (A ⊗ B ⊗ C) = ((A ⊗ B) ⊗ C)
+    result_mv = factors_mv[-1]
+    result_layout = factors_layout[-1]
+
+    for i in range(len(factors_mv) - 2, -1, -1):
+        result_mv = kronecker(factors_mv[i], result_mv, factors_layout[i], result_layout)
+        # Update layout to reflect the Kronecker product size
+        result_layout = get_size(factors_layout[i]) * get_size(result_layout)
+
+    return result_mv
