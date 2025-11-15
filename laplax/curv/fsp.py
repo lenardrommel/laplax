@@ -383,6 +383,7 @@ def create_fsp_posterior_kronecker(
     is_classification: bool = False,
     chunk_mode: str = "scan",
     regression_noise_scale: float | None = None,
+    ggn_col_chunk_size: int = 64,
     **kwargs,
 ) -> Posterior:
     """Create FSP posterior with Kronecker structured prior.
@@ -488,6 +489,7 @@ def create_fsp_posterior_kronecker(
         U=u,
         is_classification=is_classification,
         regression_noise_scale=regression_noise_scale,
+        col_chunk_size=ggn_col_chunk_size,
     )
 
     # Compute U_A, D_A
@@ -545,6 +547,7 @@ def create_fsp_posterior_none(
     independent_outputs: bool = False,
     kernels_per_output: list[Callable] | None = None,
     regression_noise_scale: float | None = None,
+    ggn_col_chunk_size: int = 64,
     **kwargs,
 ) -> Posterior:
     """Create FSP posterior with unstructured prior (full covariance Lanczos).
@@ -647,6 +650,7 @@ def create_fsp_posterior_none(
         U=u,  # Pass U here!
         is_classification=is_classification,
         regression_noise_scale=regression_noise_scale,
+        col_chunk_size=ggn_col_chunk_size,
     )
 
     # Compute U_A, D_A
@@ -707,6 +711,7 @@ def create_fsp_posterior(
     independent_outputs: bool = False,
     kernels_per_output: list[Callable] | None = None,
     regression_noise_scale: float | None = None,
+    ggn_col_chunk_size: int = 64,
     **kwargs,
 ) -> Posterior:
     """Create FSP posterior with specified kernel structure.
@@ -768,6 +773,7 @@ def create_fsp_posterior(
             spatial_max_iters=spatial_max_iters,
             is_classification=is_classification,
             regression_noise_scale=regression_noise_scale,
+            ggn_col_chunk_size=ggn_col_chunk_size,
             **kwargs,
         )
 
@@ -790,6 +796,7 @@ def create_fsp_posterior(
             independent_outputs=independent_outputs,
             kernels_per_output=kernels_per_output,
             regression_noise_scale=regression_noise_scale,
+            ggn_col_chunk_size=ggn_col_chunk_size,
             **kwargs,
         )
 
