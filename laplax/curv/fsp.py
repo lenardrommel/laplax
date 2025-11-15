@@ -31,6 +31,7 @@ from laplax.util.flatten import (
     create_partial_pytree_flattener,
     create_pytree_flattener,
 )
+from laplax.util.mv import LazyKronecker
 
 KernelStructure = CovarianceStructure
 
@@ -474,11 +475,16 @@ def create_fsp_posterior_kronecker(
         function_kernels, initial_vectors_function, max_iters=None
     )
 
-    # Combine Lanczos results using Kronecker product
-    k_spatial_inv_sqrt = _kronecker_product(spatial_lanczos_results)
-    k_function_inv_sqrt = _kronecker_product(function_lanczos_results)
+    # Use LazyKronecker to avoid creating intermediate dense matrices
+    # Combine spatial and function factors
+    k_spatial_lazy = LazyKronecker(*spatial_lanczos_results)
+    k_function_lazy = LazyKronecker(*function_lanczos_results)
 
-    k_inv_sqrt = jnp.kron(k_spatial_inv_sqrt, k_function_inv_sqrt)
+    # Combine into full Kronecker product (still lazy)
+    k_inv_sqrt_lazy = k_spatial_lazy @ k_function_lazy
+
+    # Only densify when absolutely needed for column iteration
+    k_inv_sqrt = k_inv_sqrt_lazy.todense()
 
     n_function = x_context.shape[0]
     rank = k_inv_sqrt.shape[-1]
