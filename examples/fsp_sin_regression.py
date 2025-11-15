@@ -124,12 +124,26 @@ def train_mlp(model, x_train, y_train, num_epochs=1000, learning_rate=0.01):
     """Train MLP with Adam optimizer."""
     optimizer = nnx.Optimizer(model, optax.adam(learning_rate), wrt=nnx.Param)
 
-    @nnx.jit
-    def train_step(model, optimizer, x_batch, y_batch):
-        """Single training step."""
-        loss, grads = nnx.value_and_grad(mse_loss)(model, x_batch, y_batch)
-        optimizer.update(model, grads)  # Requires Flax >= 0.11.0
-        return loss
+    # Detect Flax version to use correct optimizer API
+    import inspect
+    update_sig = inspect.signature(optimizer.update)
+    # Flax < 0.11.0: update(grads), Flax >= 0.11.0: update(model, grads)
+    needs_model_arg = len(update_sig.parameters) > 1
+
+    if needs_model_arg:
+        @nnx.jit
+        def train_step(model, optimizer, x_batch, y_batch):
+            """Single training step."""
+            loss, grads = nnx.value_and_grad(mse_loss)(model, x_batch, y_batch)
+            optimizer.update(model, grads)
+            return loss
+    else:
+        @nnx.jit
+        def train_step(model, optimizer, x_batch, y_batch):
+            """Single training step."""
+            loss, grads = nnx.value_and_grad(mse_loss)(model, x_batch, y_batch)
+            optimizer.update(grads)
+            return loss
 
     for epoch in range(num_epochs):
         loss = train_step(model, optimizer, x_train, y_train)

@@ -258,8 +258,8 @@ def create_ggn_mv_without_data(
         # Step 1: Single jvp for entire batch, if vmap_over_data is True
         def fwd(p):
             if vmap_over_data:
-                return jax.vmap(lambda x: model_fn(input=x, params=p))(data["input"])
-            return model_fn(input=data["input"], params=p)
+                return jax.vmap(lambda x: model_fn(x, p))(data["input"])
+            return model_fn(data["input"], p)
 
         # Step 2: Linearize the forward pass
         z, jvp = jax.linearize(fwd, params)
@@ -501,13 +501,18 @@ def compute_ggn_quadratic_form(
         vmap_over_data=True,
     )
 
-    flatten, unflatten = create_pytree_flattener(params)
-    U_flat = flatten(U)
+    # Use partial flattener to flatten U (preserves columns)
+    from laplax.util.flatten import create_partial_pytree_flattener, create_pytree_flattener
+    flatten_partial, _ = create_partial_pytree_flattener(U)
+    U_flat = flatten_partial(U)
+
+    # Use regular flattener for individual columns (no column dimension)
+    flatten_single, unflatten_single = create_pytree_flattener(params)
 
     def compute_ggn_column(u_col):
-        u_i = unflatten(u_col)
+        u_i = unflatten_single(u_col)
         ggn_u_i = ggn_mv(u_i)
-        return flatten(ggn_u_i)
+        return flatten_single(ggn_u_i)
 
     GGN_U = jax.vmap(compute_ggn_column, in_axes=1, out_axes=1)(U_flat)
 

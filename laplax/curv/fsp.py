@@ -502,14 +502,13 @@ def create_fsp_posterior_kronecker(
     _u, s = _truncated_left_svd(M_flat)
 
     u = unflatten(_u)
-    ggn_mv = compute_ggn_quadratic_form(
+    uTggnu = compute_ggn_quadratic_form(
         model_fn=model_fn,
         params=params,
         x_context=x_context,
-        hessian_diag=not is_classification,
+        U=u,
+        is_classification=is_classification,
     )
-
-    uTggnu = ggn_mv(u)
 
     # Compute U_A, D_A
     A_eigh = jnp.diag(s**2) + uTggnu

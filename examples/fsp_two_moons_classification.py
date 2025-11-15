@@ -32,18 +32,18 @@ class MLP(nnx.Module):
 
     def __init__(self, hidden_dims: list[int], *, rngs: nnx.Rngs):
         in_dim = 2  # Two moons features
-        layers = []
-        for hidden_dim in hidden_dims:
-            layers.append(nnx.Linear(in_dim, hidden_dim, rngs=rngs))
-            in_dim = hidden_dim
-        layers.append(nnx.Linear(in_dim, 1, rngs=rngs))
 
-        self.hidden_layers = tuple(layers[:-1])
-        self.output_layer = layers[-1]
+        # Build layers - use attributes to avoid tuple storage issue
+        for i, hidden_dim in enumerate(hidden_dims):
+            setattr(self, f"hidden_{i}", nnx.Linear(in_dim, hidden_dim, rngs=rngs))
+            in_dim = hidden_dim
+
+        self.output_layer = nnx.Linear(in_dim, 1, rngs=rngs)
+        self.n_hidden = len(hidden_dims)
 
     def __call__(self, x: jax.Array) -> jax.Array:
-        for layer in self.hidden_layers:
-            x = jnp.tanh(layer(x))
+        for i in range(self.n_hidden):
+            x = jnp.tanh(getattr(self, f"hidden_{i}")(x))
         x = self.output_layer(x)
         return x.squeeze()
 
@@ -75,13 +75,28 @@ def binary_cross_entropy_loss(model, x_batch, y_batch):
 def train_mlp(model, x_train, y_train, num_epochs=100, learning_rate=0.1):
     optimizer = nnx.Optimizer(model, optax.adam(learning_rate), wrt=nnx.Param)
 
-    @nnx.jit
-    def train_step(model, optimizer, x_batch, y_batch):
-        loss, grads = nnx.value_and_grad(binary_cross_entropy_loss)(
-            model, x_batch, y_batch
-        )
-        optimizer.update(model, grads)
-        return loss
+    # Detect Flax version to use correct optimizer API
+    import inspect
+    update_sig = inspect.signature(optimizer.update)
+    # Flax < 0.11.0: update(grads), Flax >= 0.11.0: update(model, grads)
+    needs_model_arg = len(update_sig.parameters) > 1
+
+    if needs_model_arg:
+        @nnx.jit
+        def train_step(model, optimizer, x_batch, y_batch):
+            loss, grads = nnx.value_and_grad(binary_cross_entropy_loss)(
+                model, x_batch, y_batch
+            )
+            optimizer.update(model, grads)
+            return loss
+    else:
+        @nnx.jit
+        def train_step(model, optimizer, x_batch, y_batch):
+            loss, grads = nnx.value_and_grad(binary_cross_entropy_loss)(
+                model, x_batch, y_batch
+            )
+            optimizer.update(grads)
+            return loss
 
     for epoch in range(num_epochs):
         loss = train_step(model, optimizer, x_train, y_train)
