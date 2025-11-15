@@ -180,6 +180,69 @@ def kronecker(
     return kronecker_mv
 
 
+class LazyKronecker:
+    """Lazy Kronecker product that defers densification.
+
+    Stores Kronecker factors and only computes the dense product when needed.
+    This avoids creating large intermediate dense matrices.
+
+    Attributes:
+        factors: List of factor matrices (each as a dense array)
+    """
+
+    def __init__(self, *factors):
+        """Initialize with Kronecker factors.
+
+        Args:
+            *factors: Variable number of factor matrices
+        """
+        self.factors = list(factors)
+
+    def __matmul__(self, other):
+        """Matrix-vector or matrix-matrix product.
+
+        For (A ⊗ B ⊗ C) @ v, computes efficiently without forming full product.
+        """
+        if isinstance(other, LazyKronecker):
+            # Kronecker product of two LazyKronecker objects
+            return LazyKronecker(*(self.factors + other.factors))
+
+        # Matrix-vector or matrix-matrix product
+        if other.ndim == 1:
+            # Vector case
+            result = other
+            for factor in reversed(self.factors):
+                n = factor.shape[0]
+                m = result.size // n
+                result = result.reshape(n, m)
+                result = factor @ result
+                result = result.reshape(-1)
+            return result
+        else:
+            # Matrix case - apply to each column
+            return jnp.column_stack([self @ other[:, i] for i in range(other.shape[1])])
+
+    def todense(self):
+        """Convert to dense matrix.
+
+        Only creates the full Kronecker product when explicitly requested.
+        """
+        if len(self.factors) == 1:
+            return self.factors[0]
+
+        result = self.factors[0]
+        for factor in self.factors[1:]:
+            result = jnp.kron(result, factor)
+        return result
+
+    @property
+    def shape(self):
+        """Shape of the full Kronecker product."""
+        rows = jnp.prod(jnp.array([f.shape[0] for f in self.factors]))
+        cols = jnp.prod(jnp.array([f.shape[1] for f in self.factors]))
+        return (int(rows), int(cols))
+
+
 def kronecker_product_factors(factors_mv: list[Callable], factors_layout: list[Layout]) -> Callable:
     """Create an efficient Kronecker product from multiple factors.
 
