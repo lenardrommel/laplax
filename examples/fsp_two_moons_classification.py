@@ -245,26 +245,40 @@ def main():
         K = create_kernel_matrix(x_context, lengthscale=lengthscale, variance=variance)
         return K @ v
 
-    prior_cov = create_kernel_matrix(
-        x_context, lengthscale=lengthscale, variance=variance
-    )
-    prior_variance = jnp.diag(prior_cov)
-    print(
-        f"   Prior variance range: [{float(prior_variance.min()):.4f}, {float(prior_variance.max()):.4f}]"
-    )
-
     # Split for Laplax
     model_fn, trained_params = split_model(model)
 
+    # Wrap model to use two-logit trick for proper CE Hessian in FSP
+    def model_fn_two_logit(x, params):
+        """Model function with two-logit output for cross-entropy."""
+        logit = model_fn(x, params).squeeze()
+        return jnp.stack([jnp.zeros_like(logit), logit], axis=-1)
+
+    # Compute prior variance for multi-output model (n_context, n_outputs)
+    prior_cov = create_kernel_matrix(
+        x_context, lengthscale=lengthscale, variance=variance
+    )
+    prior_var_single = jnp.diag(prior_cov)  # Shape: (n_context,)
+    # Tile for both outputs (same prior for each output dimension)
+    prior_variance = jnp.tile(
+        prior_var_single[:, None], (1, 2)
+    )  # Shape: (n_context, 2)
+
+    print(
+        f"   Prior variance range: [{float(prior_var_single.min()):.4f}, {float(prior_var_single.max()):.4f}]"
+    )
+
     posterior = create_fsp_posterior(
-        model_fn=model_fn,
+        model_fn=model_fn_two_logit,
         params=trained_params,
         x_context=x_context,
         kernel_structure=KernelStructure.NONE,
-        kernel=kernel_fn,
-        prior_variance=prior_variance,
+        kernel=kernel_fn,  # Shared kernel for both outputs
+        prior_variance=prior_variance,  # Shape: (n_context, 2)
+        independent_outputs=True,  # Process each output independently with the same kernel
         n_chunks=2,
         max_iter=50,
+        is_classification=True,
     )
     print(f"   FSP posterior rank: {posterior.rank}")
 
@@ -330,7 +344,11 @@ def main():
         z = jax.random.normal(subkey, (posterior.rank,))
         delta_params = posterior.scale_mv(posterior.state)(z)
         sample_params = jax.tree.map(lambda p, dp: p + dp, trained_params, delta_params)
-        sample_logits = jax.vmap(lambda x: model_fn(x, sample_params))(grid_jax)
+        # Use two-logit model and extract the relevant logit (index 1)
+        sample_two_logits = jax.vmap(lambda x: model_fn_two_logit(x, sample_params))(
+            grid_jax
+        )
+        sample_logits = sample_two_logits[:, 1]  # Extract second logit
         fsp_samples.append(jax.nn.sigmoid(sample_logits))
     fsp_samples = jnp.stack(fsp_samples)
     fsp_std = jnp.std(fsp_samples, axis=0)

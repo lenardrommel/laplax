@@ -66,22 +66,27 @@ def generate_truncated_sine(key, n_samples=100, feature_dim=1, noise_std=0.01):
 class MLP(nnx.Module):
     """Simple MLP for regression using Flax NNX."""
 
-    def __init__(self, hidden_dims: list[int], *, rngs: nnx.Rngs):
+    def __init__(self, hidden_dims: list[int], *, rngs: nnx.Rngs, dtype=jnp.float64):
         """Initialize MLP.
 
         Args:
             hidden_dims: List of hidden layer dimensions
             rngs: Random number generator
+            dtype: Data type for parameters
         """
         in_dim = 1  # 1D input
 
         # Build layers - use attributes to avoid tuple storage issue
         for i, hidden_dim in enumerate(hidden_dims):
-            setattr(self, f"hidden_{i}", nnx.Linear(in_dim, hidden_dim, rngs=rngs))
+            setattr(
+                self,
+                f"hidden_{i}",
+                nnx.Linear(in_dim, hidden_dim, rngs=rngs, dtype=dtype),
+            )
             in_dim = hidden_dim
 
         # Output layer (single value for regression)
-        self.output_layer = nnx.Linear(in_dim, 1, rngs=rngs)
+        self.output_layer = nnx.Linear(in_dim, 1, rngs=rngs, dtype=dtype)
         self.n_hidden = len(hidden_dims)
 
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -209,23 +214,23 @@ def train_mlp_fsp(
 
 
 # ==============================================================================
-# FSP Posterior with Periodic Kernel
+# FSP Posterior with RBF Kernel
 # ==============================================================================
 
 
 def periodic_kernel(x1, x2, lengthscale=6.0, variance=1.0, period=2.0):
     """Periodic kernel function for periodic data like sine waves.
 
-    k(x1, x2) = variance * exp(-2 * sin^2(π |x1 - x2| / period) / lengthscale^2)
+    k(x1, x2) = variance * exp(-||x1 - x2||^2 / (2 * lengthscale^2))
     """
     dist = jnp.sqrt(jnp.sum((x1[:, None, :] - x2[None, :, :]) ** 2, axis=-1))
     sin_term = jnp.sin(jnp.pi * dist / period)
     return variance * jnp.exp(-2 * sin_term**2 / lengthscale**2)
 
 
-def create_kernel_matrix(x_context, lengthscale=1.0, variance=1.0, period=1.0):
-    """Create periodic kernel matrix."""
-    K = periodic_kernel(x_context, x_context, lengthscale, variance, period)
+def create_kernel_matrix(x_context, lengthscale=1.0, variance=1.0):
+    """Create RBF kernel matrix."""
+    K = rbf_kernel(x_context, x_context, lengthscale, variance)
     # Add jitter for numerical stability
     K = K + 1e-6 * jnp.eye(K.shape[0])
     return K
@@ -296,14 +301,12 @@ def main():
 
     def kernel_fn(v):
         """Kernel matrix-vector product."""
-        K = create_kernel_matrix(
-            x_context, lengthscale=lengthscale, variance=variance, period=period
-        )
+        K = create_kernel_matrix(x_context, lengthscale=lengthscale, variance=variance)
         return K @ v
 
     # Compute prior variance
     prior_cov = create_kernel_matrix(
-        x_context, lengthscale=lengthscale, variance=variance, period=period
+        x_context, lengthscale=lengthscale, variance=variance
     )
     prior_variance = jnp.diag(prior_cov)
 
