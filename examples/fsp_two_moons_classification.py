@@ -1,9 +1,10 @@
 """FSP vs Standard Laplace on Two Moons (Binary Classification).
 
-This script mirrors the Jupyter notebook `fsp_two_moons_classification.ipynb` but as
-an executable Python script. It trains a small MLP on the noiseless two-moons
-dataset, constructs an FSP posterior with an RBF kernel on context points, and
-compares predictive uncertainty against a standard Laplace (low‑rank/Lanczos) posterior.
+This script demonstrates FSP (Function-Space Prior) Laplace approximation for
+binary classification on the two-moons dataset. It trains a small MLP using the
+FSP objective (cross-entropy + RKHS regularization) with an RBF kernel on context
+points, constructs an FSP posterior, and compares predictive uncertainty against
+a standard Laplace (low-rank/Lanczos) posterior.
 
 It saves a visualization to `fsp_two_moons_classification.png`.
 """
@@ -72,34 +73,68 @@ def binary_cross_entropy_loss(model, x_batch, y_batch):
     )
 
 
-def train_mlp(model, x_train, y_train, num_epochs=100, learning_rate=0.1):
+def train_mlp_fsp(
+    model,
+    x_train,
+    y_train,
+    x_context,
+    prior_cov_kernel,
+    num_epochs=100,
+    learning_rate=0.1,
+    reg_weight=1.0,
+):
+    """Train MLP with FSP objective (cross-entropy + regularization)."""
     optimizer = nnx.Optimizer(model, optax.adam(learning_rate), wrt=nnx.Param)
 
     # Detect Flax version to use correct optimizer API
     import inspect
+
     update_sig = inspect.signature(optimizer.update)
-    # Flax < 0.11.0: update(grads), Flax >= 0.11.0: update(model, grads)
     needs_model_arg = len(update_sig.parameters) > 1
 
+    # Compute prior covariance matrix once with jitter for stability
+    K_c_c = prior_cov_kernel(x_context, x_context)
+    K_c_c = K_c_c + 1e-5 * jnp.eye(K_c_c.shape[0])  # Add jitter for numerical stability
+    prior_mean = jnp.zeros(x_context.shape[0])
+    dataset_size = x_train.shape[0]
+
+    def fsp_loss_fn(model):
+        """FSP objective: cross-entropy + RKHS regularization."""
+        # Cross-entropy term
+        logits = jax.vmap(model)(x_train)
+        ce_loss = -jnp.mean(
+            jax.nn.log_sigmoid(logits) * y_train
+            + jax.nn.log_sigmoid(-logits) * (1 - y_train)
+        )
+        ce_loss = ce_loss * dataset_size
+
+        # Regularization term: 1/2 (f(c) - m)^T K^{-1} (f(c) - m)
+        # For classification, f(c) are the logits at context points
+        f_c = jax.vmap(model)(x_context) - prior_mean
+        left = jax.scipy.linalg.solve(K_c_c, f_c, assume_a="sym")
+        reg = 0.5 * jnp.dot(f_c, left)
+
+        return ce_loss + reg_weight * reg
+
     if needs_model_arg:
+
         @nnx.jit
-        def train_step(model, optimizer, x_batch, y_batch):
-            loss, grads = nnx.value_and_grad(binary_cross_entropy_loss)(
-                model, x_batch, y_batch
-            )
+        def train_step(model, optimizer):
+            """Single training step."""
+            loss, grads = nnx.value_and_grad(fsp_loss_fn)(model)
             optimizer.update(model, grads)
             return loss
     else:
+
         @nnx.jit
-        def train_step(model, optimizer, x_batch, y_batch):
-            loss, grads = nnx.value_and_grad(binary_cross_entropy_loss)(
-                model, x_batch, y_batch
-            )
+        def train_step(model, optimizer):
+            """Single training step."""
+            loss, grads = nnx.value_and_grad(fsp_loss_fn)(model)
             optimizer.update(grads)
             return loss
 
     for epoch in range(num_epochs):
-        loss = train_step(model, optimizer, x_train, y_train)
+        loss = train_step(model, optimizer)
         if (epoch + 1) % 20 == 0:
             print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss:.4f}")
 
@@ -144,11 +179,40 @@ def main():
     print(f"   Dataset shape: X={X.shape}, y={y.shape}")
 
     # ------------------------------------------------------------------
-    # 2) Train model
+    # 2) Set up FSP training with RBF kernel
     # ------------------------------------------------------------------
-    print("\n2) Training MLP...")
+    print("\n2) Setting up FSP training with RBF kernel...")
+
+    # Select context points for FSP training
+    n_context = 50
+    rng = np.random.default_rng(42)
+    context_indices = rng.choice(len(X), size=n_context, replace=False)
+    x_context = X_jax[context_indices]
+    print(f"   Context points: {x_context.shape[0]}")
+
+    # RBF kernel hyperparameters
+    lengthscale = 0.5
+    variance = 0.01
+
+    def prior_cov_kernel(x1, x2):
+        """Prior covariance kernel for FSP objective."""
+        return rbf_kernel(x1, x2, lengthscale=lengthscale, variance=variance)
+
+    # ------------------------------------------------------------------
+    # 3) Train model with FSP objective
+    # ------------------------------------------------------------------
+    print("\n3) Training MLP with FSP objective (cross-entropy + regularization)...")
     model = MLP(hidden_dims=[32, 32], rngs=nnx.Rngs(0))
-    model = train_mlp(model, X_jax, y_jax, num_epochs=100, learning_rate=0.1)
+    model = train_mlp_fsp(
+        model,
+        X_jax,
+        y_jax,
+        x_context,
+        prior_cov_kernel,
+        num_epochs=100,
+        learning_rate=0.1,
+        reg_weight=0.01,
+    )
 
     logits = jax.vmap(model)(X_jax)
     predictions = (jax.nn.sigmoid(logits) > 0.5).astype(jnp.float32)
@@ -156,20 +220,10 @@ def main():
     print(f"   Training accuracy: {float(train_acc):.2%}")
 
     # ------------------------------------------------------------------
-    # 3) FSP posterior
+    # 4) FSP posterior
     # ------------------------------------------------------------------
-    print("\n3) Building FSP posterior with RBF kernel on context points...")
-
-    # Select context points
-    n_context = 50
-    rng = np.random.default_rng(42)
-    context_indices = rng.choice(len(X), size=n_context, replace=False)
-    x_context = X_jax[context_indices]
-    print(f"   Context points: {x_context.shape[0]}")
-
-    # Kernel hyperparameters
-    lengthscale = 0.5
-    variance = 0.01
+    print("\n4) Building FSP posterior with RBF kernel on context points...")
+    # Note: Context points and kernel already defined for training
 
     def kernel_fn(v):
         K = create_kernel_matrix(x_context, lengthscale=lengthscale, variance=variance)
@@ -197,9 +251,9 @@ def main():
     print(f"   FSP posterior rank: {posterior.rank}")
 
     # ------------------------------------------------------------------
-    # 4) Standard Laplace (Lanczos low-rank curvature)
+    # 5) Standard Laplace (Lanczos low-rank curvature)
     # ------------------------------------------------------------------
-    print("\n4) Estimating standard Laplace curvature (Lanczos)...")
+    print("\n5) Estimating standard Laplace curvature (Lanczos)...")
     flatten_fn, unflatten_fn = create_pytree_flattener(trained_params)
 
     def model_fn_flat(inp, flat_params):
@@ -235,9 +289,9 @@ def main():
     print(f"   Standard Laplace rank: {curv_estimate.U.shape[1]}")
 
     # ------------------------------------------------------------------
-    # 5) Predictions & Sampling
+    # 6) Predictions & Sampling
     # ------------------------------------------------------------------
-    print("\n5) Creating prediction grid and sampling posteriors...")
+    print("\n6) Creating prediction grid and sampling posteriors...")
     x_min, x_max = X[:, 0].min() - 0.5, X[:, 0].max() + 0.5
     y_min, y_max = X[:, 1].min() - 0.5, X[:, 1].max() + 0.5
     xx, yy = np.meshgrid(
@@ -290,9 +344,9 @@ def main():
     )
 
     # ------------------------------------------------------------------
-    # 6) Visualization
+    # 7) Visualization
     # ------------------------------------------------------------------
-    print("\n6) Saving visualizations to 'fsp_two_moons_classification.png'...")
+    print("\n7) Saving visualizations to 'fsp_two_moons_classification.png'...")
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
 
     # Row 1: Mean predictions (shared)
@@ -384,7 +438,7 @@ def main():
     print("   Saved 'fsp_two_moons_classification.png'.")
 
     # ------------------------------------------------------------------
-    # 7) Summary
+    # 8) Summary
     # ------------------------------------------------------------------
     print("\n" + "=" * 70)
     print("Summary:")
