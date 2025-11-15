@@ -18,10 +18,14 @@ from flax import nnx
 from sklearn.datasets import make_moons
 
 from laplax.api import GGN
-from laplax.curv import KernelStructure, create_fsp_posterior, estimate_curvature, set_posterior_fn
+from laplax.curv import (
+    KernelStructure,
+    create_fsp_posterior,
+    estimate_curvature,
+    set_posterior_fn,
+)
 from laplax.enums import CurvApprox, LossFn
 from laplax.util.flatten import create_pytree_flattener
-
 
 # ==============================================================================
 # Model (Flax NNX)
@@ -124,6 +128,7 @@ def train_mlp_fsp(
             loss, grads = nnx.value_and_grad(fsp_loss_fn)(model)
             optimizer.update(model, grads)
             return loss
+
     else:
 
         @nnx.jit
@@ -229,7 +234,9 @@ def main():
         K = create_kernel_matrix(x_context, lengthscale=lengthscale, variance=variance)
         return K @ v
 
-    prior_cov = create_kernel_matrix(x_context, lengthscale=lengthscale, variance=variance)
+    prior_cov = create_kernel_matrix(
+        x_context, lengthscale=lengthscale, variance=variance
+    )
     prior_variance = jnp.diag(prior_cov)
     print(
         f"   Prior variance range: [{float(prior_variance.min()):.4f}, {float(prior_variance.max()):.4f}]"
@@ -294,9 +301,7 @@ def main():
     print("\n6) Creating prediction grid and sampling posteriors...")
     x_min, x_max = X[:, 0].min() - 0.5, X[:, 0].max() + 0.5
     y_min, y_max = X[:, 1].min() - 0.5, X[:, 1].max() + 0.5
-    xx, yy = np.meshgrid(
-        np.linspace(x_min, x_max, 100), np.linspace(y_min, y_max, 100)
-    )
+    xx, yy = np.meshgrid(np.linspace(x_min, x_max, 100), np.linspace(y_min, y_max, 100))
     grid_points = np.c_[xx.ravel(), yy.ravel()]
     grid_jax = jnp.array(grid_points)
 
@@ -335,9 +340,7 @@ def main():
     standard_samples = jnp.stack(standard_samples)
     standard_std = jnp.std(standard_samples, axis=0)
 
-    print(
-        f"   FSP std range: [{float(fsp_std.min()):.3f}, {float(fsp_std.max()):.3f}]"
-    )
+    print(f"   FSP std range: [{float(fsp_std.min()):.3f}, {float(fsp_std.max()):.3f}]")
     print(
         "   Standard std range: "
         f"[{float(standard_std.min()):.3f}, {float(standard_std.max()):.3f}]"
@@ -424,7 +427,12 @@ def main():
     ax = axes[1, 2]
     standard_confidence = 1 - 2 * standard_std
     contour = ax.contourf(
-        xx, yy, standard_confidence.reshape(xx.shape), levels=20, cmap="plasma", alpha=0.8
+        xx,
+        yy,
+        standard_confidence.reshape(xx.shape),
+        levels=20,
+        cmap="plasma",
+        alpha=0.8,
     )
     ax.scatter(X[:, 0], X[:, 1], c=y, cmap="RdBu_r", edgecolor="k", s=30, alpha=0.6)
     ax.set_title("Standard Laplace Confidence", fontsize=12, fontweight="bold")
@@ -460,4 +468,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

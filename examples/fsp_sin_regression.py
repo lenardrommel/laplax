@@ -5,6 +5,8 @@ for regression on a truncated sine function, showing how FSP captures
 uncertainty in extrapolation regions.
 """
 
+import inspect
+
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -15,8 +17,7 @@ from flax import nnx
 from laplax.curv import KernelStructure, create_fsp_posterior
 from laplax.util.objective import create_fsp_objective
 
-# Note: jax_enable_x64 disabled to avoid dtype mismatches
-# jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_enable_x64", True)
 
 
 # ==============================================================================
@@ -144,9 +145,6 @@ def train_mlp_fsp(
         noise_scale, optax.adam(learning_rate), wrt=nnx.Param
     )
 
-    # Detect Flax version
-    import inspect
-
     update_sig = inspect.signature(model_optimizer.update)
     needs_model_arg = len(update_sig.parameters) > 1
 
@@ -220,12 +218,11 @@ def train_mlp_fsp(
 # ==============================================================================
 
 
-def periodic_kernel(x1, x2, lengthscale=1.0, variance=1.0, period=1.0):
+def periodic_kernel(x1, x2, lengthscale=1.0, variance=0.10, period=1.0):
     """Periodic kernel function for periodic data like sine waves.
 
     k(x1, x2) = variance * exp(-2 * sin^2(π |x1 - x2| / period) / lengthscale^2)
     """
-    # Compute pairwise distances, sum over feature dimensions
     dist = jnp.sqrt(jnp.sum((x1[:, None, :] - x2[None, :, :]) ** 2, axis=-1))
     sin_term = jnp.sin(jnp.pi * dist / period)
     return variance * jnp.exp(-2 * sin_term**2 / lengthscale**2)
@@ -262,9 +259,8 @@ def main():
     # Set up context points and kernel for FSP training
     x_context = X_train  # Use all training data as context
 
-    # Periodic kernel hyperparameters (for sine wave with period ~2π)
     lengthscale = 0.5
-    variance = 1.0
+    variance = 0.10
     period = 2.0 * jnp.pi  # Match sine wave period
 
     def prior_cov_kernel(x1, x2):
