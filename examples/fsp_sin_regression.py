@@ -216,6 +216,12 @@ def train_mlp_fsp(
 # ==============================================================================
 # FSP Posterior with RBF Kernel
 # ==============================================================================
+def rbf_kernel(x1, x2, lengthscale=1.0, variance=1.0):
+    """Radial Basis Function (RBF) kernel (squared exponential)."""
+    sqdist = (
+        jnp.sum(x1**2, 1).reshape(-1, 1) + jnp.sum(x2**2, 1) - 2 * jnp.dot(x1, x2.T)
+    )
+    return variance * jnp.exp(-0.5 / lengthscale**2 * sqdist)
 
 
 def periodic_kernel(x1, x2, lengthscale=6.0, variance=1.0, period=2.0):
@@ -230,7 +236,7 @@ def periodic_kernel(x1, x2, lengthscale=6.0, variance=1.0, period=2.0):
 
 def create_kernel_matrix(x_context, lengthscale=1.0, variance=1.0):
     """Create RBF kernel matrix."""
-    K = rbf_kernel(x_context, x_context, lengthscale, variance)
+    K = periodic_kernel(x_context, x_context, lengthscale, variance, period=1.0)
     # Add jitter for numerical stability
     K = K + 1e-6 * jnp.eye(K.shape[0])
     return K

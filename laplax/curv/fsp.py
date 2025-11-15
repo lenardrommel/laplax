@@ -3,7 +3,6 @@
 """FSP (Function-Space Prior) inference module with support for different kernel structures."""
 
 from functools import partial
-import math
 
 import jax
 import jax.numpy as jnp
@@ -93,7 +92,7 @@ def _accumulate_M_over_chunks(
     k_inv_sqrt_dense: jnp.ndarray,
     n_chunks: int,
     *,
-    mode: str = "scan",
+    mode: str = "map",
 ):
     """Accumulate _M_batch over context chunks using a chosen reduction mode.
 
@@ -308,7 +307,9 @@ def _lanczos_kronecker_structure(
         max_iters = [None] * len(kernels_list)
 
     lanczos_results = []
-    for kernel, init_vec, max_iter in zip(kernels_list, initial_vectors, max_iters):
+    for kernel, init_vec, max_iter in zip(
+        kernels_list, initial_vectors, max_iters, strict=False
+    ):
         kwargs = {}
         if max_iter is not None:
             kwargs["max_iter"] = max_iter
@@ -455,19 +456,9 @@ def create_fsp_posterior_kronecker(
     # Adjust chunk count to evenly divide number of functions
     n_functions = int(x_context.shape[0])
     n_chunks_eff = int(min(max(1, n_chunks), n_functions))
-    # Choose the largest divisor of n_functions not exceeding n_chunks_eff
-    if n_functions % n_chunks_eff != 0:
-        k_max = n_chunks_eff
-        best = 1
-        limit = math.isqrt(n_functions)
-        for d in range(1, limit + 1):
-            if n_functions % d == 0:
-                q = n_functions // d
-                if d <= k_max and d > best:
-                    best = d
-                if q <= k_max and q > best:
-                    best = q
-        n_chunks_eff = best
+
+    while n_functions % n_chunks_eff != 0 and n_chunks_eff > 1:
+        n_chunks_eff -= 1
 
     dim = sum(x.size for x in jax.tree_util.tree_leaves(params))
 

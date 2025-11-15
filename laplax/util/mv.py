@@ -7,6 +7,7 @@ from functools import singledispatch
 
 import jax
 from jax import numpy as jnp
+from torch import layout
 
 from laplax import util
 from laplax.types import Array, Kwargs, Layout, PyTree
@@ -131,3 +132,39 @@ def to_dense(mv: Callable, layout: Layout, **kwargs: Kwargs) -> Array:
         jnp.transpose,
         jax.lax.map(mv, identity, batch_size=kwargs.get("to_dense_batch_size")),
     )  # jax.lax.map shares along the first axis (rows instead of columns).
+
+
+@singledispatch
+def kronecker(
+    mv_a: Callable,
+    mv_b: Callable,
+    layout_a: Layout,
+    layout_b: Layout,
+) -> Callable:
+    """Create a memory-efficient Kronecker product matrix-vector product function.
+
+    Uses the identity: (A ⊗ B) vec(X) = vec(B X A^T)
+    """
+    if isinstance(layout_a, int) and isinstance(layout_b, int):
+        size_a = layout_a
+        size_b = layout_b
+    else:
+        size_a = get_size(layout_a)
+        size_b = get_size(layout_b)
+
+    def kronecker_mv(v):
+        # Reshape: vec(X) -> X with shape (size_b, size_a)
+        X = v.reshape(size_a, size_b).T
+
+        # Y = B @ X: apply mv_b to each column
+        mv_b_vmap = jax.vmap(mv_b, in_axes=1, out_axes=1)
+        Y = mv_b_vmap(X)
+
+        # Z = Y @ A^T: apply mv_a to each row of Y
+        mv_a_vmap = jax.vmap(mv_a, in_axes=0, out_axes=0)
+        Z = mv_a_vmap(Y)
+
+        # Vectorize: Z -> vec(Z)
+        return Z.T.reshape(-1)
+
+    return kronecker_mv
