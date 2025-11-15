@@ -21,7 +21,7 @@ from laplax.types import (
     PredArray,
     TargetArray,
 )
-from laplax.util.flatten import create_pytree_flattener
+from laplax.util.flatten import create_partial_pytree_flattener, create_pytree_flattener
 from laplax.util.tree import mul
 
 
@@ -363,111 +363,6 @@ def create_ggn_mv(
     return wrapped_ggn_mv
 
 
-def create_ggn_pytree_mv(
-    model_fn: ModelFn,
-    params: Params,
-    x_context: Num[Array, "..."],
-    hessian_diag: bool = True,
-    *,
-    vmap_over_data: bool = True,
-) -> Callable[[Params], Array]:
-    """Create a GGN matrix-vector product function that works with pytrees.
-
-    This function creates a Generalized Gauss-Newton (GGN) matrix-vector product
-    operator that works directly with pytree parameters without requiring linear
-    operators or dense matrices.
-
-    Args:
-        model_fn: Model function taking input and params
-        params: Model parameters as pytree
-        x_context: Context points for GGN computation
-        hessian_diag: If True, assumes diagonal Hessian (identity for regression)
-
-    Returns:
-        Function that computes GGN @ u for pytree u
-    """
-
-    def _jmp_vmap(u):
-        return jax.vmap(
-            lambda x_c: jax.vmap(
-                lambda u_c: jax.jvp(lambda p: model_fn(x_c, p), (params,), (u_c,))[1],
-                in_axes=-1,
-                out_axes=-1,
-            )(u)
-        )(x_context)
-
-    def _jmp_laxmap(u):
-        return jax.lax.map(
-            lambda x_c: jax.vmap(
-                lambda u_c: jax.jvp(lambda p: model_fn(x_c, p), (params,), (u_c,))[1],
-                in_axes=-1,
-                out_axes=-1,
-            )(u),
-            x_context,
-        )
-
-    # TODO: move this to hessian?
-    def ggn_vector_product(u):
-        """Compute u^T @ GGN @ u.
-
-        Args:
-            u: pytree with same structure as params
-
-        Returns:
-            GGN matrix-vector product
-        """
-        if hessian_diag and vmap_over_data:
-            ju = _jmp_vmap(u)
-            batch_size = ju.shape[0]
-            rank = ju.shape[-1]
-            ju_flat = ju.reshape(batch_size, -1, rank)
-            return jax.numpy.einsum("bji,bjk->ik", ju_flat, ju_flat)
-
-        if hessian_diag and not vmap_over_data:
-            ju = _jmp_laxmap(u)
-            batch_size = ju.shape[0]
-            rank = ju.shape[-1]
-            ju_flat = ju.reshape(batch_size, -1, rank)
-            return jax.numpy.einsum("bji,bjk->ik", ju_flat, ju_flat)
-
-        if vmap_over_data:
-            ju = _jmp_vmap(u)
-            logits = jax.vmap(lambda x_c: model_fn(x_c, params))(x_context)
-        else:
-            ju = _jmp_laxmap(u)
-            logits = jax.lax.map(lambda x_c: model_fn(x_c, params), x_context)
-
-        if logits.ndim <= 1 or ju.ndim < 3:
-            prob = jax.nn.sigmoid(logits)  # shape (B,) or leading dims collapsed
-            leading_shape = ju.shape[:-1]
-            m = math.prod(leading_shape) if leading_shape else 1
-            ju_mr = ju.reshape(m, ju.shape[-1])  # (M, R)
-            p_m = prob.reshape(m)  # (M,)
-            w_sqrt = jax.numpy.sqrt(p_m * (1.0 - p_m))  # (M,)
-            ju_w = ju_mr * w_sqrt[:, None]  # (M, R)
-            return jax.numpy.einsum("mr,ms->rs", ju_w, ju_w)
-
-        # Multi-class softmax case
-        prob = jax.nn.softmax(logits, axis=-1)
-        rank = ju.shape[-1]
-        num_classes = ju.shape[-2]
-        leading_shape = ju.shape[:-2]
-        m = math.prod(leading_shape) if leading_shape else 1
-        ju_mkr = ju.reshape(m, num_classes, rank)
-        p_mk = prob.reshape(m, num_classes)
-
-        sqrt_p = jax.numpy.sqrt(p_mk)[..., None]  # (M, K, 1)
-        a_scaled = ju_mkr * sqrt_p  # (M, K, R)
-        term_diag = jax.numpy.einsum("mkr,mks->rs", a_scaled, a_scaled)
-
-        at_p = jax.numpy.einsum("mkr,mk->mr", ju_mkr, p_mk)  # (M, R)
-        term_outer = jax.numpy.einsum("mr,ms->rs", at_p, at_p)
-
-        return term_diag - term_outer
-
-    return ggn_vector_product
-
-
 def compute_ggn_quadratic_form(
     model_fn: ModelFn,
     params: Params,
@@ -501,8 +396,6 @@ def compute_ggn_quadratic_form(
         vmap_over_data=True,
     )
 
-    # Use partial flattener to flatten U (preserves columns)
-    from laplax.util.flatten import create_partial_pytree_flattener, create_pytree_flattener
     flatten_partial, _ = create_partial_pytree_flattener(U)
     U_flat = flatten_partial(U)
 

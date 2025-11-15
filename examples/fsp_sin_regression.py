@@ -126,18 +126,21 @@ def train_mlp(model, x_train, y_train, num_epochs=1000, learning_rate=0.01):
 
     # Detect Flax version to use correct optimizer API
     import inspect
+
     update_sig = inspect.signature(optimizer.update)
-    # Flax < 0.11.0: update(grads), Flax >= 0.11.0: update(model, grads)
     needs_model_arg = len(update_sig.parameters) > 1
 
     if needs_model_arg:
+
         @nnx.jit
         def train_step(model, optimizer, x_batch, y_batch):
             """Single training step."""
             loss, grads = nnx.value_and_grad(mse_loss)(model, x_batch, y_batch)
             optimizer.update(model, grads)
             return loss
+
     else:
+
         @nnx.jit
         def train_step(model, optimizer, x_batch, y_batch):
             """Single training step."""
@@ -303,9 +306,7 @@ def main():
 
     ax.set_xlabel("x")
     ax.set_ylabel("y")
-    ax.set_title(
-        f"FSP Laplace Predictions (rank={posterior.rank})", fontweight="bold"
-    )
+    ax.set_title(f"FSP Laplace Predictions (rank={posterior.rank})", fontweight="bold")
     ax.legend()
     ax.grid(True, alpha=0.3)
 
@@ -338,7 +339,9 @@ def main():
     print(f"  - Mean prediction std: {pred_std.mean():.4f}")
     print(f"  - Max prediction std: {pred_std.max():.4f}")
     print(f"  - Training loss: {train_loss:.4f}")
-    print("\nNote: Uncertainty increases in extrapolation regions ([-1.5,-1] ∪ [-0.5,0.5] ∪ [1,1.5])")
+    print(
+        "\nNote: Uncertainty increases in extrapolation regions ([-1.5,-1] ∪ [-0.5,0.5] ∪ [1,1.5])"
+    )
     print("=" * 70)
 
 
