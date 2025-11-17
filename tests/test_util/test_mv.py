@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from laplax.util.flatten import create_pytree_flattener, wrap_function
-from laplax.util.mv import diagonal, to_dense
+from laplax.util.mv import diagonal, kronecker, kronecker_product_factors, to_dense
 from laplax.util.tree import get_size
 
 
@@ -289,6 +289,254 @@ def test_diagonal_batch_size_parameter():
     np.testing.assert_allclose(diag_full, diag_batched, atol=1e-7, rtol=1e-7)
 
 
+def test_kronecker_product_factors_two_factors():
+    """Test kronecker_product_factors with two factors (reduces to basic kronecker)."""
+    key = jax.random.PRNGKey(42)
+    k1, k2, kv = jax.random.split(key, 3)
+
+    n1, n2 = 3, 4
+    A = jax.random.normal(k1, (n1, n1))
+    B = jax.random.normal(k2, (n2, n2))
+    v = jax.random.normal(kv, (n1 * n2,))
+
+    def mv_a(x):
+        return A @ x
+
+    def mv_b(x):
+        return B @ x
+
+    # Using kronecker_product_factors
+    mv_kron = kronecker_product_factors([mv_a, mv_b], [n1, n2])
+
+    result = mv_kron(v)
+    expected = jnp.kron(A, B) @ v
+
+    np.testing.assert_allclose(result, expected, atol=1e-6, rtol=1e-6)
+
+
+def test_kronecker_product_factors_three_factors():
+    """Test kronecker_product_factors with three factors."""
+    key = jax.random.PRNGKey(123)
+    keys = jax.random.split(key, 4)
+
+    n1, n2, n3 = 2, 3, 2
+    A = jax.random.normal(keys[0], (n1, n1))
+    B = jax.random.normal(keys[1], (n2, n2))
+    C = jax.random.normal(keys[2], (n3, n3))
+    v = jax.random.normal(keys[3], (n1 * n2 * n3,))
+
+    def mv_a(x):
+        return A @ x
+
+    def mv_b(x):
+        return B @ x
+
+    def mv_c(x):
+        return C @ x
+
+    # Using kronecker_product_factors
+    mv_kron = kronecker_product_factors([mv_a, mv_b, mv_c], [n1, n2, n3])
+
+    result = mv_kron(v)
+
+    # Compute reference: (A ⊗ B ⊗ C) @ v
+    AB = jnp.kron(A, B)
+    ABC = jnp.kron(AB, C)
+    expected = ABC @ v
+
+    np.testing.assert_allclose(result, expected, atol=1e-6, rtol=1e-6)
+
+
+def test_kronecker_product_factors_single_factor():
+    """Test kronecker_product_factors with a single factor (identity operation)."""
+    key = jax.random.PRNGKey(99)
+    k1, kv = jax.random.split(key)
+
+    n = 5
+    A = jax.random.normal(k1, (n, n))
+    v = jax.random.normal(kv, (n,))
+
+    def mv_a(x):
+        return A @ x
+
+    # Single factor should just return the original mv
+    mv_kron = kronecker_product_factors([mv_a], [n])
+
+    result = mv_kron(v)
+    expected = A @ v
+
+    np.testing.assert_allclose(result, expected, atol=1e-7, rtol=1e-7)
+
+
+def test_kronecker_product_factors_four_factors():
+    """Test kronecker_product_factors with four factors."""
+    key = jax.random.PRNGKey(456)
+    keys = jax.random.split(key, 5)
+
+    dims = [2, 2, 2, 2]
+    matrices = [jax.random.normal(keys[i], (d, d)) for i, d in enumerate(dims)]
+    total_dim = int(jnp.prod(jnp.array(dims)))
+    v = jax.random.normal(keys[4], (total_dim,))
+
+    mvs = [lambda x, M=M: M @ x for M in matrices]
+
+    # Using kronecker_product_factors
+    mv_kron = kronecker_product_factors(mvs, dims)
+
+    result = mv_kron(v)
+
+    # Compute reference by sequential kronecker products
+    K = matrices[0]
+    for M in matrices[1:]:
+        K = jnp.kron(K, M)
+    expected = K @ v
+
+    np.testing.assert_allclose(result, expected, atol=1e-5, rtol=1e-5)
+
+
+def test_kronecker_product_factors_various_sizes():
+    """Test kronecker_product_factors with varying factor sizes."""
+    key = jax.random.PRNGKey(789)
+    keys = jax.random.split(key, 4)
+
+    dims = [2, 5, 3]
+    matrices = [jax.random.normal(keys[i], (d, d)) for i, d in enumerate(dims)]
+    total_dim = int(jnp.prod(jnp.array(dims)))
+    v = jax.random.normal(keys[3], (total_dim,))
+
+    mvs = [lambda x, M=M: M @ x for M in matrices]
+
+    mv_kron = kronecker_product_factors(mvs, dims)
+
+    result = mv_kron(v)
+
+    # Compute reference
+    K = matrices[0]
+    for M in matrices[1:]:
+        K = jnp.kron(K, M)
+    expected = K @ v
+
+    np.testing.assert_allclose(result, expected, atol=1e-5, rtol=1e-5)
+
+
+def test_kronecker_separable_diagonal():
+    """Test diagonal computation with separable Kronecker structure.
+
+    For Kronecker products, diag(A ⊗ B) = diag(A) ⊗ diag(B).
+    """
+    key = jax.random.PRNGKey(999)
+    k1, k2 = jax.random.split(key)
+
+    m, n = 4, 5
+    A = jax.random.normal(k1, (m, m))
+    B = jax.random.normal(k2, (n, n))
+
+    K = jnp.kron(A, B)
+
+    # Expected diagonal using Kronecker property
+    diag_A = jnp.diag(A)
+    diag_B = jnp.diag(B)
+    expected_diag = jnp.kron(diag_A, diag_B)
+
+    # Compare with actual diagonal
+    actual_diag = jnp.diag(K)
+    np.testing.assert_allclose(actual_diag, expected_diag, atol=1e-6, rtol=1e-6)
+
+    # Test our diagonal function
+    def kron_mv(x):
+        return K @ x
+
+    computed_diag = diagonal(kron_mv, layout=m * n)
+    np.testing.assert_allclose(computed_diag, expected_diag, atol=1e-6, rtol=1e-6)
+
+
+def test_kronecker_product_factors_to_dense():
+    """Test that kronecker_product_factors produces correct dense matrix."""
+    key = jax.random.PRNGKey(2024)
+    keys = jax.random.split(key, 3)
+
+    dims = [3, 4]
+    A = jax.random.normal(keys[0], (dims[0], dims[0]))
+    B = jax.random.normal(keys[1], (dims[1], dims[1]))
+
+    def mv_a(x):
+        return A @ x
+
+    def mv_b(x):
+        return B @ x
+
+    mv_kron = kronecker_product_factors([mv_a, mv_b], dims)
+
+    # Convert to dense
+    total_dim = int(jnp.prod(jnp.array(dims)))
+    dense_result = to_dense(mv_kron, layout=total_dim)
+
+    # Expected
+    expected = jnp.kron(A, B)
+
+    np.testing.assert_allclose(dense_result, expected, atol=1e-6, rtol=1e-6)
+
+
+def test_kronecker_composition():
+    """Test that kronecker operations can be composed."""
+    key = jax.random.PRNGKey(111)
+    keys = jax.random.split(key, 5)
+
+    n = 3
+    m = 2
+
+    A = jax.random.normal(keys[0], (n, n))
+    B = jax.random.normal(keys[1], (m, m))
+    C = jax.random.normal(keys[2], (n, n))
+    D = jax.random.normal(keys[3], (m, m))
+
+    v = jax.random.normal(keys[4], (n * m,))
+
+    def mv_a(x):
+        return A @ x
+
+    def mv_b(x):
+        return B @ x
+
+    def mv_c(x):
+        return C @ x
+
+    def mv_d(x):
+        return D @ x
+
+    # Create two Kronecker products and add them
+    mv_kron1 = kronecker_product_factors([mv_a, mv_b], [n, m])
+    mv_kron2 = kronecker_product_factors([mv_c, mv_d], [n, m])
+
+    def mv_sum(x):
+        return mv_kron1(x) + mv_kron2(x)
+
+    result = mv_sum(v)
+
+    # Expected
+    K1 = jnp.kron(A, B)
+    K2 = jnp.kron(C, D)
+    expected = (K1 + K2) @ v
+
+    np.testing.assert_allclose(result, expected, atol=1e-6, rtol=1e-6)
+
+
+def test_diagonal_batch_size_parameter():
+    """Test that diagonal_batch_size parameter works correctly."""
+    n = 10
+    key = jax.random.PRNGKey(42)
+    A = jax.random.normal(key, (n, n))
+
+    def mv(x):
+        return A @ x
+
+    # Test with different batch sizes
+    diag_full = diagonal(mv, layout=n)
+    diag_batched = diagonal(mv, layout=n, diagonal_batch_size=2)
+
+    np.testing.assert_allclose(diag_full, diag_batched, atol=1e-7, rtol=1e-7)
+
+
 def test_to_dense_batch_size_parameter():
     """Test that to_dense_batch_size parameter works correctly."""
     n = 8
@@ -343,3 +591,33 @@ def test_diagonal_with_complex_pytree():
     diag_expected = jnp.diag(A)
 
     np.testing.assert_allclose(diag_computed, diag_expected, atol=1e-6, rtol=1e-6)
+
+
+def test_kronecker_numerical_stability():
+    """Test numerical stability of Kronecker products with varying scales."""
+    key = jax.random.PRNGKey(2025)
+    keys = jax.random.split(key, 3)
+
+    n1, n2 = 3, 4
+
+    # Create matrices with different scales
+    A = jax.random.normal(keys[0], (n1, n1)) * 0.1
+    B = jax.random.normal(keys[1], (n2, n2)) * 10.0
+    v = jax.random.normal(keys[2], (n1 * n2,))
+
+    def mv_a(x):
+        return A @ x
+
+    def mv_b(x):
+        return B @ x
+
+    mv_kron = kronecker_product_factors([mv_a, mv_b], [n1, n2])
+
+    result = mv_kron(v)
+
+    # Check no NaN or Inf
+    assert jnp.all(jnp.isfinite(result))
+
+    # Verify against reference
+    expected = jnp.kron(A, B) @ v
+    np.testing.assert_allclose(result, expected, atol=1e-5, rtol=1e-5)
