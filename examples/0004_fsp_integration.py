@@ -28,17 +28,15 @@ import gpjax as gpx
 import laplax
 from laplax.curv import estimate_curvature
 from laplax.curv.cov import Posterior, set_posterior_fn
-from laplax.curv.fsp import (
-    compute_curvature_fn,
+from laplax.extra.fsp.curv import compute_curvature_fn
+from laplax.extra.fsp.fsp import (
     compute_matrix_jacobian_product,
-    create_fsp_objective,
-    create_loss_mse,
-    create_loss_nll,
-    create_loss_reg,
     lanczos_jacobian_initialization,
 )
-from laplax.curv.ggn import create_fsp_ggn_mv, create_ggn_mv_without_data
-from laplax.extra.fsp.lanczos_isqrt import lanczos_isqrt
+from laplax.extra.fsp.objective import create_fsp_objective
+from laplax.extra.fsp.ggn import create_fsp_ggn_mv
+from laplax.curv.ggn import create_ggn_mv_without_data
+from laplax.extra.fsp.lanczos_isqrt import lanczos_invert_sqrt
 from laplax.enums import LossFn
 from laplax.eval.pushforward import (
     lin_pred_mean,
@@ -185,6 +183,21 @@ def create_model(config, loss_type):
     return model, model_fn, graph_def
 
 
+def create_loss_mse(model_fn):
+    """Create MSE loss function."""
+    def loss_fn(data, params):
+        preds = jax.vmap(model_fn, in_axes=(0, None))(data["input"], params)
+        return jnp.mean((preds - data["target"]) ** 2)
+    return loss_fn
+
+
+def create_loss_nll(model_fn, base_loss_fn):
+    """Create NLL loss function."""
+    def loss_fn(data, params, scale=None):
+        return base_loss_fn(data["target"], jax.vmap(model_fn, in_axes=(0, None))(data["input"], params))
+    return loss_fn
+
+
 def create_loss_fn(
     loss_type,
     model_fn,
@@ -205,7 +218,7 @@ def create_loss_fn(
 
         fsp_obj = create_fsp_objective(
             model_fn,
-            nll_loss,
+            num_training_samples,
             prior_mean,
             prior_cov_kernel,
         )
@@ -219,7 +232,7 @@ def create_loss_fn(
             data,
             context_points,
             params["model"],
-            other_params=params["param"],
+            scale=params.get("param"),
         )
     else:
         msg = f"Unknown loss type: {loss_type}. Supported types are: mse, nll, fsp"
@@ -239,17 +252,16 @@ def fsp_laplace(
     params_correct = deepcopy(params)
 
     # Initial vector
-    v = lanczos_jacobian_initialization(model_fn, params, data, **kwargs)
+    v = lanczos_jacobian_initialization(model_fn, params, context_points, **kwargs)
     # Define cov operator
-    op = prior_cov_kernel(context_points, context_points)
-    # op = op if isinstance(op, Callable) else lambda x: op @ x
-    cov_matrix = prior_cov_kernel(data["input"], data["input"])
+    cov_matrix = prior_cov_kernel(context_points, context_points)
+    prior_var = jnp.diag(cov_matrix)
 
-    L = lanczos_isqrt(cov_matrix, v)
+    L = lanczos_invert_sqrt(cov_matrix, v, tol=jnp.finfo(v.dtype).eps)
     M, unravel_fn = compute_matrix_jacobian_product(
         model_fn,
         params,
-        data,
+        context_points,
         L,
         has_batch_dim=False,
     )
@@ -263,9 +275,7 @@ def fsp_laplace(
 
     ggn_matrix = create_fsp_ggn_mv(model_fn, params, M)(data)
 
-    prior_var = jnp.diag(prior_cov_kernel(data["test_input"], data["test_input"]))
-
-    S = compute_curvature_fn(model_fn, params, data, ggn_matrix, prior_var, _u)
+    S = compute_curvature_fn(model_fn, params, context_points, ggn_matrix, prior_var, _u)
 
     posterior_state: PosteriorState = {"scale_sqrt": S}
     flatten, unflatten = laplax.util.flatten.create_pytree_flattener(params)

@@ -24,7 +24,7 @@ def create_fsp_ggn_mv(
     params: Params,
     M: PredArray,
     *,
-    has_batch: bool = False,
+    vmap_over_data: bool = True,
     loss_hessian_mv: Callable[[PredArray, PredArray], Num[Array, "..."]] | None = None,
 ) -> Callable[[Params, Data], Params]:
     r"""Implements the FSP-Laplace equation (3.8) from the paper:
@@ -40,18 +40,21 @@ def create_fsp_ggn_mv(
 
     This equation describes the FSP-Laplace approximation for the Generalized Gauss-Newton
     matrix in the context of Bayesian deep learning.
+
+    Args:
+        model_fn: The model's forward pass function.
+        params: Model parameters.
+        M: The matrix M from FSP Laplace.
+        vmap_over_data: Whether to vmap over data. Defaults to True.
+        loss_hessian_mv: Optional custom loss Hessian matrix-vector product.
+
+    Returns:
+        FSP GGN matrix-vector product function.
     """  # noqa: D415, DOC201
     _u, _s, _ = jnp.linalg.svd(M, full_matrices=False)
     tol = jnp.finfo(M.dtype).eps ** 2
     s = _s[_s > tol]
     u = _u[:, : s.size]
-
-    if has_batch:
-        msg = (
-            "FSP GGN MV is not implemented for batched data. "
-            "Please set has_batch=False."
-        )
-        raise NotImplementedError(msg)
 
     def identity_loss_hessian_mv(v, pred=None, target=None):
         return v
@@ -61,7 +64,7 @@ def create_fsp_ggn_mv(
         params=params,
         loss_fn=LossFn.NONE,  # Placeholder - we're providing custom loss_hessian_mv
         factor=1.0,
-        has_batch=has_batch,
+        vmap_over_data=vmap_over_data,
         loss_hessian_mv=identity_loss_hessian_mv,
     )
 

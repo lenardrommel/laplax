@@ -10,8 +10,8 @@ from matplotlib import pyplot as plt
 from plotting import plot_sinusoid_task, plot_gp_prediction
 
 from laplax.curv.cov import Posterior
-from laplax.curv.fsp import create_fsp_objective
-from laplax.extra.fsp.lanczos_isqrt import lanczos_isqrt
+from laplax.extra.fsp.objective import create_fsp_objective
+from laplax.extra.fsp.lanczos_isqrt import lanczos_invert_sqrt
 from jax.flatten_util import ravel_pytree
 
 from laplax.util.flatten import create_partial_pytree_flattener
@@ -330,7 +330,7 @@ _ = plot_sinusoid_task(X_train, y_train, X_test, y_test, X_pred, y_pred)
 # plt.show()
 
 v = jnp.ones_like(X_train.squeeze(-1))
-L = lanczos_isqrt(kernel_fn(X_train, X_train), v)
+L = lanczos_invert_sqrt(kernel_fn(X_train, X_train), v, tol=jnp.finfo(v.dtype).eps)
 # M = J(X_train, X_train)^T @ kernel_matrix
 # compute vjp of model and L
 graph, params = nnx.split(model)
