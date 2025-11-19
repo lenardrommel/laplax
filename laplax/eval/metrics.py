@@ -536,6 +536,9 @@ def low_rank_mahalanobis_distance_inverse_covariance(
 
     Here, `S` are the singular values of the scale, so the covariance
     eigenvalues are `S²`.
+
+    Returns:
+        The Mahalanobis distance between `pred_mean` and `target`.
     """
     del kwargs
     U = pred_cov_low_rank_terms.U  # (D, k)
@@ -554,7 +557,11 @@ def low_rank_mahalanobis_distance_inverse_covariance(
 def low_rank_log_determinant(
     pred_cov_low_rank_terms: LowRankTerms, observation_noise: Array, **kwargs: Kwargs
 ) -> Float:
-    """Compute log|Σ| for Σ = U diag(S²) Uᵀ + σ² I."""
+    """Compute log|Σ| for Σ = U diag(S²) Uᵀ + σ² I.
+
+    Returns:
+        The log-determinant of the covariance matrix Σ.
+    """
     del kwargs
     U = pred_cov_low_rank_terms.U
     S = pred_cov_low_rank_terms.S
@@ -574,7 +581,8 @@ def low_rank_nlpd_per_input(
 ) -> dict[str, Float]:
     """Negative log predictive density (vector form) using low-rank Σ.
 
-    Returns a dict with `nlpd_per_input` and `mahalanobis_distance`.
+    Returns:
+    a dict with `nlpd_per_input` and `mahalanobis_distance`.
     """
     del kwargs
 
