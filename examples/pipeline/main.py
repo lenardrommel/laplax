@@ -15,14 +15,14 @@ from prior import Prior
 
 import laplax
 from laplax.curv.cov import Posterior
-from laplax.curv.fsp import (
-    compute_curvature_fn,
-    compute_matrix_jacobian_product,
-    create_fsp_objective,
+from laplax.extra.fsp.curv import compute_curvature_fn
+from laplax.extra.fsp.fsp import compute_matrix_jacobian_product
+from laplax.extra.fsp.objective import create_fsp_objective
+from laplax.extra.fsp.ggn import create_fsp_ggn_mv
+from laplax.extra.fsp.lanczos_isqrt import (
+    lanczos_invert_sqrt,
     lanczos_jacobian_initialization,
 )
-from laplax.curv.ggn import create_fsp_ggn_mv
-from laplax.extra.fsp.lanczos_isqrt import lanczos_isqrt
 from laplax.eval.pushforward import (
     lin_pred_mean,
     lin_pred_std,
@@ -290,7 +290,7 @@ def fsp_laplace(
 
     cov_matrix = prior_cov_kernel(context_points, context_points, 0.0)
     eps = jnp.finfo(context_points.dtype).eps
-    L = lanczos_isqrt(cov_matrix, v, tol=eps**2)
+    L = lanczos_invert_sqrt(cov_matrix, v, tol=eps**2)
     M, unravel_fn = compute_matrix_jacobian_product(
         model_fn,
         params,

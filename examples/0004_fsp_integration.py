@@ -28,17 +28,19 @@ import gpjax as gpx
 import laplax
 from laplax.curv import estimate_curvature
 from laplax.curv.cov import Posterior, set_posterior_fn
-from laplax.curv.fsp import (
-    compute_curvature_fn,
-    compute_matrix_jacobian_product,
+from laplax.extra.fsp.curv import compute_curvature_fn
+from laplax.extra.fsp.fsp import compute_matrix_jacobian_product
+from laplax.extra.fsp.objective import (
     create_fsp_objective,
-    create_loss_mse,
     create_loss_nll,
     create_loss_reg,
+)
+from laplax.extra.fsp.ggn import create_fsp_ggn_mv
+from laplax.curv.ggn import create_ggn_mv_without_data
+from laplax.extra.fsp.lanczos_isqrt import (
+    lanczos_invert_sqrt,
     lanczos_jacobian_initialization,
 )
-from laplax.curv.ggn import create_fsp_ggn_mv, create_ggn_mv_without_data
-from laplax.extra.fsp.lanczos_isqrt import lanczos_isqrt
 from laplax.enums import LossFn
 from laplax.eval.pushforward import (
     lin_pred_mean,
@@ -245,7 +247,7 @@ def fsp_laplace(
     # op = op if isinstance(op, Callable) else lambda x: op @ x
     cov_matrix = prior_cov_kernel(data["input"], data["input"])
 
-    L = lanczos_isqrt(cov_matrix, v)
+    L = lanczos_invert_sqrt(cov_matrix, v)
     M, unravel_fn = compute_matrix_jacobian_product(
         model_fn,
         params,
