@@ -21,6 +21,7 @@ computation and result aggregation.
 from collections.abc import Iterator
 
 import jax
+import jax.numpy as jnp
 from loguru import logger
 
 from laplax.types import Any, Array, Callable, Data, InputArray, Kwargs
@@ -353,16 +354,26 @@ def evaluate_metrics_on_generator(
             fns=metrics, results={}, aux=pred, low_rank=low_rank, **kwargs
         )
 
-    # Vmap over batch dimension, if necessary.
+    all_results: list[dict[str, Array]] = []
+
     if vmap_over_data:
         evaluate_data = jax.vmap(evaluate_data)
-    if not kwargs.get("debug"):
         evaluate_data = jax.jit(evaluate_data)
+        all_results = [evaluate_data(transform(dp)) for dp in data_generator]
 
-    # Evaluate metrics by iterating over the generator
-    all_results = [evaluate_data(transform(dp)) for dp in data_generator]
+    else:
 
-    # Combine and reduce results
+        def batched_eval(dp_batched: Data) -> dict[str, Array]:
+            return jax.lax.map(
+                evaluate_data,
+                dp_batched,
+                batch_size=kwargs.get("data_batch_size", 1),
+            )
+
+        batched_eval = jax.jit(batched_eval)
+
+        all_results = [batched_eval(transform(dp)) for dp in data_generator]
+
     if not all_results:
         return {}
 
