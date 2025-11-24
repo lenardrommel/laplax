@@ -15,6 +15,7 @@ import jax.numpy as jnp
 
 from laplax import util
 from laplax.curv.cov import Posterior
+from laplax.curv.utils import LowRankTerms
 from laplax.eval.predictives import (
     laplace_bridge,
     mean_field_0_predictive,
@@ -469,6 +470,8 @@ def set_output_mv(
     input: InputArray,
     jvp: Callable[[InputArray, Params], PredArray],
     vjp: Callable[[InputArray, PredArray], Params],
+    *,
+    low_rank: bool = True,
 ):
     """Create matrix-vector product functions for output covariance and scale.
 
@@ -499,9 +502,44 @@ def set_output_mv(
         return jvp(input, vec)
 
     low_rank_terms = posterior_state.low_rank_terms
+    rank = posterior_state.rank
+    scale_mv = posterior_state.scale_mv(posterior_state.state)
+
+    eye = jnp.eye(rank, dtype=input.dtype)
+
+    if not low_rank:
+        return {
+            "cov_mv": output_cov_mv,
+            "jac_mv": output_jac_mv,
+            "low_rank_terms": low_rank_terms,
+        }
+
+    def col_B(e_vec: Array) -> PredArray:
+        delta_w = scale_mv(e_vec)
+        return jvp(input, delta_w)
+
+    B_cols = jax.vmap(col_B)(eye)
+    B = jnp.moveaxis(B_cols, 0, -1)
+
+    scalar = 0.0
+    if posterior_state.low_rank_terms is not None:
+        scalar = posterior_state.low_rank_terms.scalar
+
+    def cov_mv_low_rank(vec: PredArray) -> PredArray:
+        vec_flat = vec.reshape(-1)  # (D,)
+        B_flat = B.reshape(-1, rank)  # (D, r)
+
+        tmp = B_flat.T @ vec_flat  # (r,)
+        out_flat = B_flat @ tmp + scalar * vec_flat  # (D,)
+
+        return out_flat.reshape(vec.shape)
+
+    U_out = B.reshape(-1, rank)  # (D, r)
+    S_out = jnp.ones(rank, dtype=B.dtype)  # since Σ = B B^T
+    low_rank_terms = LowRankTerms(U_out, S_out, scalar=scalar)
 
     return {
-        "cov_mv": output_cov_mv,
+        "cov_mv": cov_mv_low_rank,
         "jac_mv": output_jac_mv,
         "low_rank_terms": low_rank_terms,
     }
