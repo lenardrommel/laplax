@@ -32,8 +32,66 @@ from laplax.util.flatten import (
     create_partial_pytree_flattener,
     create_pytree_flattener,
 )
+from laplax.util.tree import ones_like
 
 KernelStructure = CovarianceStructure
+
+
+def compute_inverse_sqrt_covariance(
+    *,
+    kernel_mv: Callable,
+    structure: KernelStructure,
+    model_fn: ModelFn,
+    params: Params,
+    x_context: InputArray,
+    output_shape: tuple[int, ...],
+    n_chunks: int,
+    lanczos_max_iter: int | None = None,
+) -> tuple[jnp.ndarray, int]:
+    """Compute dense inverse sqrt factors for a prior covariance operator.
+
+    Currently only the unstructured (``KernelStructure.NONE``) path is implemented.
+    For that case, the provided ``kernel_mv`` is expected to either be a callable
+    implementing a matrix-vector product ``v -> K v`` or the dense covariance
+    matrix itself. The result is reshaped back to match the model output layout
+    so it can be consumed by the existing FSP routines.
+
+    Returns:
+    tuple[jnp.ndarray, int]
+        Dense inverse sqrt factor reshaped to match the model outputs as well as
+        the effective rank returned by the Lanczos routine.
+
+    Raises:
+        ValueError: If a kernel structure other than ``KernelStructure.NONE`` is
+            requested.
+    """
+    if structure != KernelStructure.NONE:
+        msg = (
+            "compute_inverse_sqrt_covariance currently supports only the "
+            "'none' kernel structure."
+        )
+        raise ValueError(msg)
+
+    n_functions = int(x_context.shape[0])
+    n_chunks_eff = int(min(max(1, n_chunks), n_functions))
+    while n_functions % n_chunks_eff != 0 and n_chunks_eff > 1:
+        n_chunks_eff -= 1
+
+    init_vec = _lanczos_init_full(model_fn, params, x_context, num_chunks=n_chunks_eff)
+    norm = jnp.linalg.norm(init_vec)
+    init_vec = jnp.where(norm > 0, init_vec / norm, init_vec)
+
+    inverse_sqrt = create_lanczos_factor_unstructured(
+        kernel_mv, init_vec, max_iter=lanczos_max_iter
+    )
+    rank = int(inverse_sqrt.shape[-1])
+
+    reshaped = inverse_sqrt.reshape(
+        n_functions,
+        *output_shape[1:],
+        rank,
+    )
+    return reshaped, rank
 
 
 # ==============================================================================
@@ -491,6 +549,36 @@ def _lanczos_init(model_fn: ModelFn, params: Params, xs: InputArray, num_chunks:
     return initial_vectors_function, initial_vectors_spatial
 
 
+@partial(jax.jit, static_argnums=(0,), static_argnames=("num_chunks",))
+def _lanczos_init_full(
+    model_fn: ModelFn,
+    params: Params,
+    xs: InputArray,
+    num_chunks: Int,
+) -> jnp.ndarray:
+    """Compute a dense initialization vector for unstructured kernels.
+
+    Returns:
+    jnp.ndarray
+        Flattened Jacobian-vector product used as the starting vector.
+    """
+    ones_pytree = jax.tree.map(jnp.ones_like, params)
+
+    model_jvp = jax.vmap(
+        lambda x: jax.jvp(
+            lambda w: model_fn(x, w),
+            (params,),
+            (ones_pytree,),
+        )[1],
+        in_axes=0,
+        out_axes=0,
+    )
+
+    batches = jnp.split(xs, num_chunks, axis=0)
+    b = jnp.concatenate([model_jvp(batch) for batch in batches], axis=0)
+    return b.reshape(-1)
+
+
 # ==============================================================================
 # Kernel structure specific implementations
 # ==============================================================================
@@ -788,13 +876,13 @@ def create_fsp_posterior_none(
 
     sum(x.size for x in jax.tree_util.tree_leaves(params))
 
-    # Initialize with ones (simple initialization for unstructured case)
-    ones_pytree = jax.tree.map(jnp.ones_like, params)
-    model_jvp = create_model_jvp(params, ones_pytree, model_fn, in_axes=0, out_axes=0)
-    b = model_jvp(x_context)
-
     # Compute Lanczos inverse sqrt for the prior kernel
     if independent_outputs or kernels_per_output is not None:
+        ones_pytree = ones_like(params)
+        model_jvp = create_model_jvp(
+            params, ones_pytree, model_fn, in_axes=0, out_axes=0
+        )
+        b = model_jvp(x_context)
         # Build block-diagonal K^{-1/2} across output channels using per-output kernels
         output_dim = 1 if b.ndim == 1 else int(b.shape[-1])
         per_output_cols = []
@@ -823,11 +911,16 @@ def create_fsp_posterior_none(
             )
             offset += r
     else:
-        initial_vector = b.flatten() / (jnp.linalg.norm(b.flatten()) + 1e-12)
-        k_inv_sqrt = _lanczos_none_structure(kernel, initial_vector, max_iter)
-
-        rank = k_inv_sqrt.shape[-1]
-        k_inv_sqrt_dense = k_inv_sqrt.reshape(*output_shape, rank)
+        k_inv_sqrt_dense, _ = compute_inverse_sqrt_covariance(
+            kernel_mv=kernel,
+            structure=KernelStructure.NONE,
+            model_fn=model_fn,
+            params=params,
+            x_context=x_context,
+            output_shape=output_shape,
+            n_chunks=n_chunks_eff,
+            lanczos_max_iter=max_iter,
+        )
 
     M = _accumulate_M_over_chunks(
         model_fn,

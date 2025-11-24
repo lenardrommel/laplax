@@ -372,6 +372,72 @@ def nonlin_pred_std(
     return results, aux
 
 
+def nonlin_pred_lsqrt_low_rank_cov(
+    results: dict[str, Array],
+    aux: dict[str, Any],
+    **kwargs,
+) -> tuple[dict[str, Array], dict[str, Any]]:
+    r"""Attach approximate low-rank predictive info and cheap diagonal.
+
+    - Keeps `low_rank_terms` (computed in lin_setup when low_rank=True).
+    - Computes `pred_var` from the low-rank factors without densifying.
+      For Σ = U diag(S²) Uᵀ + σ² I with U ∈ R^{D\times k},
+      diag(Σ) = σ² 1 + Σ_j (S_j U[:, j])².
+
+    Args:
+        results: Dictionary to store computed results.
+        aux: Auxiliary data containing the prediction ensemble.
+        **kwargs: Additional arguments (ignored).
+
+    Returns:
+        tuple: Updated `results` and `aux`.
+
+    """  # noqa: DOC501
+    if "pred_mean" not in results:
+        results, aux = nonlin_pred_mean(results, aux, **kwargs)
+
+    pred_ensemble = aux.get("pred_ensemble")
+    if pred_ensemble is None:
+        msg = "pred_ensemble missing in aux; run nonlin_setup first."
+        raise ValueError(msg)
+
+    num_samples = pred_ensemble.shape[0]
+    pred_mean = results["pred_mean"]
+    dtype = pred_mean.dtype
+
+    if num_samples <= 1:
+        empty = LowRankTerms(
+            U=jnp.zeros((pred_mean.size, 0), dtype=dtype),
+            S=jnp.zeros((0,), dtype=dtype),
+            scalar=jnp.asarray(0.0, dtype=dtype),
+        )
+        results["pred_cov_low_rank_terms"] = empty
+        results.setdefault("low_rank_terms", empty)
+        return results, aux
+
+    centered = pred_ensemble - pred_mean
+    flat_centered = centered.reshape(num_samples, -1)
+    denom = max(num_samples - 1, 1)
+    scaled = flat_centered / jnp.sqrt(denom)
+
+    _, singular_values, vt = jnp.linalg.svd(scaled, full_matrices=False)
+    basis = vt.T
+    terms = LowRankTerms(
+        U=basis,
+        S=singular_values,
+        scalar=jnp.asarray(0.0, dtype=dtype),
+    )
+
+    results["pred_cov_low_rank_terms"] = terms
+    results.setdefault("low_rank_terms", terms)
+
+    if "pred_var" not in results:
+        variances = jnp.sum((basis * singular_values) ** 2, axis=1)
+        results["pred_var"] = variances.reshape(pred_mean.shape)
+
+    return results, aux
+
+
 def nonlin_samples(
     results: dict[str, Array],
     aux: dict[str, Any],
@@ -458,6 +524,7 @@ DEFAULT_NONLIN_FINALIZE_FNS = [
     nonlin_pred_var,
     nonlin_pred_std,
     nonlin_samples,
+    nonlin_pred_lsqrt_low_rank_cov,
 ]
 
 # -------------------------------------------------------------------------
@@ -472,7 +539,7 @@ def set_output_mv(
     vjp: Callable[[InputArray, PredArray], Params],
     *,
     low_rank: bool = True,
-):
+) -> dict[str, Callable[[PredArray], PredArray]]:
     """Create matrix-vector product functions for output covariance and scale.
 
     This function propagates uncertainty from weight space to output space by
@@ -486,6 +553,8 @@ def set_output_mv(
         input: Input data for the model.
         jvp: Function for computing Jacobian-vector products.
         vjp: Function for computing vector-Jacobian products.
+
+        low_rank: Whether to compute a low-rank approximation of the output
 
     Returns:
         dict: A dictionary with:
@@ -721,11 +790,11 @@ def lin_pred_lsqrt_low_rank_cov(
     aux: dict[str, Any],
     **kwargs,
 ) -> tuple[dict[str, Array], dict[str, Any]]:
-    """Attach low-rank predictive info and cheap diagonal.
+    r"""Attach low-rank predictive info and cheap diagonal.
 
     - Keeps `low_rank_terms` (computed in lin_setup when low_rank=True).
     - Computes `pred_var` from the low-rank factors without densifying.
-      For Σ = U diag(S²) Uᵀ + σ² I with U ∈ R^{D×k},
+      For Σ = U diag(S²) Uᵀ + σ² I with U ∈ R^{D\times k},
       diag(Σ) = σ² 1 + Σ_j (S_j U[:, j])².
     """  # noqa: DOC201
     if "pred_mean" not in results:

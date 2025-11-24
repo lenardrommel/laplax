@@ -21,7 +21,6 @@ computation and result aggregation.
 from collections.abc import Iterator
 
 import jax
-import jax.numpy as jnp
 from loguru import logger
 
 from laplax.types import Any, Array, Callable, Data, InputArray, Kwargs
