@@ -267,7 +267,7 @@ def _jmp_fast(
 def create_jmp(
     model_fn: ModelFn,
     *,
-    vmap_over_data: bool,
+    vmap_over_data: bool = False,
     batch_size: Int = 8,
 ) -> Callable[[Params, InputArray, Params], PredArray]:
     """Create a JVP-based Jacobian-matrix product specialized to `model_fn`.
@@ -354,28 +354,44 @@ def create_ggn_mv_without_data(
     )
 
     def ggn_fsp_mv(vec, data):
-        x_context = data["context"]
+        """FSP GGN: compute U^T G U.
+
+        vec is a pytree U with trailing rank dimension.
+        Returns Gram matrix of shape (rank, rank).
+        """
+        # J @ U: shape (batch, *output, rank)
         ju = jmp(
             params=params,
-            x_context=x_context,
+            x_context=data["input"],
             u=vec,
         )
-        batch_size = ju.shape[0]
+
+        batch_size_data = ju.shape[0]
         rank = ju.shape[-1]
 
-        preds = jax.vmap(lambda x: model_fn(x, params))(x_context)
+        # Get predictions for loss Hessian
+        def model_single(x):
+            return model_fn(x, params)
+        preds = jax.lax.map(model_single, data["input"], batch_size=batch_size)
 
-        ju_rank_major = jnp.moveaxis(ju, -1, 0)
+        # Apply loss Hessian to each column of JU
+        # ju has shape (batch, *output, rank)
+        # We need to apply H to each rank slice
+        ju_rank_major = jnp.moveaxis(ju, -1, 0)  # (rank, batch, *output)
 
         def apply_loss_hessian(jv_single):
+            """Apply H to one column."""
             return loss_hessian_mv(jv_single, pred=preds, target=data["target"])
 
-        hju_rank_major = jax.vmap(apply_loss_hessian)(ju_rank_major)
-        hju = jnp.moveaxis(hju_rank_major, 0, -1)
+        hju_rank_major = jax.lax.map(apply_loss_hessian, ju_rank_major, batch_size=batch_size)
+        hju = jnp.moveaxis(hju_rank_major, 0, -1)  # (batch, *output, rank)
 
-        ju_flat = ju.reshape(batch_size, -1, rank)
-        hju_flat = hju.reshape(batch_size, -1, rank)
-        gram = jnp.einsum("bji,bjk->ik", ju_flat, hju_flat)
+        # Compute Gram matrix: sum_i (JU)_i^T H_i (JU)_i
+        ju_flat = ju.reshape(batch_size_data, -1, rank)   # (batch, output_flat, rank)
+        hju_flat = hju.reshape(batch_size_data, -1, rank)
+
+        # gram[i,j] = sum over batch and output of ju[:,k,i] * hju[:,k,j]
+        gram = jnp.einsum("boi,boj->ij", ju_flat, hju_flat)
 
         return mul(factor, gram)
 
@@ -393,6 +409,7 @@ def create_ggn_mv(
     vmap_over_data: bool = True,
     loss_hessian_mv: Callable | None = None,
     fsp: bool = False,
+    batch_size: Int = 1,
 ) -> Callable[[Params], Params]:
     r"""Computes the Generalized Gauss-Newton (GGN) matrix-vector product with data.
 
@@ -465,6 +482,7 @@ def create_ggn_mv(
         vmap_over_data=vmap_over_data,
         loss_hessian_mv=loss_hessian_mv,
         fsp=fsp,
+        batch_size=batch_size,
     )
 
     def wrapped_ggn_mv(vec: Params) -> Params:

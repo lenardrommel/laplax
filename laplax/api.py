@@ -566,6 +566,7 @@ def GGN(
     fsp: bool = False,
     verbose_logging: bool = True,
     transform: Callable | None = None,
+    batch_size: int = 1,
 ) -> Callable[[Params], Params]:
     """Create a GGN matrix-vector product function.
 
@@ -579,6 +580,7 @@ def GGN(
         fsp: Whether to use FSP (Function-Space Posterior) mode.
         verbose_logging: Whether to enable verbose logging.
         transform: Transform to apply to data.
+        batch_size: Batch size for lax.map operations in FSP mode.
 
     Returns:
         GGN matrix-vector product function.
@@ -593,6 +595,7 @@ def GGN(
         factor=factor,
         vmap_over_data=vmap_over_data,
         fsp=fsp,
+        batch_size=batch_size,
     )
 
     mv_bound = _maybe_wrap_loader_or_batch(

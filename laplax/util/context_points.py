@@ -78,6 +78,48 @@ def _pca_transform_jax(
     return jax.device_put(transformed), pca
 
 
+def _pca_transform_input_jax(
+    x_data: Array,
+    n_components: int | None = None,
+    variance_threshold: float = 0.95,
+) -> tuple[Array, PCA, np.ndarray, np.ndarray]:
+    """Standardize input features, then run PCA and return scores.
+
+    Returns:
+        Tuple of (transformed_data, fitted_pca_model, mean, std).
+    """
+    x_np = np.array(x_data)
+    feat_mean = x_np.mean(axis=0, keepdims=True)
+    feat_std = x_np.std(axis=0, keepdims=True) + 1e-8
+    x_np_std = (x_np - feat_mean) / feat_std
+
+    if n_components is None:
+        pca = PCA(n_components=variance_threshold, svd_solver="full")
+    else:
+        pca = PCA(n_components=n_components)
+
+    pca.fit(x_np_std)
+    transformed = pca.transform(x_np_std)
+
+    return jax.device_put(transformed), pca, feat_mean, feat_std
+
+
+def _pca_inverse_transform_jax(
+    pca_scores: np.ndarray,
+    pca: PCA,
+    mean: np.ndarray,
+    std: np.ndarray,
+) -> Array:
+    """Inverse PCA transform: map from PCA space back to original input space.
+
+    Returns:
+        Reconstructed data in original input space.
+    """
+    x_pca_std = pca.inverse_transform(pca_scores)
+    x_reconstructed = x_pca_std * std + mean
+    return jax.device_put(x_reconstructed)
+
+
 def _generate_low_discrepancy_sequence(
     n_dims: int,
     n_points: int,
@@ -94,7 +136,10 @@ def _generate_low_discrepancy_sequence(
     """
     if sequence_type.lower() == "sobol":
         sampler = qmc.Sobol(d=n_dims, scramble=True, seed=seed)
-        points = sampler.random_base2(n_points)
+        if (n_points & (n_points - 1)) == 0 and n_points > 0:
+            points = sampler.random_base2(int(np.log2(n_points)))
+        else:
+            points = sampler.random(n_points)
     elif sequence_type.lower() == "halton":
         sampler = qmc.Halton(d=n_dims, scramble=True, seed=seed)
         points = sampler.random(n_points)
@@ -271,6 +316,315 @@ def _halton_context_points(
     )
 
 
+def _get_input_shape_and_dim(dataloader: DataLoader) -> tuple[tuple, int]:
+    """Get input shape and flattened feature dimension from dataloader.
+
+    Returns:
+        Tuple of (input_shape, feature_dim).
+    """
+    x, _ = next(iter(dataloader))
+    x_array = jnp.array(x)
+    input_shape = x_array.shape[1:]
+    feature_dim = int(np.prod(input_shape))
+    return input_shape, feature_dim
+
+
+def _get_input_range(dataloader: DataLoader) -> tuple[Array, Array]:
+    """Get min and max values for each input feature dimension.
+
+    Returns:
+        Tuple of (min_values, max_values) as 1D arrays.
+    """
+    all_x, _ = _load_all_data_from_dataloader(dataloader)
+    x_flat = all_x.reshape(len(all_x), -1)
+    min_vals = jnp.min(x_flat, axis=0)
+    max_vals = jnp.max(x_flat, axis=0)
+    return min_vals, max_vals
+
+
+def _generate_synthetic_context_points(
+    dataloader: DataLoader,
+    n_context_points: Int,
+    sequence_type: str = "halton",
+    seed: Int | None = None,
+) -> tuple[Array, Array]:
+    """Generate synthetic context points in input space using low-discrepancy sequences.
+
+    Generates points that look like data but are not from the dataset.
+
+    Returns:
+        Tuple of (context_x, context_y) where context_x are synthetic points
+        and context_y are dummy values with appropriate shape.
+    """
+    _, all_y = _load_all_data_from_dataloader(dataloader)
+    input_shape, feature_dim = _get_input_shape_and_dim(dataloader)
+    min_vals, max_vals = _get_input_range(dataloader)
+
+    ld_points = _generate_low_discrepancy_sequence(
+        n_dims=feature_dim,
+        n_points=n_context_points,
+        sequence_type=sequence_type,
+        seed=seed,
+    )
+
+    ld_points_jax = jnp.array(ld_points)
+    context_x_flat = ld_points_jax * (max_vals - min_vals) + min_vals
+    context_x = context_x_flat.reshape(n_context_points, *input_shape)
+
+    y_shape = all_y.shape[1:]
+    context_y = jnp.zeros((n_context_points, *y_shape), dtype=all_y.dtype)
+
+    return context_x, context_y
+
+
+def _halton_synthetic_context_points(
+    dataloader: DataLoader,
+    n_context_points: Int,
+    n_pca_components: Int | None = None,
+    pca_variance_threshold: float = 0.95,
+    seed: Int | None = None,
+) -> tuple[Array, Array]:
+    """Generate synthetic context points using Halton sequence in input space.
+
+    Returns:
+        Tuple of (context_x, context_y).
+    """
+    del n_pca_components, pca_variance_threshold
+    return _generate_synthetic_context_points(
+        dataloader=dataloader,
+        n_context_points=n_context_points,
+        sequence_type="halton",
+        seed=seed,
+    )
+
+
+def _latin_hypercube_synthetic_context_points(
+    dataloader: DataLoader,
+    n_context_points: Int,
+    n_pca_components: Int | None = None,
+    pca_variance_threshold: float = 0.95,
+    seed: Int | None = None,
+) -> tuple[Array, Array]:
+    """Generate synthetic context points using Latin Hypercube in input space.
+
+    Returns:
+        Tuple of (context_x, context_y).
+    """
+    del n_pca_components, pca_variance_threshold
+    return _generate_synthetic_context_points(
+        dataloader=dataloader,
+        n_context_points=n_context_points,
+        sequence_type="latin_hypercube",
+        seed=seed,
+    )
+
+
+def _sobol_synthetic_context_points(
+    dataloader: DataLoader,
+    n_context_points: Int,
+    n_pca_components: Int | None = None,
+    pca_variance_threshold: float = 0.95,
+    seed: Int | None = None,
+) -> tuple[Array, Array]:
+    """Generate synthetic context points using Sobol sequence in input space.
+
+    Returns:
+        Tuple of (context_x, context_y).
+    """
+    del n_pca_components, pca_variance_threshold
+    return _generate_synthetic_context_points(
+        dataloader=dataloader,
+        n_context_points=n_context_points,
+        sequence_type="sobol",
+        seed=seed,
+    )
+
+
+def _grid_context_points(
+    dataloader: DataLoader,
+    n_context_points: Int,
+    n_pca_components: Int | None = None,
+    pca_variance_threshold: float = 0.95,
+    seed: Int | None = None,
+) -> tuple[Array, Array]:
+    """Generate context points on a regular grid in input space.
+
+    Returns:
+        Tuple of (context_x, context_y).
+
+    Raises:
+        ValueError: If feature dimension is not 1, 2, 3, or 4.
+    """
+    del n_pca_components, pca_variance_threshold, seed
+
+    _, all_y = _load_all_data_from_dataloader(dataloader)
+    input_shape, feature_dim = _get_input_shape_and_dim(dataloader)
+    min_vals, max_vals = _get_input_range(dataloader)
+
+    if feature_dim not in {1, 2, 3, 4}:
+        msg = (
+            f"Grid context selection only works for 1D-4D features, got {feature_dim}D"
+        )
+        raise ValueError(msg)
+
+    if feature_dim == 1:
+        context_x_flat = jnp.linspace(
+            min_vals[0], max_vals[0], n_context_points
+        ).reshape(-1, 1)
+    elif feature_dim == 2:
+        n_dim = int(jnp.rint(jnp.sqrt(n_context_points)))
+        x1 = jnp.linspace(min_vals[0], max_vals[0], n_dim)
+        x2 = jnp.linspace(min_vals[1], max_vals[1], n_dim)
+        X1, X2 = jnp.meshgrid(x1, x2, indexing="ij")
+        context_x_flat = jnp.stack([X1, X2], axis=-1).reshape(-1, 2)
+    elif feature_dim == 3:
+        n_dim = int(jnp.rint(n_context_points ** (1 / 3)))
+        x1 = jnp.linspace(min_vals[0], max_vals[0], n_dim)
+        x2 = jnp.linspace(min_vals[1], max_vals[1], n_dim)
+        x3 = jnp.linspace(min_vals[2], max_vals[2], n_dim)
+        X1, X2, X3 = jnp.meshgrid(x1, x2, x3, indexing="ij")
+        context_x_flat = jnp.stack([X1, X2, X3], axis=-1).reshape(-1, 3)
+    else:
+        n_dim = int(jnp.rint(n_context_points ** (1 / 4)))
+        x1 = jnp.linspace(min_vals[0], max_vals[0], n_dim)
+        x2 = jnp.linspace(min_vals[1], max_vals[1], n_dim)
+        x3 = jnp.linspace(min_vals[2], max_vals[2], n_dim)
+        x4 = jnp.linspace(min_vals[3], max_vals[3], n_dim)
+        X1, X2, X3, X4 = jnp.meshgrid(x1, x2, x3, x4, indexing="ij")
+        context_x_flat = jnp.stack([X1, X2, X3, X4], axis=-1).reshape(-1, 4)
+
+    context_x_flat = context_x_flat[:n_context_points]
+    context_x = context_x_flat.reshape(-1, *input_shape)
+
+    y_shape = all_y.shape[1:]
+    context_y = jnp.zeros((len(context_x), *y_shape), dtype=all_y.dtype)
+
+    return context_x, context_y
+
+
+def _generate_pca_synthetic_context_points(
+    dataloader: DataLoader,
+    n_context_points: Int,
+    sequence_type: str = "halton",
+    n_pca_components: Int | None = None,
+    pca_variance_threshold: float = 0.95,
+    seed: Int | None = None,
+) -> tuple[Array, Array]:
+    """Generate synthetic context points by sampling in PCA space and mapping back.
+
+    Performs PCA on input data, samples in PCA space using low-discrepancy sequences,
+    then maps back to input space using inverse PCA transform. This generates points
+    that look like data but are not from the dataset.
+
+    Returns:
+        Tuple of (context_x, context_y) where context_x are synthetic points
+        and context_y are dummy values with appropriate shape.
+    """
+    all_x, all_y = _load_all_data_from_dataloader(dataloader)
+    input_shape, _ = _get_input_shape_and_dim(dataloader)
+
+    x_flat = all_x.reshape(len(all_x), -1)
+
+    x_pca, pca, mean, std = _pca_transform_input_jax(
+        x_flat,
+        n_components=n_pca_components,
+        variance_threshold=pca_variance_threshold,
+    )
+
+    x_pca_np = np.array(x_pca)
+    pca_min = x_pca_np.min(axis=0)
+    pca_max = x_pca_np.max(axis=0)
+
+    ld_points = _generate_low_discrepancy_sequence(
+        n_dims=pca.n_components_,
+        n_points=n_context_points,
+        sequence_type=sequence_type,
+        seed=seed,
+    )
+
+    ld_points_scaled = ld_points * (pca_max - pca_min) + pca_min
+
+    context_x_flat = _pca_inverse_transform_jax(ld_points_scaled, pca, mean, std)
+    context_x = context_x_flat.reshape(n_context_points, *input_shape)
+
+    y_shape = all_y.shape[1:]
+    context_y = jnp.zeros((n_context_points, *y_shape), dtype=all_y.dtype)
+
+    return context_x, context_y
+
+
+def _pca_halton_synthetic_context_points(
+    dataloader: DataLoader,
+    n_context_points: Int,
+    n_pca_components: Int | None = None,
+    pca_variance_threshold: float = 0.95,
+    seed: Int | None = None,
+) -> tuple[Array, Array]:
+    """Generate synthetic context points using PCA + Halton sequence.
+
+    Samples in PCA space and maps back to input space.
+
+    Returns:
+        Tuple of (context_x, context_y).
+    """
+    return _generate_pca_synthetic_context_points(
+        dataloader=dataloader,
+        n_context_points=n_context_points,
+        sequence_type="halton",
+        n_pca_components=n_pca_components,
+        pca_variance_threshold=pca_variance_threshold,
+        seed=seed,
+    )
+
+
+def _pca_latin_hypercube_synthetic_context_points(
+    dataloader: DataLoader,
+    n_context_points: Int,
+    n_pca_components: Int | None = None,
+    pca_variance_threshold: float = 0.95,
+    seed: Int | None = None,
+) -> tuple[Array, Array]:
+    """Generate synthetic context points using PCA + Latin Hypercube.
+
+    Samples in PCA space and maps back to input space.
+
+    Returns:
+        Tuple of (context_x, context_y).
+    """
+    return _generate_pca_synthetic_context_points(
+        dataloader=dataloader,
+        n_context_points=n_context_points,
+        sequence_type="latin_hypercube",
+        n_pca_components=n_pca_components,
+        pca_variance_threshold=pca_variance_threshold,
+        seed=seed,
+    )
+
+
+def _pca_sobol_synthetic_context_points(
+    dataloader: DataLoader,
+    n_context_points: Int,
+    n_pca_components: Int | None = None,
+    pca_variance_threshold: float = 0.95,
+    seed: Int | None = None,
+) -> tuple[Array, Array]:
+    """Generate synthetic context points using PCA + Sobol sequence.
+
+    Samples in PCA space and maps back to input space.
+
+    Returns:
+        Tuple of (context_x, context_y).
+    """
+    return _generate_pca_synthetic_context_points(
+        dataloader=dataloader,
+        n_context_points=n_context_points,
+        sequence_type="sobol",
+        n_pca_components=n_pca_components,
+        pca_variance_threshold=pca_variance_threshold,
+        seed=seed,
+    )
+
+
 def _random_context_points(
     dataloader: DataLoader,
     n_context_points: Int,
@@ -311,12 +665,16 @@ ContextSelectionFn = Callable[
 
 CONTEXT_SELECTION_METHODS: dict[str, ContextSelectionFn] = {
     "random": _random_context_points,
-    "sobol": _sobol_context_points,
+    "sobol": _sobol_synthetic_context_points,
     "pca_sobol": _sobol_context_points,
-    "halton": _halton_context_points,
+    "halton": _halton_synthetic_context_points,
     "pca_halton": _halton_context_points,
-    "latin_hypercube": _latin_hypercube_context_points,
+    "latin_hypercube": _latin_hypercube_synthetic_context_points,
     "pca_lhs": _latin_hypercube_context_points,
+    "grid": _grid_context_points,
+    "pca_synthetic_halton": _pca_halton_synthetic_context_points,
+    "pca_synthetic_lhs": _pca_latin_hypercube_synthetic_context_points,
+    "pca_synthetic_sobol": _pca_sobol_synthetic_context_points,
     # Alias 'pca' to Sobol-based PCA selection
     "pca": _sobol_context_points,
 }
@@ -445,6 +803,85 @@ def _apply_grid_stride(
     return grid, context_x
 
 
+def make_grid(
+    spatial_dims: int | tuple[int, ...],
+    min_domain: float = 0.0,
+    max_domain: float = 2 * np.pi,
+) -> jnp.ndarray:
+    """Create a spatial grid with the specified dimensions.
+
+    Args:
+        spatial_dims: Spatial dimensions. Can be:
+            - int: Number of points for 1D grid
+            - tuple[int, int]: (nx, ny) for 2D grid
+            - tuple[int, int, int]: (nx, ny, nz) for 3D grid
+        min_domain: Minimum domain value. Defaults to 0.0.
+        max_domain: Maximum domain value. Defaults to 2π.
+
+    Returns:
+        Grid array with appropriate shape:
+            - 1D: (n_points,)
+            - 2D: (ny, nx, 2) with coordinates stacked along last axis
+            - 3D: (nx, ny, nz, 3) with coordinates stacked along last axis
+
+    Raises:
+        ValueError: If spatial_dims is invalid or unsupported.
+
+    Examples:
+        >>> grid_1d = make_grid(32)  # 1D grid with 32 points
+        >>> grid_2d = make_grid((16, 16))  # 2D grid 16x16
+        >>> grid_3d = make_grid((8, 8, 8))  # 3D grid 8x8x8
+    """
+    if isinstance(spatial_dims, int):
+        num_points = spatial_dims
+        domain_extent = max_domain - min_domain
+        dx = domain_extent / num_points
+        grid = jnp.linspace(min_domain, max_domain - dx, num_points)
+        return grid
+
+    if isinstance(spatial_dims, tuple):
+        num_dims = len(spatial_dims)
+
+        if num_dims == 2:
+            num_points_x, num_points_y = spatial_dims
+            domain_extent = max_domain - min_domain
+            dx = domain_extent / num_points_x
+            dy = domain_extent / num_points_y
+
+            x = jnp.linspace(min_domain, max_domain - dx, num_points_x)
+            y = jnp.linspace(min_domain, max_domain - dy, num_points_y)
+
+            X, Y = jnp.meshgrid(x, y, indexing="xy")
+            grid = jnp.stack([X, Y], axis=-1)
+            return grid
+
+        if num_dims == 3:
+            num_points_x, num_points_y, num_points_z = spatial_dims
+            domain_extent = max_domain - min_domain
+            dx = domain_extent / num_points_x
+            dy = domain_extent / num_points_y
+            dz = domain_extent / num_points_z
+
+            x = jnp.linspace(min_domain, max_domain - dx, num_points_x)
+            y = jnp.linspace(min_domain, max_domain - dy, num_points_y)
+            z = jnp.linspace(min_domain, max_domain - dz, num_points_z)
+            X, Y, Z = jnp.meshgrid(x, y, z, indexing="ij")
+            grid = jnp.stack([X, Y, Z], axis=-1)
+            return grid
+
+        msg = (
+            f"Unsupported number of spatial dimensions: {num_dims}. "
+            "Expected int for 1D, tuple of 2 for 2D, or tuple of 3 for 3D."
+        )
+        raise ValueError(msg)
+
+    msg = (
+        f"Invalid spatial_dims type: {type(spatial_dims)}. "
+        "Expected int or tuple of ints."
+    )
+    raise ValueError(msg)
+
+
 def select_context_points(
     dataloader: DataLoader,
     context_selection: str,
@@ -480,8 +917,9 @@ def select_context_points(
                 msg = (
                     f"Unknown context_selection: {strategy}. "
                     "Choose from 'random', 'sobol', 'halton', "
-                    "'latin_hypercube', 'pca', 'pca_sobol', "
-                    "'pca_halton', 'pca_lhs'"
+                    "'latin_hypercube', 'grid', 'pca', 'pca_sobol', "
+                    "'pca_halton', 'pca_lhs', 'pca_synthetic_halton', "
+                    "'pca_synthetic_lhs', 'pca_synthetic_sobol'"
                 )
                 raise ValueError(msg)
             cx, cy = CONTEXT_SELECTION_METHODS[strategy](
@@ -507,8 +945,9 @@ def select_context_points(
         msg = (
             f"Unknown context_selection: {context_selection}. "
             "Choose from 'random', 'sobol', 'halton', "
-            "'latin_hypercube', 'pca', 'pca_sobol', "
-            "'pca_halton', 'pca_lhs'"
+            "'latin_hypercube', 'grid', 'pca', 'pca_sobol', "
+            "'pca_halton', 'pca_lhs', 'pca_synthetic_halton', "
+            "'pca_synthetic_lhs', 'pca_synthetic_sobol'"
         )
         raise ValueError(msg)
 

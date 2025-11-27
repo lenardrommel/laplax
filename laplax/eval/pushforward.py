@@ -538,7 +538,7 @@ def set_output_mv(
     jvp: Callable[[InputArray, Params], PredArray],
     vjp: Callable[[InputArray, PredArray], Params],
     *,
-    low_rank: bool = True,
+    low_rank: bool = False,
 ) -> dict[str, Callable[[PredArray], PredArray]]:
     """Create matrix-vector product functions for output covariance and scale.
 
@@ -574,14 +574,14 @@ def set_output_mv(
     rank = posterior_state.rank
     scale_mv = posterior_state.scale_mv(posterior_state.state)
 
-    eye = jnp.eye(rank, dtype=input.dtype)
-
     if not low_rank:
         return {
             "cov_mv": output_cov_mv,
             "jac_mv": output_jac_mv,
             "low_rank_terms": low_rank_terms,
         }
+    # TODO: use the already computed posterior state
+    eye = jnp.eye(rank, dtype=input.dtype)
 
     def col_B(e_vec: Array) -> PredArray:
         delta_w = scale_mv(e_vec)

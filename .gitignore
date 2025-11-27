@@ -4,6 +4,10 @@ checkpoints/*
 results/*
 wandb/*
 data/*
+.DS_Store
+__pycache__/
+laplax.egg-info/
+laplax/laplax/extra
 
 
 

@@ -670,6 +670,7 @@ def cov_low_rank_approximation(results: dict, aux: dict, **kwargs: Kwargs):
         tuple[dict, dict]: Updated `results` and `aux` dictionaries.
     """
     cov_pred = results.get("pred_cov")
+    seed = kwargs.get("seed", 0)
     if cov_pred is None:
         return results, aux
 
@@ -678,7 +679,7 @@ def cov_low_rank_approximation(results: dict, aux: dict, **kwargs: Kwargs):
         return results, aux
 
     cov_rank = kwargs.get("cov_rank", kwargs.get("rank", 100))
-    lr = lanczos_lowrank(cov_pred, rank=int(cov_rank))
+    lr = lanczos_lowrank(cov_pred, rank=int(cov_rank), key=jax.random.key(seed))
 
     # Clip negatives and convert eigenvalues (λ) to singular values (S = sqrt(λ)).
     S_cov = jnp.where(lr.S > 0.0, lr.S, 0.0)
