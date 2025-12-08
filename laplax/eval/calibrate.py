@@ -340,7 +340,7 @@ def adam_with_restarts(
 def stein_variational_gradient_descent(
     objective: Callable[[PriorArguments], float],
     initial_log_prior_prec: float,
-    num_particles: int = 10,
+    num_particles: int = 2,
     learning_rate: float = 1e-2,
     max_iter: int | None = None,
     **kwargs: Kwargs,
