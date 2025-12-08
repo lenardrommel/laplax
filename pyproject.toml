@@ -24,7 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Operating System :: OS Independent",
 ]
-dependencies = ["jax", "jaxtyping", "loguru", "tqdm"]
+dependencies = ["jax", "jaxtyping", "loguru", "scipy", "scikit-learn", "tqdm"]
 version = "0.0.2"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -47,6 +47,7 @@ dev = [
     "curvlinops-for-pytorch",
     "laplace-torch",
     "coveralls",
+    "scikit-learn",
 ]
 notebooks = [
     "torch",
