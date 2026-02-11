@@ -121,3 +121,34 @@ def to_dense(mv: Callable, layout: Layout, **kwargs: Kwargs) -> Array:
         jnp.transpose,
         jax.lax.map(mv, identity, batch_size=kwargs.get("to_dense_batch_size")),
     )  # jax.lax.map shares along the first axis (rows instead of columns).
+
+
+def kernel_mv(
+    kernel_fn: Callable[[Array, Array], Array],
+    x1: Array,
+    x2: Array,
+    v: Array,
+    *,
+    batch_size: int = 64,
+) -> Array:
+    """Compute kernel matrix-vector product K(x1, x2) @ v memory-efficiently.
+
+    Args:
+        kernel_fn: Kernel function k(x, y) -> scalar/matrix.
+        x1: First set of inputs (N1, D).
+        x2: Second set of inputs (N2, D).
+        v: Vector to multiply (N2, Out).
+        batch_size: Batch size for row-wise computation.
+
+    Returns:
+        Result of matrix-vector product (N1, Out).
+    """
+
+    def row_fn(x_i):
+        # x_i: (D,)
+        # k_row: (N2,)
+        k_row = kernel_fn(x_i[None], x2).reshape(-1)
+        return jnp.dot(k_row, v)
+
+    # Compute K @ v using map to avoid storing full K
+    return jax.lax.map(row_fn, x1, batch_size=batch_size)

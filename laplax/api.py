@@ -21,7 +21,10 @@ from loguru import logger
 
 # Laplax imports
 from laplax.curv.cov import Posterior, estimate_curvature, set_posterior_fn
-from laplax.curv.ggn import create_ggn_mv_without_data
+from laplax.curv.ggn import (
+    create_ggn_mv_fsp_without_data,
+    create_ggn_mv_without_data,
+)
 from laplax.enums import (
     CalibrationMethod,
     CalibrationObjective,
@@ -565,6 +568,7 @@ def GGN(
     vmap_over_data: bool = True,
     verbose_logging: bool = True,
     transform: Callable | None = None,
+    fsp: bool = False,
 ) -> Callable[[Params], Params]:
     """Create a GGN matrix-vector product function.
 
@@ -577,6 +581,7 @@ def GGN(
         vmap_over_data: Whether model expects batch dimension.
         verbose_logging: Whether to enable verbose logging.
         transform: Transform to apply to data.
+        fsp: Whether to use Function Space Prior (FSP) formulation.
 
     Returns:
         GGN matrix-vector product function.
@@ -584,13 +589,24 @@ def GGN(
     Raises:
         ValueError: If input/output shapes don't match.
     """
-    ggn_mv = create_ggn_mv_without_data(  # type: ignore[call-arg]
-        model_fn=model_fn,
-        params=params,
-        loss_fn=loss_fn,
-        factor=factor,
-        vmap_over_data=vmap_over_data,
-    )
+    if fsp:
+        # FSP GGN
+        ggn_mv = create_ggn_mv_fsp_without_data(
+            model_fn=model_fn,
+            params=params,
+            loss_fn=loss_fn,
+            factor=factor,
+            vmap_over_data=vmap_over_data,
+        )
+    else:
+        # Standard GGN
+        ggn_mv = create_ggn_mv_without_data(  # type: ignore[call-arg]
+            model_fn=model_fn,
+            params=params,
+            loss_fn=loss_fn,
+            factor=factor,
+            vmap_over_data=vmap_over_data,
+        )
 
     mv_bound = _maybe_wrap_loader_or_batch(
         ggn_mv,

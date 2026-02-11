@@ -5,8 +5,18 @@ results/*
 wandb/*
 data/*
 
+
+# Local files
+.local/
+# DS Store files
+.DS_Store
+# pycache files
+__pycache__/
 # Temporary files (documentation)
 *.tmp
+*.lock
+*.png
+
 
 # Pytest
 .pytest_cache/
@@ -149,6 +159,8 @@ ipython_config.py
 .pdm.toml
 .pdm-python
 .pdm-build/
+
+FSPLaplace
 
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
 __pypackages__/

@@ -400,3 +400,25 @@ def _(
     new_mv.output_transform = new_output_transform
 
     return new_mv
+
+
+def _is_data_loader(data: Data) -> bool:
+    """Check if the data is a data loader.
+
+    Returns:
+        True if data is a data loader, False otherwise.
+    """
+    return hasattr(data, "__iter__") and not hasattr(data, "shape")
+
+
+def _validate_and_get_transform(data: Data) -> Callable:
+    """Get the appropriate transform for the data.
+
+    Args:
+        data: The data to get the transform for.
+
+    Returns:
+        The appropriate transform for the data.
+    """
+    del data
+    return input_target_split
