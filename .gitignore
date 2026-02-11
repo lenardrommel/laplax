@@ -4,6 +4,7 @@ checkpoints/*
 results/*
 wandb/*
 data/*
+rest/*
 
 
 # Local files
