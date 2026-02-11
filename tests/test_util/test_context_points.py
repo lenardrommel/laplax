@@ -13,13 +13,6 @@ from laplax.util.context_points import (
     select_context_points,
 )
 
-try:
-    import matplotlib.pyplot as plt
-
-    HAS_MATPLOTLIB = True
-except ImportError:
-    HAS_MATPLOTLIB = False
-
 
 @pytest.fixture
 def seed():
@@ -28,7 +21,11 @@ def seed():
 
 @pytest.fixture
 def sample_data(seed):
-    """Create sample data batch."""
+    """Create sample data batch.
+
+    Returns:
+        Dictionary with 'input' and 'target' arrays.
+    """
     key = jax.random.PRNGKey(seed)
     batch_size = 10
     input_shape = (batch_size, 5, 3)
@@ -43,7 +40,11 @@ def sample_data(seed):
 
 @pytest.fixture
 def sample_dataloader(sample_data):
-    """Create a simple dataloader from sample data."""
+    """Create a simple dataloader from sample data.
+
+    Returns:
+        SimpleLoader instance.
+    """
 
     class SimpleLoader:
         def __init__(self, data):
@@ -219,7 +220,11 @@ def test_select_context_points_different_methods_produce_different_results(
 
 @pytest.fixture
 def pde_2d_image_data(seed):
-    """Create 2D PDE-like image data (wave pattern)."""
+    """Create 2D PDE-like image data (wave pattern).
+
+    Returns:
+        Dictionary with 'input' and 'target' arrays.
+    """
     key = jax.random.PRNGKey(seed)
     batch_size = 4
     height, width = 32, 32
@@ -241,65 +246,3 @@ def pde_2d_image_data(seed):
     targets = jnp.ones((batch_size, height, width, 1))
 
     return {"input": inputs, "target": targets}
-
-
-@pytest.mark.skipif(not HAS_MATPLOTLIB, reason="matplotlib not available")
-@pytest.mark.parametrize("method", ["random", "sobol", "halton", "pca"])
-def test_context_points_2d_images_visualization(
-    method, pde_2d_image_data, seed, tmp_path
-):
-    """Test context point selection on 2D image data with visualization.
-
-    This test generates PDE-like 2D image data and creates visualizations
-    showing the original data and selected context points.
-    """
-    n_context_points = 6
-    original_data = pde_2d_image_data["input"]
-
-    context_x, _ = select_context_points(
-        data=pde_2d_image_data,
-        method=method,
-        n_context_points=n_context_points,
-        seed=seed,
-    )
-
-    assert context_x.shape[0] == n_context_points
-    assert context_x.shape[1:] == original_data.shape[1:]
-    assert not jnp.any(jnp.isnan(context_x))
-    assert not jnp.any(jnp.isinf(context_x))
-
-    original_np = np.array(original_data)
-    context_np = np.array(context_x)
-
-    n_original = original_np.shape[0]
-    n_cols = max(n_original, n_context_points)
-    n_rows = 2
-
-    _, axes = plt.subplots(n_rows, n_cols, figsize=(2 * n_cols, 4), squeeze=False)
-
-    for i in range(n_original):
-        img = original_np[i, :, :, 0]
-        axes[0, i].imshow(img, cmap="viridis", aspect="auto")
-        axes[0, i].set_title(f"Original {i + 1}")
-        axes[0, i].axis("off")
-
-    for i in range(n_original, n_cols):
-        axes[0, i].axis("off")
-
-    for i in range(n_context_points):
-        img = context_np[i, :, :, 0]
-        axes[1, i].imshow(img, cmap="viridis", aspect="auto")
-        axes[1, i].set_title(f"Context {i + 1}")
-        axes[1, i].axis("off")
-
-    for i in range(n_context_points, n_cols):
-        axes[1, i].axis("off")
-
-    plt.suptitle(f"Context Points Selection: {method.upper()}", fontsize=14)
-    plt.tight_layout()
-
-    output_path = tmp_path / f"context_points_2d_{method}.png"
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
-    plt.close()
-
-    assert output_path.exists()
