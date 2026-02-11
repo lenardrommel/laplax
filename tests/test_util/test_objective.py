@@ -91,7 +91,7 @@ def test_fsp_objective_periodicity():
     # Train
     for _ in range(500):
         key_train, k = jr.split(key_train)
-        params, opt_state, _loss = step(params, opt_state, k)
+        params, opt_state, _loss = step(params, opt_state)
 
     # Check periodicity
     # Check if f(1.5) approx f(-0.5) (since period is 2)
