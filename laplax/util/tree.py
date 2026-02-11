@@ -1,3 +1,5 @@
+# /laplax/util/tree.py
+
 """Relevant tree operations."""
 
 import math
@@ -27,6 +29,19 @@ def get_size(tree: PyTree) -> int:
     """
     flat, _ = jax.tree_util.tree_flatten(tree)
     return sum(math.prod(arr.shape) for arr in flat)
+
+
+def to_dtype(tree: PyTree, dtype: jnp.dtype) -> PyTree:
+    """Convert all elements of a PyTree to a given dtype.
+
+    Args:
+        tree: A PyTree whose elements are to be converted.
+        dtype: The dtype to convert to.
+
+    Returns:
+        A PyTree with elements converted to the given dtype.
+    """
+    return jax.tree.map(lambda x: x.astype(dtype), tree)
 
 
 # ---------------------------------------------------------------

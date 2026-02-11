@@ -1,3 +1,5 @@
+# /tests/test_util/test_tree.py
+
 import math
 
 import jax
@@ -7,7 +9,7 @@ import pytest_cases
 
 from laplax.types import KeyType, PyTree
 from laplax.util.flatten import create_pytree_flattener
-from laplax.util.tree import add, allclose, sub, tree_vec_get
+from laplax.util.tree import add, allclose, sub, to_dtype, tree_vec_get
 
 TreeTestCase = tuple[PyTree, jax.Array]
 
@@ -90,3 +92,17 @@ def test_tree_vec_get_pytree():
     flat = jnp.concatenate([leaf.reshape(-1) for leaf in leaves])
     for idx, expected in enumerate(flat):
         assert tree_vec_get(tree, idx) == expected
+
+
+def test_to_dtype():
+    jax.config.update("jax_enable_x64", True)
+    tree = {
+        "a": jnp.arange(4).reshape(2, 2),
+        "b": {
+            "c": jnp.arange(3),
+            "d": jnp.arange(6).reshape(2, 3),
+        },
+    }
+    tree_dtype = to_dtype(tree, dtype=jnp.float64)
+    assert tree_dtype["a"].dtype == jnp.float64
+    jax.config.update("jax_enable_x64", False)

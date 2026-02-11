@@ -23,6 +23,7 @@ FlatParams = Num[Array, "P"]
 # Parameter and model types
 Params = PyTree[Num[Array, "..."]]
 ModelFn = Callable[..., Params]  # [InputArray, Params]
+KernelFn = Callable[[InputArray, InputArray], PredArray]
 CurvatureMV = Callable[[Params], Params]
 
 # Data structures
