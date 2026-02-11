@@ -33,7 +33,7 @@ from laplax.util.flatten import (
     create_pytree_flattener,
     wrap_factory,
 )
-from laplax.util.tree import ones_like
+from laplax.util.tree import ones_like, to_dtype
 
 # -----------------------------------------------------------------------------
 # FSP Curvature creation
@@ -95,6 +95,8 @@ def create_fsp_curvature(
     if low_rank_method is not LowRankMethod.LANCZOS:
         msg = f"Unsupported FSP algorithm: {low_rank_method}"
         raise ValueError(msg)
+
+    params = to_dtype(params, dtype=jnp.float64)
 
     loss_fn_callable = _create_loss_fn(loss_fn)
 
