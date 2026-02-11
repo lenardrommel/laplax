@@ -99,9 +99,7 @@ def test_kernel_mv(dim, n1, n2):
     x2 = jax.random.normal(k2, (n2, dim))
     v = jax.random.normal(k3, (n2, 1))
 
-    # Simple RBF kernel for testing
     def kernel_fn(x, y):
-        # x: (1, D), y: (N, D) -> (N,)
         d = jnp.sum((x - y) ** 2, axis=-1)
         return jnp.exp(-0.5 * d)
 
@@ -114,7 +112,6 @@ def test_kernel_mv(dim, n1, n2):
 
     expected = K @ v
 
-    # Matrix-free computation
     result = kernel_mv(kernel_fn, x1, x2, v, batch_size=2)
 
     expected = expected.reshape(n1, 1)
