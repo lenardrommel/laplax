@@ -30,7 +30,7 @@ $$
 where the first-order term vanishes due to the assumed local optimality of $\theta^*$. Negation and exponentiation yield
 
 $$
-p(\theta \vert \mathcal{D}) \approx \mathcal{N}\Bigl(\theta^*, \mathbf{H}(\mathcal{D}, f_{\theta^*})^{-\frac{1}{2}}\Bigr)
+p(\theta \vert \mathcal{D}) \approx \mathcal{N}\Bigl(\theta^*, \mathbf{H}(\mathcal{D}, f_{\theta^*})^{-1}\Bigr)
 $$
 
 with $\mathbf{H} = \nabla^2_{\theta \theta} \mathcal{L}(\mathcal{D}, f_{\theta^*})$ being the posterior precision.
@@ -60,3 +60,70 @@ $$
 
 This term is often used for the selection of the model hyperparameters $\mathcal{M}$ via maximization
 [@immer_scalable_2021], since it represents an analytic trade-off between **complexity** and **expressivity** -- the so-called Occam's razor [@rasmussen2000occam]. Tractability and scalability depend on the structure of the estimated $\mathbf{H}(\mathcal{D}, f_{\theta^*})$, but compared to the predictive uncertainty above (cf. [Weight posterior](reference/curv.md)), no inversion is needed.
+
+
+
+# FSP-Laplace: Function-Space Priors for the Laplace Approximation in Bayesian Deep Learning
+
+In some applications you may want to impose a prior not only on weights $\theta$, but directly on the *function* $f_\theta$. **FSP-Laplace** does exactly this by placing a **Gaussian process (GP) prior in function space** and deriving a Laplace approximation that reflects this inductive bias. This makes it possible to encode interpretable structure—e.g. smoothness, periodicity, or boundary behavior—while retaining the practical scalability of Laplace methods [@cinquin_fsp_laplace_2024].
+
+A key conceptual point is that in infinite-dimensional function spaces one cannot write ordinary Lebesgue densities. FSP-Laplace therefore recasts training as finding a “weak mode” of the posterior measure under a GP prior restricted to the neural-network function class [@cinquin_fsp_laplace_2024].
+
+## Function-space prior
+
+Choose a GP prior on the latent function:
+$$
+f \sim \mathcal{GP}(m, k),
+$$
+with mean function $m(\cdot)$ and kernel $k(\cdot,\cdot)$. The kernel is where you encode your prior belief (RBF/Matérn for smoothness, periodic kernels for periodic structure, etc.) [@cinquin_fsp_laplace_2024].
+
+## RKHS regulariser (required for FSP training)
+
+To make the function prior operational during training, FSP-Laplace adds an RKHS penalty induced by the GP kernel. In practice, this is implemented via a finite set of **context points** $X_C = \{x^{(c)}_j\}_{j=1}^{M}$, where the model is “tethered” to the prior even outside the training inputs [@cinquin_fsp_laplace_2024].
+
+Let
+
+* $f(C) := f_\theta(X_C) \in \mathbb{R}^{M\times D}$ be the network outputs at context points,
+* $m(C) := m(X_C) \in \mathbb{R}^{M\times D}$,
+* $K(C, C) := k(X_C, X_C) \in \mathbb{R}^{M\times M}$.
+
+Then the **squared RKHS norm** is approximated by the quadratic form
+$$
+\| f_\theta - m \|_{\mathcal{H}}^2
+\approx\sum_{d=1}^{D}
+\left(f_{d}(C) - m_{d}(C)\right)^\top
+K_{CC}^{-1}
+\left(f_{d}(C) - m_{d}(C)\right),
+$$
+where we sum over output dimensions $d$ if outputs are treated as conditionally independent given the same kernel.
+
+With a likelihood term $\log p(y_n \mid f_\theta(x_n))$, the **FSP objective** becomes:
+$$
+\mathcal{L}_{\text{FSP}}(\theta) = -\sum_{n=1}^{N}\log p\left(y_n \mid f_\theta(x_n)\right)
++
+\frac{1}{2}\| f_\theta - m \|_{\mathcal{H}}^2.
+$$
+This is the training objective you need for FSP-Laplace to “condition well” on the chosen function prior [@cinquin_fsp_laplace_2024].
+
+> **Implementation note (laplax):** this is exactly what `laplax.util.objective.compute_rkhs_norm(...)` computes via a stable Cholesky solve (with jitter), and `n_gaussian_log_posterior_objective(...)` combines it with a Gaussian log-likelihood (scaled to the full dataset size).
+
+## Why the posterior has a low-rank structure
+
+After training, FSP-Laplace applies a Laplace approximation around the obtained solution. The crucial computational observation is that the function-space prior enters through the context set $X_C$. Under linearisation, the curvature contribution from the RKHS term depends on Jacobians evaluated at $X_C$, which induces a **structured (often effectively low-rank) update** in weight space whose “rank” is controlled by the number of context points (and outputs). This is what enables scalable matrix-free implementations [@cinquin_fsp_laplace_2024].
+
+> **Connection to `laplax.curv.cov.Posterior`:** the `Posterior` dataclass exposes `cov_mv`/`scale_mv` for matrix-vector products and optionally stores `low_rank_terms` and `rank` of the posterior. This matches the way FSP-Laplace can be represented and applied without ever materialising a full dense covariance.
+
+## Context points in laplax
+
+Because context points are central to both *conditioning* and *scalability*, laplax provides utilities in `laplax.util.context_points.py` to generate them from data using:
+
+* **space-filling low-discrepancy sequences** (Sobol/Halton/LHS),
+* **PCA-based space filling** (fit PCA on the data, sample in score space, then inverse-transform),
+* **random bounding-box sampling**.
+
+These strategies are helpful when you want the prior to constrain behavior:
+
+* slightly **outside** the empirical training distribution,
+* on **boundaries** (e.g. PDE domains),
+* or in **regions of interest** where extrapolation matters.
+
