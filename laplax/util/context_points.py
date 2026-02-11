@@ -270,6 +270,7 @@ def infer_grid_info(
 # Random Fourier Features (RFF) helpers
 # -----------------------------------------------------------------------------
 
+
 def _rff_kernel(
     input_shape: tuple[int, ...],
     *,
@@ -403,6 +404,7 @@ def sample_gp_batch_2d(
 # -----------------------------------------------------------------------------
 # Context point selection
 # -----------------------------------------------------------------------------
+
 
 def _generate_low_discrepancy_sequence(
     *,

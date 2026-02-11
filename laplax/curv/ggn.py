@@ -9,12 +9,16 @@ import optax
 from laplax.curv.loss import fetch_loss_hessian_mv
 from laplax.enums import LossFn
 from laplax.types import (
+    Array,
     Data,
     Float,
     InputArray,
     Int,
     ModelFn,
+    Num,
     Params,
+    PredArray,
+    TargetArray,
 )
 from laplax.util.flatten import create_pytree_flattener
 from laplax.util.tree import mul

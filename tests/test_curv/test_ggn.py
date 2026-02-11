@@ -1,8 +1,10 @@
 # /tests/test_curv/test_ggn.py
 
 import operator
+
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 import pytest_cases
 
@@ -10,7 +12,6 @@ from laplax.api import GGN
 from laplax.curv.ggn import (
     create_ggn_mv,
     create_ggn_mv_fsp_without_data,
-    create_loss_hessian_mv,
 )
 from laplax.enums import LossFn
 from laplax.util.flatten import create_pytree_flattener, wrap_function

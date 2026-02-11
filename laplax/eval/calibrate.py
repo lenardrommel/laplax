@@ -152,20 +152,25 @@ def adam(
     tol: float | None = None,
     bounds: tuple[float, float] | None = None,
     **kwargs: Kwargs,
-    ) -> Float:
+) -> Float:
     """Perform adam to optimize prior precision.
 
-    This function uses the Adam optimizer to find the optimal prior precision by minimizing
-    an objective function. The optimization is performed in log-space for numerical stability.
-    The function includes early stopping mechanisms based on gradient tolerance and patience
-    for consecutive loss increases.
+    This function uses the Adam optimizer to find the optimal prior precision by
+    minimizing an objective function. The optimization is performed in log-space
+    for numerical stability. The function includes early stopping mechanisms based
+    on gradient tolerance and patience for consecutive loss increases.
+
     Args:
-        prior_prec_interval: An array of prior precision values to search.
         objective: A callable objective function that takes `PriorArguments` as input
             and returns a float result.
+        initial_log_prior_prec: The initial log prior precision (default: 0.0).
+        learning_rate: The learning rate for the Adam optimizer (default: 1e-1).
+        max_iter: The maximum number of iterations to perform (default: None).
         patience: The number of consecutive iterations with increasing results to
             tolerate before stopping (default: 5).
-        max_iterations: The maximum number of iterations to perform (default: None).
+        tol: The tolerance for the gradient norm (default: None).
+        bounds: The bounds for the prior precision (default: None).
+        **kwargs: Additional arguments passed to the optimizer.
 
     Returns:
         The prior precision value that minimizes the objective function.
@@ -231,9 +236,7 @@ def adam(
         if patience is not None and previous_loss is not None:
             if loss > previous_loss:
                 increasing_count += 1
-                logger.debug(
-                    f"Loss increased; increasing_count={increasing_count}"
-                )
+                logger.debug(f"Loss increased; increasing_count={increasing_count}")
             else:
                 increasing_count = 0
 
@@ -365,6 +368,7 @@ def stein_variational_gradient_descent(
             - bounds: tuple[float, float] for log space bounds
             - clip_grad: float for gradient clipping
             - bandwidth: float for kernel bandwidth (-1 for median heuristic)
+
     Returns:
         The prior precision value that minimizes the objective function.
     """
@@ -376,9 +380,7 @@ def stein_variational_gradient_descent(
     rng = np.random.default_rng()
 
     if bounds is not None:
-        particles = jnp.array(
-            rng.uniform(bounds[0], bounds[1], size=(num_particles,))
-        )
+        particles = jnp.array(rng.uniform(bounds[0], bounds[1], size=(num_particles,)))
     else:
         particles = jnp.array(
             rng.normal(initial_log_prior_prec, 1.0, size=(num_particles,))
@@ -412,9 +414,7 @@ def stein_variational_gradient_descent(
 
         def kernel_and_grad(x: Array) -> tuple[Array, Array]:
             k = vmap(lambda y: rbf_kernel(x, y, h))(particles)
-            grad_k = vmap(lambda y: grad(rbf_kernel, argnums=0)(x, y, h))(
-                particles
-            )
+            grad_k = vmap(lambda y: grad(rbf_kernel, argnums=0)(x, y, h))(particles)
             return k, grad_k
 
         kxy, grad_kxy = vmap(kernel_and_grad)(particles)
@@ -463,9 +463,7 @@ def stein_variational_gradient_descent(
             )
 
         if tol is not None and grad_norm < tol:
-            logger.info(
-                f"Converged at iteration {iteration} (|grad|={grad_norm:.4e})"
-            )
+            logger.info(f"Converged at iteration {iteration} (|grad|={grad_norm:.4e})")
             break
 
         if patience is not None and previous_mean_loss is not None:
@@ -479,8 +477,7 @@ def stein_variational_gradient_descent(
 
             if increasing_count >= patience:
                 logger.info(
-                    f"Stopping after {increasing_count} "
-                    "consecutive mean loss increases"
+                    f"Stopping after {increasing_count} consecutive mean loss increases"
                 )
                 break
 
@@ -611,6 +608,7 @@ def optimize_prior_prec(
     log_prior_prec_min: float = -5.0,
     log_prior_prec_max: float = 6.0,
     grid_size: int = 300,
+    *,
     stochastic: bool = False,
     **kwargs: Kwargs,
 ) -> Float:
