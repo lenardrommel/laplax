@@ -49,6 +49,7 @@ dev = [
     "coveralls",
     "scikit-learn",
     "gpjax",
+    "optax",
 ]
 notebooks = [
     "torch",
