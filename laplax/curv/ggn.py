@@ -4,7 +4,6 @@ from collections.abc import Callable
 
 import jax
 import jax.numpy as jnp
-import optax
 
 from laplax.curv.loss import fetch_loss_hessian_mv
 from laplax.enums import LossFn
@@ -208,12 +207,14 @@ def _create_loss_fn(
         return bce_loss
 
     if loss_fn == LossFn.CROSS_ENTROPY:
-
         def ce_loss(pred: PredArray, target: TargetArray) -> Num[Array, "..."]:
             if target.ndim == pred.ndim - 1:
+                # Integer labels
                 return jnp.mean(
-                    optax.softmax_cross_entropy_with_integer_labels(
-                        logits=pred, labels=target
+                    -jnp.sum(
+                        jax.nn.one_hot(target, num_classes=pred.shape[-1])
+                        * jax.nn.log_softmax(pred, axis=-1),
+                        axis=-1,
                     )
                 )
             # One-hot encoded targets
@@ -370,7 +371,6 @@ def create_ggn_fsp_operator_without_data(
         HB_U = jax.vmap(batch_hvp_flat)(preds_flat, y_b, J_U)
 
         # Compute term: sum_{b} (J_U[b].T @ HB_U[b])
-        # This effectively computes sum_b sum_o J_U[b,r,o] * HB_U[b,k,o]
         batch_terms = jnp.einsum("bro,bko->rk", J_U, HB_U)
 
         return mul(factor, batch_terms)
