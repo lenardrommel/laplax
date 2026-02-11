@@ -1,5 +1,3 @@
-# /laplax/curv/cov.py
-
 """Posterior covariance functions for various curvature estimates."""
 
 from dataclasses import dataclass
@@ -28,7 +26,6 @@ from laplax.curv.low_rank import (
     low_rank_posterior_state_to_scale,
     low_rank_prec_to_posterior_state,
 )
-from laplax.curv.utils import LowRankTerms
 from laplax.enums import CurvApprox, LowRankMethod
 from laplax.types import (
     Callable,
@@ -36,13 +33,13 @@ from laplax.types import (
     CurvatureMV,
     FlatParams,
     Float,
-    Int,
     Kwargs,
     Layout,
     PosteriorState,
     PriorArguments,
     PyTree,
 )
+from laplax.curv.utils import LowRankTerms
 from laplax.util.flatten import (
     create_pytree_flattener,
     wrap_factory,
@@ -100,8 +97,8 @@ class Posterior:
     state: PosteriorState
     cov_mv: Callable[[PosteriorState], Callable[[FlatParams], FlatParams]]
     scale_mv: Callable[[PosteriorState], Callable[[FlatParams], FlatParams]]
-    rank: Int | None = None
-    low_rank_terms: LowRankTerms | None = None  # Optional low-rank decomposition terms
+    rank: int
+    low_rank_terms: LowRankTerms
 
 
 def estimate_curvature(
