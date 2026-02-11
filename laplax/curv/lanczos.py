@@ -6,6 +6,20 @@ from laplax.types import Array, Callable, DType, Float, KeyType, Kwargs, Layout
 from laplax.util.flatten import wrap_function
 
 
+def reorthogonalize(w: Array, V: Array, i: int) -> Array:
+    """Gram-Schmidt reorthogonalization against V[:i].
+
+    Returns:
+        Reorthogonalized vector.
+    """
+
+    def body_fn(j, w_acc):
+        coeff = jnp.dot(V[j], w_acc)
+        return w_acc - coeff * V[j]
+
+    return jax.lax.fori_loop(0, i, body_fn, w)
+
+
 def lanczos_iterations(
     matvec: Callable[[Array], Array],
     b: Array,
@@ -44,13 +58,6 @@ def lanczos_iterations(
     beta = jnp.zeros(maxiter, dtype=dtype)
     V = jnp.zeros((maxiter + 1, b.shape[0]), dtype=dtype)
     V = V.at[0].set(v0)
-
-    def reorthogonalize(w: Array, V: Array, i: int) -> Array:
-        def body_fn(j: int, w_acc: Array) -> Array:
-            coeff = jnp.dot(V[j], w_acc)
-            return w_acc - coeff * V[j]
-
-        return jax.lax.fori_loop(0, i, body_fn, w)
 
     # Define a single iteration function to be used in both cases
     @jax.jit
@@ -242,3 +249,140 @@ def lanczos_lowrank(
     # Restore the original configuration dtype
     jax.config.update("jax_enable_x64", original_float64_enabled)
     return low_rank_result
+
+
+def lanczos_inverse_sqrt_factor(
+    A: Callable[[Array], Array] | Array,
+    b: Array,
+    tol: float = 1e-5,
+    max_iter: int = 500,
+    *,
+    overwrite_b: bool = False,
+) -> Array:
+    """Build a low-rank inverse factor for a PSD operator using CG/Lanczos.
+
+    Returns a skinny matrix D whose columns are A-conjugate directions
+    (normalized by sqrt of the Rayleigh quotient), such that
+        D @ D.T ≈ A^{-1}
+    on the generated Krylov subspace.
+
+    Args:
+        A: Positive semi-definite operator.
+        b: Start vector.
+        tol: Relative tolerance.
+        max_iter: Maximum number of iterations.
+        overwrite_b: If True, reuse b.
+
+    Returns:
+        Matrix D of shape (n, k).
+    """
+    matrix_mv = A if callable(A) else lambda x: A @ x
+
+    @jax.jit
+    def _step(values):
+        ds, rs, rs_norm_sq, p, eta, k = values
+        # Compute search direction
+        # p = rs[:, k] + (rs_norm_sq[k] / rs_norm_sq[k - 1]) * p
+
+        def true_fn(_p):
+            return rs[:, k] + rs_norm_sq[k] / rs_norm_sq[k - 1] * _p
+
+        def false_fn(_p):
+            return _p
+
+        p = jax.lax.cond(k > 0, true_fn, false_fn, p)
+
+        # Compute modified Lanzcos vector
+        w = matrix_mv(p)
+        eta = p @ w
+        ds = ds.at[:, k].set(p / jnp.sqrt(eta))
+
+        # Update residual
+        mu = rs_norm_sq[k] / eta
+        rs_prev_k = rs
+        rs = rs.at[:, k + 1].set(rs[:, k] - mu * w)
+
+        # Full reorthogonalization (double Gram-Schmidt)
+        coeffs = (rs_prev_k.T @ rs[:, k + 1]) / rs_norm_sq
+        # Mask future coeffs
+        mask = jnp.arange(max_iter + 1) <= k
+        coeffs = coeffs * mask
+
+        rs = rs.at[:, k + 1].set(rs[:, k + 1] - rs_prev_k @ coeffs)
+        # Double GS
+        coeffs = (rs_prev_k.T @ rs[:, k + 1]) / rs_norm_sq
+        coeffs = coeffs * mask
+        rs = rs.at[:, k + 1].set(rs[:, k + 1] - rs_prev_k @ coeffs)
+
+        rs_norm_sq = rs_norm_sq.at[k + 1].set(rs[:, k + 1].T @ rs[:, k + 1])
+
+        return ds, rs, rs_norm_sq, p, eta, k + 1
+
+    def _cond_fun(values):
+        _ds, _, rs_norm_sq, _, _eta, k = values
+        return (rs_norm_sq[k] > sqtol) & (k < max_iter)
+
+    # Initialization
+    b = jnp.asarray(b)
+    b_norm = jnp.linalg.norm(b, 2)
+    b = b / b_norm
+
+    dim = b.shape[0]
+    ds = jnp.zeros((dim, max_iter), dtype=b.dtype)
+    rs = jnp.zeros((dim, max_iter + 1), dtype=b.dtype)
+    rs_norm_sq = jnp.ones((max_iter + 1,), dtype=b.dtype)
+
+    sqtol = tol**2
+    eta = jnp.inf
+
+    rs = rs.at[:, 0].set(b)
+    rs_norm_sq = rs_norm_sq.at[0].set(b_norm**2)
+
+    p = b if overwrite_b else b.copy()
+
+    # Lanczos iterations
+    ds, _, _, _, _, k = jax.lax.while_loop(
+        _cond_fun, _step, (ds, rs, rs_norm_sq, p, eta, 0)
+    )
+
+    return ds[:, :k]
+
+
+def lanczos_truncated_eigendecomposition(
+    A: Callable[[Array], Array] | Array,
+    shape: tuple | int | None = None,
+    maxiter: int = 100,
+    seed: int = 21894,
+    dtype: DType = jnp.float32,
+) -> dict[str, Array]:
+    """Wrapper that mimics original API but uses lanczos_lowrank.
+
+    Returns:
+        Dictionary with 'U' and 'S' keys containing eigenvectors and eigenvalues.
+
+    Raises:
+        ValueError: If shape is None when A is callable.
+    """
+    if hasattr(A, "shape"):
+        layout = A.shape[-1]
+    else:
+        if shape is None:
+            msg = "Shape needed for callable A"
+            raise ValueError(msg)
+        layout = shape
+
+    key = jax.random.PRNGKey(seed)
+
+    # Re-use the main implementation
+    lr = lanczos_lowrank(
+        A,
+        key=key,
+        layout=layout,
+        rank=maxiter,
+        calc_dtype=dtype,
+        mv_dtype=dtype,
+        return_dtype=dtype,
+        full_reorthogonalize=True,
+        mv_jit=True,
+    )
+    return {"U": lr.U, "S": lr.S}
