@@ -87,7 +87,6 @@ from laplax.util.loader import (
     DataLoaderMV,
     identity,
     is_data_loader,
-    input_target_split,
     reduce_add,
     validate_data_transform,
 )
